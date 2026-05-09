@@ -6,7 +6,7 @@ from typing import cast
 import typer
 from pydantic import BaseModel
 
-from postino_core.errors import MailctlError
+from postino_core.errors import NotFoundError
 from postino_core.output import Renderer
 from postino_core.services.bundle import ServicesBundle
 
@@ -28,7 +28,7 @@ def show(ctx: typer.Context, username: str = "") -> None:
         u = _services(ctx).quota.show(username)
         if u is None:
             from postino.cli import exit_with_error as _exit
-            _exit(MailctlError(f"no quota row for {username}"))
+            _exit(NotFoundError(f"no quota row for {username}"))
         _renderer(ctx).render(cast(BaseModel, u))
     else:
         items = _services(ctx).quota.list()
