@@ -1,0 +1,50 @@
+"""Password hashing wrappers around passlib.
+
+Hashes are stored in dovecot's {scheme}hash form so dovecot's SQL
+passdb can pick the verifier per row. The {scheme} prefix MUST always
+be present on rows postino writes — dovecot's default_pass_scheme only
+covers legacy unprefixed rows."""
+from __future__ import annotations
+
+from passlib.hash import bcrypt, md5_crypt, sha512_crypt
+from pydantic import SecretStr
+
+from postino_core.enums import PasswordScheme
+from postino_core.errors import ConfigError
+
+_VERIFIERS = {
+    PasswordScheme.MD5_CRYPT: md5_crypt,
+    PasswordScheme.BCRYPT: bcrypt,
+    PasswordScheme.SHA512_CRYPT: sha512_crypt,
+}
+
+
+def hash_password(password: SecretStr, scheme: PasswordScheme) -> str:
+    """Produce a dovecot-compatible '{SCHEME}hash' string.
+
+    Returns: the prefixed hash.
+    Raises: ConfigError if the scheme has no registered verifier
+            (defensive — should not happen given the enum bound).
+    """
+    verifier = _VERIFIERS.get(scheme)
+    if verifier is None:
+        raise ConfigError(f"no verifier for scheme {scheme}")
+    return f"{{{scheme.value}}}{verifier.hash(password.get_secret_value())}"
+
+
+def verify_password(password: SecretStr, stored: str) -> bool:
+    """Check a password against a {scheme}hash row value.
+
+    Returns: True iff the password matches.
+    Raises: ConfigError if `stored` is missing the {scheme} prefix or
+            references an unknown scheme.
+    """
+    if not stored.startswith("{") or "}" not in stored:
+        raise ConfigError("stored password missing {SCHEME} prefix")
+    scheme_name, _, hashed = stored[1:].partition("}")
+    try:
+        scheme = PasswordScheme(scheme_name)
+    except ValueError as e:
+        raise ConfigError(f"unknown password scheme: {scheme_name!r}") from e
+    verifier = _VERIFIERS[scheme]
+    return verifier.verify(password.get_secret_value(), hashed)
