@@ -13,17 +13,28 @@ pytestmark = pytest.mark.integration
 runner = CliRunner()
 
 
-def _seed_domain(db: Engine, domain: str) -> None:
+def seed_domain(db: Engine, domain: str) -> None:
     md = MetaData()
     md.reflect(bind=db)
     with db.begin() as conn:
-        conn.execute(md.tables["domain"].insert().values(
-            domain=domain, description="", aliases=0, mailboxes=10,
-            maxquota=0, quota=0, transport="virtual", backupmx=0, active=1,
-        ))
+        conn.execute(
+            md.tables["domain"]
+            .insert()
+            .values(
+                domain=domain,
+                description="",
+                aliases=0,
+                mailboxes=10,
+                maxquota=0,
+                quota=0,
+                transport="virtual",
+                backupmx=0,
+                active=1,
+            )
+        )
 
 
-def _env(db_url: str, mail_root: Path, hook: Path, sql_dir: Path) -> dict[str, str]:
+def env_for_cli(db_url: str, mail_root: Path, hook: Path, sql_dir: Path) -> dict[str, str]:
     return {
         **os.environ,
         "POSTINO_IDENTITY_BACKEND": "local",
@@ -38,7 +49,7 @@ def _env(db_url: str, mail_root: Path, hook: Path, sql_dir: Path) -> dict[str, s
     }
 
 
-def _make_postfix_cf(db_url: str, sql_dir: Path) -> None:
+def make_postfix_cf(db_url: str, sql_dir: Path) -> None:
     body = db_url.replace("mysql+pymysql://", "")
     auth, _, hostdb = body.partition("@")
     user, _, pwd = auth.partition(":")
@@ -50,21 +61,34 @@ def _make_postfix_cf(db_url: str, sql_dir: Path) -> None:
 
 
 def test_user_add_then_list(
-    db: Engine, tmp_path: Path, fake_postcreation_hook: Path,
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
 ) -> None:
-    _seed_domain(db, "example.com")
+    seed_domain(db, "example.com")
     db_url = os.environ["POSTINO_TEST_DB_URL"]
     sql_dir = tmp_path / "postfix"
-    _make_postfix_cf(db_url, sql_dir)
+    make_postfix_cf(db_url, sql_dir)
     mail_root = tmp_path / "mail"
     mail_root.mkdir()
 
-    env = _env(db_url, mail_root, fake_postcreation_hook, sql_dir)
+    env = env_for_cli(db_url, mail_root, fake_postcreation_hook, sql_dir)
 
-    result = runner.invoke(app, [
-        "user", "add", "foo@example.com",
-        "--password", "hunter2", "--name", "Foo", "--quota", "5G",
-    ], env=env)
+    result = runner.invoke(
+        app,
+        [
+            "user",
+            "add",
+            "foo@example.com",
+            "--password",
+            "hunter2",
+            "--name",
+            "Foo",
+            "--quota",
+            "5G",
+        ],
+        env=env,
+    )
     assert result.exit_code == 0, result.output
 
     result = runner.invoke(app, ["user", "list", "--json"], env=env)
@@ -73,17 +97,30 @@ def test_user_add_then_list(
 
 
 def test_user_add_unknown_domain_exit_1(
-    db: Engine, tmp_path: Path, fake_postcreation_hook: Path,
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
 ) -> None:
     db_url = os.environ["POSTINO_TEST_DB_URL"]
     sql_dir = tmp_path / "postfix"
-    _make_postfix_cf(db_url, sql_dir)
+    make_postfix_cf(db_url, sql_dir)
     mail_root = tmp_path / "mail"
     mail_root.mkdir()
-    env = _env(db_url, mail_root, fake_postcreation_hook, sql_dir)
+    env = env_for_cli(db_url, mail_root, fake_postcreation_hook, sql_dir)
 
-    result = runner.invoke(app, [
-        "user", "add", "x@noexist.test",
-        "--password", "p", "--name", "", "--quota", "0",
-    ], env=env)
+    result = runner.invoke(
+        app,
+        [
+            "user",
+            "add",
+            "x@noexist.test",
+            "--password",
+            "p",
+            "--name",
+            "",
+            "--quota",
+            "0",
+        ],
+        env=env,
+    )
     assert result.exit_code == 1, result.output

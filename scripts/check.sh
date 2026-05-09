@@ -3,7 +3,7 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
-ruff check .
-ruff format --check .
-pyright
-pytest tests/ -x -q
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+.venv/bin/pyright
+.venv/bin/pytest tests/ -x -q

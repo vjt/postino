@@ -4,15 +4,18 @@ Hashes are stored in dovecot's {scheme}hash form so dovecot's SQL
 passdb can pick the verifier per row. The {scheme} prefix MUST always
 be present on rows postino writes — dovecot's default_pass_scheme only
 covers legacy unprefixed rows."""
+
 from __future__ import annotations
 
-from passlib.hash import bcrypt, md5_crypt, sha512_crypt
+from typing import Any, cast
+
+from passlib.hash import bcrypt, md5_crypt, sha512_crypt  # type: ignore[attr-defined]
 from pydantic import SecretStr
 
 from postino_core.enums import PasswordScheme
 from postino_core.errors import ConfigError
 
-_VERIFIERS = {
+_VERIFIERS: dict[PasswordScheme, Any] = {
     PasswordScheme.MD5_CRYPT: md5_crypt,
     PasswordScheme.BCRYPT: bcrypt,
     PasswordScheme.SHA512_CRYPT: sha512_crypt,
@@ -29,7 +32,7 @@ def hash_password(password: SecretStr, scheme: PasswordScheme) -> str:
     verifier = _VERIFIERS.get(scheme)
     if verifier is None:
         raise ConfigError(f"no verifier for scheme {scheme}")
-    return f"{{{scheme.value}}}{verifier.hash(password.get_secret_value())}"
+    return f"{{{scheme.value}}}{cast(str, verifier.hash(password.get_secret_value()))}"
 
 
 def verify_password(password: SecretStr, stored: str) -> bool:
@@ -47,4 +50,4 @@ def verify_password(password: SecretStr, stored: str) -> bool:
     except ValueError as e:
         raise ConfigError(f"unknown password scheme: {scheme_name!r}") from e
     verifier = _VERIFIERS[scheme]
-    return verifier.verify(password.get_secret_value(), hashed)
+    return cast(bool, verifier.verify(password.get_secret_value(), hashed))
