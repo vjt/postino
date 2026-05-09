@@ -187,3 +187,115 @@ def test_mailbox_add_fs_failure_rolls_back_db(
             )
         ).fetchone()
     assert n is None  # rolled back
+
+
+def test_delete_mailbox_removes_row_and_maildir(
+    db: Engine, tmp_mail_root: Path, fake_postcreation_hook: Path, frozen_clock: datetime,
+) -> None:
+    _seed_domain(db, "example.com", max_mailboxes=10)
+    svc = _build_service(
+        db,
+        FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1),
+        HookRunner(script_path=fake_postcreation_hook),
+        lambda: frozen_clock,
+    )
+    svc.add(MailboxCreate(
+        username="foo@example.com", password=SecretStr("p"), name="",
+        quota_bytes=0, scheme=PasswordScheme.BCRYPT,
+    ))
+    svc.delete("foo@example.com", keep_maildir=False)
+    assert svc.get("foo@example.com") is None
+    assert not (tmp_mail_root / "example.com" / "foo").exists()
+
+
+def test_delete_mailbox_keep_maildir(
+    db: Engine, tmp_mail_root: Path, fake_postcreation_hook: Path, frozen_clock: datetime,
+) -> None:
+    _seed_domain(db, "example.com", max_mailboxes=10)
+    svc = _build_service(
+        db,
+        FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1),
+        HookRunner(script_path=fake_postcreation_hook),
+        lambda: frozen_clock,
+    )
+    svc.add(MailboxCreate(
+        username="foo@example.com", password=SecretStr("p"), name="",
+        quota_bytes=0, scheme=PasswordScheme.BCRYPT,
+    ))
+    svc.delete("foo@example.com", keep_maildir=True)
+    assert (tmp_mail_root / "example.com" / "foo").is_dir()
+
+
+def test_list_returns_all_mailboxes_for_domain(
+    db: Engine, tmp_mail_root: Path, fake_postcreation_hook: Path, frozen_clock: datetime,
+) -> None:
+    _seed_domain(db, "example.com", max_mailboxes=10)
+    svc = _build_service(
+        db,
+        FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1),
+        HookRunner(script_path=fake_postcreation_hook),
+        lambda: frozen_clock,
+    )
+    for u in ("a@example.com", "b@example.com"):
+        svc.add(MailboxCreate(
+            username=u, password=SecretStr("p"), name="",
+            quota_bytes=0, scheme=PasswordScheme.BCRYPT,
+        ))
+    out = svc.list(domain="example.com", include_disabled=True)
+    assert {m.username for m in out} == {"a@example.com", "b@example.com"}
+
+
+def test_set_password_changes_hash(
+    db: Engine, tmp_mail_root: Path, fake_postcreation_hook: Path, frozen_clock: datetime,
+) -> None:
+    _seed_domain(db, "example.com", max_mailboxes=10)
+    svc = _build_service(
+        db,
+        FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1),
+        HookRunner(script_path=fake_postcreation_hook),
+        lambda: frozen_clock,
+    )
+    svc.add(MailboxCreate(
+        username="foo@example.com", password=SecretStr("a"), name="",
+        quota_bytes=0, scheme=PasswordScheme.BCRYPT,
+    ))
+    svc.set_password("foo@example.com", SecretStr("b"), PasswordScheme.BCRYPT)
+    # verified via Provider in its own tests; here we simply ensure no error.
+
+
+def test_set_status(
+    db: Engine, tmp_mail_root: Path, fake_postcreation_hook: Path, frozen_clock: datetime,
+) -> None:
+    _seed_domain(db, "example.com", max_mailboxes=10)
+    svc = _build_service(
+        db,
+        FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1),
+        HookRunner(script_path=fake_postcreation_hook),
+        lambda: frozen_clock,
+    )
+    svc.add(MailboxCreate(
+        username="foo@example.com", password=SecretStr("p"), name="",
+        quota_bytes=0, scheme=PasswordScheme.BCRYPT,
+    ))
+    svc.set_status("foo@example.com", MailboxStatus.DISABLED)
+    m = svc.get("foo@example.com")
+    assert m is not None and m.status is MailboxStatus.DISABLED
+
+
+def test_set_quota(
+    db: Engine, tmp_mail_root: Path, fake_postcreation_hook: Path, frozen_clock: datetime,
+) -> None:
+    _seed_domain(db, "example.com", max_mailboxes=10)
+    svc = _build_service(
+        db,
+        FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1),
+        HookRunner(script_path=fake_postcreation_hook),
+        lambda: frozen_clock,
+    )
+    svc.add(MailboxCreate(
+        username="foo@example.com", password=SecretStr("p"), name="",
+        quota_bytes=0, scheme=PasswordScheme.BCRYPT,
+    ))
+    svc.set_quota("foo@example.com", 5 * 1024**3)
+    m = svc.get("foo@example.com")
+    assert m is not None and m.quota_bytes == 5 * 1024**3

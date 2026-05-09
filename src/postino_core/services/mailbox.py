@@ -9,13 +9,13 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import EmailStr
+from pydantic import EmailStr, SecretStr
 from sqlalchemy import MetaData, func, select
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.exc import IntegrityError
 
-from postino_core.enums import MailboxStatus
+from postino_core.enums import MailboxStatus, PasswordScheme
 from postino_core.errors import (
     AlreadyExistsError,
     CapacityError,
@@ -178,3 +178,78 @@ class MailboxService:
             created=m["created"],  # type: ignore[arg-type]
             modified=m["modified"],  # type: ignore[arg-type]
         )
+
+    def delete(self, username: EmailStr, *, keep_maildir: bool) -> None:
+        """Delete the mailbox row + quota row + (optionally) maildir.
+
+        Idempotent on FS removal but DB row absence raises NotFoundError."""
+        mailbox = self._md.tables["mailbox"]
+        existing = self.get(username)
+        if existing is None:
+            raise NotFoundError(f"mailbox {username} does not exist")
+        relative = existing.maildir
+        with self._engine.begin() as conn:
+            self._identity.delete_identity(conn, username)
+            quota2 = self._md.tables["quota2"]
+            conn.execute(quota2.delete().where(quota2.c.username == str(username)))
+            conn.execute(mailbox.delete().where(mailbox.c.username == str(username)))
+        if not keep_maildir:
+            self._fs.remove_maildir(relative)
+
+    def list(
+        self,
+        *,
+        domain: str | None,
+        include_disabled: bool,
+    ) -> list[Mailbox]:
+        """List mailboxes, optionally scoped to a domain.
+
+        Returns mailboxes ordered by username ascending."""
+        mailbox = self._md.tables["mailbox"]
+        stmt = select(mailbox).order_by(mailbox.c.username)
+        if domain is not None:
+            stmt = stmt.where(mailbox.c.domain == domain)
+        if not include_disabled:
+            stmt = stmt.where(mailbox.c.active == int(MailboxStatus.ACTIVE))
+        with self._engine.connect() as conn:
+            rows = conn.execute(stmt).fetchall()
+        return [self._row_to_model(r._mapping) for r in rows]  # type: ignore[arg-type]
+
+    def set_password(
+        self,
+        username: EmailStr,
+        password: SecretStr,
+        scheme: PasswordScheme,
+    ) -> None:
+        """Change password via the active IdentityProvider."""
+        with self._engine.begin() as conn:
+            self._identity.set_password(conn, username, password, scheme)
+
+    def set_status(self, username: EmailStr, status: MailboxStatus) -> None:
+        """Enable / disable the mailbox."""
+        mailbox = self._md.tables["mailbox"]
+        now = self._clock()
+        with self._engine.begin() as conn:
+            result = conn.execute(
+                mailbox.update()
+                .where(mailbox.c.username == str(username))
+                .values(active=int(status), modified=now)
+            )
+            if result.rowcount == 0:
+                raise NotFoundError(f"mailbox {username} does not exist")
+
+    def set_quota(self, username: EmailStr, quota_bytes: int) -> None:
+        """Set the per-mailbox quota cap."""
+        if quota_bytes < 0:
+            from postino_core.errors import ConfigError
+            raise ConfigError("quota_bytes cannot be negative")
+        mailbox = self._md.tables["mailbox"]
+        now = self._clock()
+        with self._engine.begin() as conn:
+            result = conn.execute(
+                mailbox.update()
+                .where(mailbox.c.username == str(username))
+                .values(quota=quota_bytes, modified=now)
+            )
+            if result.rowcount == 0:
+                raise NotFoundError(f"mailbox {username} does not exist")
