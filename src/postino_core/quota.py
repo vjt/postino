@@ -2,10 +2,11 @@
 
 Internal canonical form is `int` bytes. CLI input ("5G") and CLI output
 ("5.0G") flow through these helpers; everything in between stays int."""
+
 from __future__ import annotations
 
-from postino_core.errors import ConfigError
 from postino_core.enums import QuotaUnit
+from postino_core.errors import ConfigError
 
 _MULTIPLIERS: dict[QuotaUnit, int] = {
     QuotaUnit.B: 1,

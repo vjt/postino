@@ -2,6 +2,7 @@
 
 Built once at CLI startup from PostinoSettings + PostfixSqlCredentials.
 Constructor injection through and through; no globals."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -69,8 +70,12 @@ def build_services(
         metadata=metadata,
         identity=identity,
         mailbox=MailboxService(
-            engine=engine, identity=identity, fs=fs, hooks=hooks,
-            clock=clock, metadata=metadata,
+            engine=engine,
+            identity=identity,
+            fs=fs,
+            hooks=hooks,
+            clock=clock,
+            metadata=metadata,
         ),
         alias=AliasService(engine=engine, metadata=metadata, clock=clock),
         domain=DomainService(engine=engine, metadata=metadata, clock=clock),

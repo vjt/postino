@@ -1,4 +1,5 @@
 """postino check — print human findings + exit 0 if all green, else exit 4."""
+
 from __future__ import annotations
 
 import typer
@@ -18,7 +19,9 @@ def run(ctx: typer.Context) -> None:
 
     s = _services(ctx)
     result = run_consistency_check(
-        settings=s.settings, engine=s.engine, metadata=s.metadata,
+        settings=s.settings,
+        engine=s.engine,
+        metadata=s.metadata,
     )
     console = Console()
     for f in result.findings:

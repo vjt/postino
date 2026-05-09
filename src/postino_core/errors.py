@@ -1,6 +1,7 @@
 """Error hierarchy. Anything postino expects to be able to recover from
 or report cleanly to the CLI inherits from MailctlError. Anything else
 is a bug — let it propagate to the top-level exit-99 path."""
+
 from __future__ import annotations
 
 

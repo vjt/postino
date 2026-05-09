@@ -1,4 +1,5 @@
 """IdentityProvider Protocol — the seam between local and Zitadel modes."""
+
 from __future__ import annotations
 
 from typing import Protocol

@@ -1,4 +1,5 @@
 """AliasService — CRUD on the PA alias table."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -38,14 +39,16 @@ class AliasService:
         now = self._clock()
         with self._engine.begin() as conn:
             try:
-                conn.execute(alias.insert().values(
-                    address=str(address),
-                    goto=goto,
-                    domain=domain,
-                    created=now,
-                    modified=now,
-                    active=int(MailboxStatus.ACTIVE),
-                ))
+                conn.execute(
+                    alias.insert().values(
+                        address=str(address),
+                        goto=goto,
+                        domain=domain,
+                        created=now,
+                        modified=now,
+                        active=int(MailboxStatus.ACTIVE),
+                    )
+                )
             except IntegrityError as e:
                 raise AlreadyExistsError(f"alias {address} already exists") from e
         got = self.get(address)
@@ -57,9 +60,7 @@ class AliasService:
         """Return the alias or None if absent."""
         alias = self._md.tables["alias"]
         with self._engine.connect() as conn:
-            row = conn.execute(
-                select(alias).where(alias.c.address == str(address))
-            ).fetchone()
+            row = conn.execute(select(alias).where(alias.c.address == str(address))).fetchone()
         if row is None:
             return None
         return self._row_to_model(row._mapping)  # type: ignore[arg-type]
@@ -71,9 +72,7 @@ class AliasService:
         """
         alias = self._md.tables["alias"]
         with self._engine.begin() as conn:
-            result = conn.execute(
-                alias.delete().where(alias.c.address == str(address))
-            )
+            result = conn.execute(alias.delete().where(alias.c.address == str(address)))
             if result.rowcount == 0:
                 raise NotFoundError(f"alias {address} does not exist")
 

@@ -1,4 +1,5 @@
 """DomainService — CRUD on the PA domain table."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -42,19 +43,21 @@ class DomainService:
         now = self._clock()
         with self._engine.begin() as conn:
             try:
-                conn.execute(d.insert().values(
-                    domain=domain,
-                    description=description,
-                    aliases=max_aliases,
-                    mailboxes=max_mailboxes,
-                    maxquota=max_quota_bytes,
-                    quota=default_quota_bytes,
-                    transport=transport.value,
-                    backupmx=int(backupmx),
-                    active=int(MailboxStatus.ACTIVE),
-                    created=now,
-                    modified=now,
-                ))
+                conn.execute(
+                    d.insert().values(
+                        domain=domain,
+                        description=description,
+                        aliases=max_aliases,
+                        mailboxes=max_mailboxes,
+                        maxquota=max_quota_bytes,
+                        quota=default_quota_bytes,
+                        transport=transport.value,
+                        backupmx=int(backupmx),
+                        active=int(MailboxStatus.ACTIVE),
+                        created=now,
+                        modified=now,
+                    )
+                )
             except IntegrityError as e:
                 raise AlreadyExistsError(f"domain {domain!r} already exists") from e
         got = self.get(domain)
@@ -65,9 +68,7 @@ class DomainService:
     def get(self, domain: str) -> Domain | None:
         d = self._md.tables["domain"]
         with self._engine.connect() as conn:
-            row = conn.execute(
-                select(d).where(d.c.domain == domain)
-            ).fetchone()
+            row = conn.execute(select(d).where(d.c.domain == domain)).fetchone()
         if row is None:
             return None
         return self._row_to_model(row._mapping)  # type: ignore[arg-type]

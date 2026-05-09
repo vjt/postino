@@ -1,4 +1,5 @@
 """Output renderer — Rich tables in human mode, JSON in --json mode."""
+
 from __future__ import annotations
 
 import json
@@ -39,9 +40,7 @@ class Renderer:
         for field in type(first).model_fields:
             table.add_column(field, no_wrap=True)
         for item in items:
-            table.add_row(*[
-                self._render_cell(getattr(item, f)) for f in type(first).model_fields
-            ])
+            table.add_row(*[self._render_cell(getattr(item, f)) for f in type(first).model_fields])
         self._console.print(table)
 
     def _render_cell(self, value: Any) -> str:

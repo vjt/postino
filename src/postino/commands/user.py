@@ -1,4 +1,5 @@
 """postino user … subcommands."""
+
 from __future__ import annotations
 
 from typing import Annotated, cast
@@ -29,7 +30,10 @@ def add(
     username: str,
     password: Annotated[str, typer.Option("--password", help="Password to set.")],
     name: Annotated[str, typer.Option("--name", help="Display name.")] = "",
-    quota: Annotated[str, typer.Option("--quota", help="Quota size, e.g. 5G or 0 for unlimited.")] = "0",
+    quota: Annotated[
+        str,
+        typer.Option("--quota", help="Quota size, e.g. 5G or 0 for unlimited."),
+    ] = "0",
     scheme: Annotated[
         PasswordScheme,
         typer.Option("--scheme", help="Hash scheme."),
@@ -38,15 +42,18 @@ def add(
     """Create a mailbox."""
     from postino.cli import exit_with_error as _exit
     from postino_core.errors import MailctlError
+
     try:
         s = _services(ctx)
-        m = s.mailbox.add(MailboxCreate(
-            username=username,
-            password=SecretStr(password),
-            name=name,
-            quota_bytes=parse_quota(quota),
-            scheme=scheme,
-        ))
+        m = s.mailbox.add(
+            MailboxCreate(
+                username=username,
+                password=SecretStr(password),
+                name=name,
+                quota_bytes=parse_quota(quota),
+                scheme=scheme,
+            )
+        )
         _renderer(ctx).render(m)
     except MailctlError as e:
         _exit(e)
@@ -62,6 +69,7 @@ def delete(
     """Delete a mailbox."""
     from postino.cli import exit_with_error as _exit
     from postino_core.errors import MailctlError
+
     if not yes:
         typer.confirm(f"Delete mailbox {username}?", abort=True)
     try:
@@ -90,6 +98,7 @@ def show(ctx: typer.Context, username: str) -> None:
     """Show one mailbox."""
     from postino.cli import exit_with_error as _exit
     from postino_core.errors import MailctlError, NotFoundError
+
     try:
         m = _services(ctx).mailbox.get(username)
         if m is None:
@@ -109,6 +118,7 @@ def passwd(
     """Change password (local backend only; hidden in zitadel mode)."""
     from postino.cli import exit_with_error as _exit
     from postino_core.errors import ConfigError, MailctlError
+
     try:
         s = _services(ctx)
         if not s.identity.supports_password_change():
@@ -144,5 +154,6 @@ def quota_cmd(
     if m is None:
         from postino.cli import exit_with_error as _exit
         from postino_core.errors import NotFoundError
+
         _exit(NotFoundError(f"mailbox {username} does not exist"))
     _renderer(ctx).render(m)  # type: ignore[arg-type]

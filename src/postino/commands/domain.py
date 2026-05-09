@@ -1,4 +1,5 @@
 """postino domain … subcommands."""
+
 from __future__ import annotations
 
 from typing import Annotated, cast
@@ -36,6 +37,7 @@ def add(
     backupmx: Annotated[bool, typer.Option("--backupmx/--no-backupmx")] = False,
 ) -> None:
     from postino.cli import exit_with_error as _exit
+
     try:
         d = _services(ctx).domain.add(
             domain=domain,
@@ -59,6 +61,7 @@ def delete(
     yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
 ) -> None:
     from postino.cli import exit_with_error as _exit
+
     if not yes:
         typer.confirm(f"Delete domain {domain}?", abort=True)
     try:

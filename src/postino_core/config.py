@@ -8,6 +8,7 @@ Settings load order (pydantic-settings):
   2. /usr/local/etc/postino/postino.toml
   3. ~/.config/postino/postino.toml
   4. POSTINO_* environment variables (highest precedence)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -90,6 +91,4 @@ class PostinoSettings(BaseSettings):
 
     def mailbox_creds(self) -> PostfixSqlCredentials:
         """Resolve mailbox-table credentials from the postfix sql dir."""
-        return parse_postfix_sql_cf(
-            self.postfix_sql_dir / "sql-virtual_mailbox_maps.cf"
-        )
+        return parse_postfix_sql_cf(self.postfix_sql_dir / "sql-virtual_mailbox_maps.cf")

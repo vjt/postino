@@ -17,9 +17,15 @@ def _seed_quota(db: Engine, username: str, used: int, msgs: int) -> None:
     md = MetaData()
     md.reflect(bind=db)
     with db.begin() as conn:
-        conn.execute(md.tables["quota2"].insert().values(
-            username=username, bytes=used, messages=msgs,
-        ))
+        conn.execute(
+            md.tables["quota2"]
+            .insert()
+            .values(
+                username=username,
+                bytes=used,
+                messages=msgs,
+            )
+        )
 
 
 def test_quota_show_one(db: Engine) -> None:

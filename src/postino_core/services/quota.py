@@ -1,4 +1,5 @@
 """QuotaService — read-only view of the PA quota2 table."""
+
 from __future__ import annotations
 
 from pydantic import EmailStr
@@ -16,9 +17,7 @@ class QuotaService:
     def show(self, username: EmailStr) -> MailboxUsage | None:
         q = self._md.tables["quota2"]
         with self._engine.connect() as conn:
-            row = conn.execute(
-                select(q).where(q.c.username == str(username))
-            ).fetchone()
+            row = conn.execute(select(q).where(q.c.username == str(username))).fetchone()
         if row is None:
             return None
         m = row._mapping  # type: ignore[attr-defined]

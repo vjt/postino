@@ -2,6 +2,7 @@
 
 vmail_uid/gid of -1 means "do not chown" (used in unit tests where the
 caller has no privileges to chown to the production vmail user)."""
+
 from __future__ import annotations
 
 import os

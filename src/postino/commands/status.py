@@ -1,4 +1,5 @@
 """postino status — daily-ops snapshot. MVP scope: row counts only."""
+
 from __future__ import annotations
 
 import typer

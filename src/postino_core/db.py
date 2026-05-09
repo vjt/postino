@@ -3,6 +3,7 @@
 Reflection is done once per Engine and cached in `MetaData`. Tables
 are exposed by attribute (`db.metadata.tables['mailbox']`) so services
 can compose insert/update/select without redefining column lists."""
+
 from __future__ import annotations
 
 from sqlalchemy import MetaData, create_engine

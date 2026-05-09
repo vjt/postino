@@ -1,4 +1,5 @@
 """postino quota … subcommands (read-only view of quota2 usage)."""
+
 from __future__ import annotations
 
 from typing import cast
@@ -28,6 +29,7 @@ def show(ctx: typer.Context, username: str = "") -> None:
         u = _services(ctx).quota.show(username)
         if u is None:
             from postino.cli import exit_with_error as _exit
+
             _exit(NotFoundError(f"no quota row for {username}"))
         _renderer(ctx).render(cast(BaseModel, u))
     else:

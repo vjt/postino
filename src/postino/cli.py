@@ -2,6 +2,7 @@
 
 Top-level catches MailctlError → prints + exits with the documented
 code. Anything else propagates to Rich's traceback handler and exits 99."""
+
 from __future__ import annotations
 
 import os
@@ -43,13 +44,9 @@ app.add_typer(user_cmd.app, name="user", help="Mailbox CRUD.")
 app.add_typer(alias_cmd.app, name="alias", help="Alias CRUD.")
 app.add_typer(domain_cmd.app, name="domain", help="Domain CRUD.")
 app.add_typer(quota_cmd.app, name="quota", help="Quota inspection.")
-app.command("check", help="Validate consistency between postino and the mail stack.")(
-    check_cmd.run
-)
+app.command("check", help="Validate consistency between postino and the mail stack.")(check_cmd.run)
 app.command("status", help="Snapshot of mail stack health.")(status_cmd.run)
-app.command("reconcile", help="(V2) drift detection vs identity source.")(
-    reconcile_cmd.run
-)
+app.command("reconcile", help="(V2) drift detection vs identity source.")(reconcile_cmd.run)
 
 
 _EXIT_CODES: dict[type[MailctlError], int] = {
@@ -75,9 +72,7 @@ def _settings_with_db_override() -> PostinoSettings:
         auth, _, hostdb = body.partition("@")
         user, _, pwd = auth.partition(":")
         host, _, dbname = hostdb.partition("/")
-        sql_cf.write_text(
-            f"hosts = {host}\nuser = {user}\npassword = {pwd}\ndbname = {dbname}\n"
-        )
+        sql_cf.write_text(f"hosts = {host}\nuser = {user}\npassword = {pwd}\ndbname = {dbname}\n")
     return s
 
 
@@ -88,9 +83,7 @@ def _entry(  # pyright: ignore[reportUnusedFunction]
 ) -> None:
     install_traceback(show_locals=False)
     settings = _settings_with_db_override()
-    services = build_services(
-        settings, clock=lambda: datetime.now(), echo=False
-    )
+    services = build_services(settings, clock=lambda: datetime.now(), echo=False)
     ctx.obj = {"services": services, "json": json}
 
 

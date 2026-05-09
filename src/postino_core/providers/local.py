@@ -2,6 +2,7 @@
 
 Participates in the caller's SQLAlchemy transaction (the `conn`
 parameter is the Connection inside an outer `engine.begin()`)."""
+
 from __future__ import annotations
 
 from pydantic import EmailStr, SecretStr
@@ -23,7 +24,7 @@ class LocalProvider:
         self,
         conn: Connection,
         username: EmailStr,
-        name: str,  # noqa: ARG002 — Protocol contract
+        name: str,
         password: SecretStr,
         scheme: PasswordScheme,
     ) -> None:
@@ -62,9 +63,7 @@ class LocalProvider:
         mailbox = self._metadata.tables["mailbox"]
         hashed = hash_password(password, scheme)
         result = conn.execute(
-            update(mailbox)
-            .where(mailbox.c.username == str(username))
-            .values(password=hashed)
+            update(mailbox).where(mailbox.c.username == str(username)).values(password=hashed)
         )
         if must_exist and result.rowcount == 0:
             raise NotFoundError(f"mailbox {username} does not exist")

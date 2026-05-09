@@ -30,7 +30,9 @@ def _settings(tmp_path: Path, hook: Path) -> PostinoSettings:
 
 
 def test_check_passes_with_executable_hook(
-    db: Engine, tmp_path: Path, fake_postcreation_hook: Path,
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
 ) -> None:
     s = _settings(tmp_path, fake_postcreation_hook)
     s.virtual_mailbox_base.mkdir()
@@ -42,7 +44,8 @@ def test_check_passes_with_executable_hook(
 
 
 def test_check_fails_when_hook_not_executable(
-    db: Engine, tmp_path: Path,
+    db: Engine,
+    tmp_path: Path,
 ) -> None:
     hook = tmp_path / "hook.sh"
     hook.write_text("#!/bin/sh\nexit 0\n")
@@ -57,7 +60,9 @@ def test_check_fails_when_hook_not_executable(
 
 
 def test_check_fails_when_mailbox_base_missing(
-    db: Engine, tmp_path: Path, fake_postcreation_hook: Path,
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
 ) -> None:
     s = _settings(tmp_path, fake_postcreation_hook)
     md = MetaData()

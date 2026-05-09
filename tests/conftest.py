@@ -3,10 +3,10 @@
 Integration tests require POSTINO_TEST_DB_URL pointing at a MySQL/MariaDB
 schema where the test runner has full privileges. The schema is wiped
 before each test by truncating every table the PA schema declared."""
+
 from __future__ import annotations
 
 import os
-import subprocess
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
@@ -72,6 +72,6 @@ def fake_postcreation_hook(tmp_path: Path) -> Path:
     """An executable script that records its argv to a file but always exits 0."""
     log = tmp_path / "hook.log"
     script = tmp_path / "hook.sh"
-    script.write_text(f"#!/bin/sh\necho \"$@\" >> {log}\nexit 0\n")
+    script.write_text(f'#!/bin/sh\necho "$@" >> {log}\nexit 0\n')
     script.chmod(0o755)
     return script

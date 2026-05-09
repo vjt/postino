@@ -1,4 +1,5 @@
 """Postcreation hook runner."""
+
 from __future__ import annotations
 
 import subprocess
@@ -22,6 +23,5 @@ class HookRunner:
         )
         if result.returncode != 0:
             raise HookError(
-                f"postcreation hook exit {result.returncode}: "
-                f"stderr={result.stderr.strip()!r}"
+                f"postcreation hook exit {result.returncode}: stderr={result.stderr.strip()!r}"
             )

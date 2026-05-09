@@ -3,6 +3,7 @@
 The `add` method runs the full create flow inside a single transaction
 plus an outer try/except that cleans up the maildir if the post-DB
 filesystem or hook step fails."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -115,9 +116,7 @@ class MailboxService:
                 select(func.count()).select_from(m).where(m.c.domain == domain)
             ).scalar_one()
             if count >= cap:
-                raise CapacityError(
-                    f"domain {domain!r} reached max_mailboxes={cap}"
-                )
+                raise CapacityError(f"domain {domain!r} reached max_mailboxes={cap}")
 
     def _insert_mailbox_row(
         self,
@@ -130,31 +129,33 @@ class MailboxService:
         mailbox = self._md.tables["mailbox"]
         now = self._clock()
         try:
-            conn.execute(mailbox.insert().values(
-                username=str(create.username),
-                password=_SENTINEL,
-                name=create.name,
-                maildir=str(maildir) + "/",
-                quota=create.quota_bytes,
-                local_part=local_part,
-                domain=domain,
-                active=int(MailboxStatus.ACTIVE),
-                created=now,
-                modified=now,
-            ))
+            conn.execute(
+                mailbox.insert().values(
+                    username=str(create.username),
+                    password=_SENTINEL,
+                    name=create.name,
+                    maildir=str(maildir) + "/",
+                    quota=create.quota_bytes,
+                    local_part=local_part,
+                    domain=domain,
+                    active=int(MailboxStatus.ACTIVE),
+                    created=now,
+                    modified=now,
+                )
+            )
         except IntegrityError as e:
-            raise AlreadyExistsError(
-                f"mailbox {create.username} already exists"
-            ) from e
+            raise AlreadyExistsError(f"mailbox {create.username} already exists") from e
 
     def _insert_quota_row(self, conn: Connection, username: str) -> None:
         quota2 = self._md.tables["quota2"]
         try:
-            conn.execute(quota2.insert().values(
-                username=username,
-                bytes=0,
-                messages=0,
-            ))
+            conn.execute(
+                quota2.insert().values(
+                    username=username,
+                    bytes=0,
+                    messages=0,
+                )
+            )
         except IntegrityError:
             # quota2 may already have a row from a prior partial run; ignore.
             return None
@@ -242,6 +243,7 @@ class MailboxService:
         """Set the per-mailbox quota cap."""
         if quota_bytes < 0:
             from postino_core.errors import ConfigError
+
             raise ConfigError("quota_bytes cannot be negative")
         mailbox = self._md.tables["mailbox"]
         now = self._clock()

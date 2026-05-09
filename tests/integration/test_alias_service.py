@@ -14,10 +14,21 @@ def _seed_domain(db: Engine, domain: str) -> None:
     md = MetaData()
     md.reflect(bind=db)
     with db.begin() as conn:
-        conn.execute(md.tables["domain"].insert().values(
-            domain=domain, description="", aliases=0, mailboxes=0,
-            maxquota=0, quota=0, transport="virtual", backupmx=0, active=1,
-        ))
+        conn.execute(
+            md.tables["domain"]
+            .insert()
+            .values(
+                domain=domain,
+                description="",
+                aliases=0,
+                mailboxes=0,
+                maxquota=0,
+                quota=0,
+                transport="virtual",
+                backupmx=0,
+                active=1,
+            )
+        )
 
 
 def _service(db: Engine, frozen_clock: datetime) -> AliasService:

@@ -6,6 +6,7 @@ available (EmailStr, Path, datetime). No coercion.
 Optional[...] is used only when a column is genuinely nullable in
 the PostfixAdmin schema. Convention: missing string fields use ""
 explicitly (the caller decides), not Optional[str]."""
+
 from __future__ import annotations
 
 from datetime import datetime

@@ -1,4 +1,5 @@
 """Enumerations used across postino_core."""
+
 from __future__ import annotations
 
 from enum import IntEnum, StrEnum
