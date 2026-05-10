@@ -1,25 +1,28 @@
 from __future__ import annotations
 
+import collections.abc
+
 import pytest
+from litestar import Litestar
 from litestar.testing import AsyncTestClient
 
 from postinod.app import build_app
 
 
 @pytest.fixture
-async def client() -> AsyncTestClient:  # type: ignore[type-arg]  # WHY: AsyncTestClient is generic on the app type but test fixtures don't need the type param
+async def client() -> collections.abc.AsyncGenerator[AsyncTestClient[Litestar], None]:
     app = build_app(ready_callback=lambda: True)
     async with AsyncTestClient(app=app) as c:
-        yield c  # type: ignore[misc]  # WHY: pytest-asyncio async generator fixtures require yield inside async with; mypy/pyright flag this but it works at runtime
+        yield c
 
 
-async def test_healthz_returns_200(client: AsyncTestClient) -> None:  # type: ignore[type-arg]  # WHY: same as above
+async def test_healthz_returns_200(client: AsyncTestClient[Litestar]) -> None:
     r = await client.get("/healthz")
     assert r.status_code == 200
     assert r.json() == {"status": "ok"}
 
 
-async def test_readyz_ready(client: AsyncTestClient) -> None:  # type: ignore[type-arg]  # WHY: same as above
+async def test_readyz_ready(client: AsyncTestClient[Litestar]) -> None:
     r = await client.get("/readyz")
     assert r.status_code == 200
 

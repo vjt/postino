@@ -15,14 +15,13 @@ from litestar import Litestar
 from postinod.health import build_health_router
 
 
-def build_app(*, ready_callback: Callable[[], bool] | None = None) -> Litestar:
+def build_app(*, ready_callback: Callable[[], bool]) -> Litestar:
     """Construct the Litestar app.
 
     `ready_callback` lets tests inject readiness state. In production
     (task 15) this becomes a closure over the DB ping + JWKS cache.
     """
-    rc = ready_callback or (lambda: True)
     return Litestar(
-        route_handlers=[build_health_router(ready_callback=rc)],
+        route_handlers=[build_health_router(ready_callback=ready_callback)],
         debug=False,
     )
