@@ -11,10 +11,13 @@ Settings load order (pydantic-settings):
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
+from tomllib import TOMLDecodeError
 from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, SecretStr, model_validator
+from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -151,3 +154,66 @@ class PostinoSettings(BaseSettings):
     def mailbox_creds(self) -> PostfixSqlCredentials:
         """Resolve mailbox-table credentials from the postfix sql dir."""
         return parse_postfix_sql_cf(self.postfix_sql_dir / "sql-virtual_mailbox_maps.cf")
+
+
+class _PostinoTomlSource(PydanticBaseSettingsSource):
+    """Reads the top-level postino keys from a postino.toml file.
+
+    Subtable sections (e.g. ``[postinod]``) are silently dropped so that
+    ``PostinoSettings(extra="forbid")`` does not reject daemon-only keys
+    when both postino and postinod settings live in the same file.
+    """
+
+    def __init__(self, settings_cls: type[BaseSettings], toml_path: Path) -> None:
+        super().__init__(settings_cls)
+        self._toml_path = toml_path
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[object, str, bool]:
+        raise NotImplementedError  # __call__ is the public path
+
+    def __call__(self) -> dict[str, object]:
+        if not self._toml_path.is_file():
+            return {}
+        try:
+            with self._toml_path.open("rb") as f:
+                raw = tomllib.load(f)  # dict[str, Any] from tomllib stubs
+        except TOMLDecodeError as e:
+            raise RuntimeError(f"failed to parse TOML config at {self._toml_path}: {e}") from e
+        # Drop subtable entries (dicts) — they belong to daemon-only sections
+        # like [postinod] and must not be passed to PostinoSettings which has
+        # extra="forbid". Scalar and list values are postino-level config.
+        return {
+            k: v
+            for k, v in raw.items()  # type: ignore[union-attr]  # WHY: tomllib stubs type load() as dict[str, Any]; isinstance on the outer object is implicit; we iterate the top-level dict safely
+            if not isinstance(v, dict)
+        }
+
+
+def load_postino_settings(toml_path: Path) -> PostinoSettings:
+    """Build PostinoSettings from a specific TOML file + env overrides.
+
+    Constructs a runtime subclass that overrides the settings source so an
+    arbitrary path is read instead of the hardcoded system/user defaults.
+    Subtable sections (e.g. ``[postinod]``) in the TOML are silently dropped
+    so that ``PostinoSettings(extra="forbid")`` does not reject daemon-only
+    keys when both postino and postinod settings live in the same TOML file.
+    """
+
+    class _PostinoSettingsImpl(PostinoSettings):
+        @classmethod
+        def settings_customise_sources(
+            cls,
+            settings_cls: type[BaseSettings],
+            init_settings: PydanticBaseSettingsSource,
+            env_settings: PydanticBaseSettingsSource,
+            dotenv_settings: PydanticBaseSettingsSource,
+            file_secret_settings: PydanticBaseSettingsSource,
+        ) -> tuple[PydanticBaseSettingsSource, ...]:
+            return (
+                init_settings,
+                env_settings,
+                _PostinoTomlSource(settings_cls, toml_path),
+                file_secret_settings,
+            )
+
+    return _PostinoSettingsImpl()  # type: ignore[call-arg]  # WHY: pydantic-settings populates from sources, not init kwargs

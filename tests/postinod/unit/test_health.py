@@ -6,12 +6,12 @@ import pytest
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
 
-from postinod.app import build_app
+from postinod.app import build_minimal_app
 
 
 @pytest.fixture
 async def client() -> collections.abc.AsyncGenerator[AsyncTestClient[Litestar], None]:
-    app = build_app(ready_callback=lambda: True)
+    app = build_minimal_app(ready_callback=lambda: True)
     async with AsyncTestClient(app=app) as c:
         yield c
 
@@ -28,7 +28,7 @@ async def test_readyz_ready(client: AsyncTestClient[Litestar]) -> None:
 
 
 async def test_readyz_not_ready() -> None:
-    app = build_app(ready_callback=lambda: False)
+    app = build_minimal_app(ready_callback=lambda: False)
     async with AsyncTestClient(app=app) as c:
         r = await c.get("/readyz")
         assert r.status_code == 503

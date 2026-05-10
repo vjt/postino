@@ -1,4 +1,5 @@
 from pathlib import Path
+from textwrap import dedent
 
 import pytest
 from pydantic import SecretStr
@@ -6,6 +7,7 @@ from pydantic import SecretStr
 from postino_core.config import (
     PostfixSqlCredentials,
     PostinoSettings,
+    load_postino_settings,
     parse_postfix_sql_cf,
 )
 from postino_core.enums import IdentityBackend, PasswordScheme
@@ -124,3 +126,35 @@ def test_unknown_backend_string_rejected() -> None:
             default_password_scheme=PasswordScheme.BCRYPT,
             default_quota_bytes=1024**3,
         )
+
+
+def test_load_postino_settings_from_toml(tmp_path: Path) -> None:
+    """load_postino_settings reads values from the specified TOML path."""
+    hook = tmp_path / "hook.sh"
+    hook.write_text("#!/bin/sh\nexit 0\n")
+    toml = tmp_path / "postino.toml"
+    toml.write_text(
+        dedent(
+            f"""
+            identity_backend = "noauth"
+            postfix_sql_dir = "{tmp_path}"
+            virtual_mailbox_base = "{tmp_path}/vmail"
+            postcreation_hook = "{hook}"
+            postcreation_hook_timeout = 10.0
+            vmail_uid = 42
+            vmail_gid = 42
+            default_password_scheme = "BLF-CRYPT"
+            default_quota_bytes = 2147483648
+            """
+        ).strip()
+        + "\n"
+    )
+    s = load_postino_settings(toml)
+    from postino_core.enums import IdentityBackend
+
+    assert s.identity_backend is IdentityBackend.NOAUTH
+    assert s.vmail_uid == 42
+    assert s.vmail_gid == 42
+    assert s.default_quota_bytes == 2147483648
+    assert s.postcreation_hook_timeout == 10.0
+    assert s.default_password_scheme == PasswordScheme.BCRYPT

@@ -1,52 +1,125 @@
 """Litestar app factory.
 
-The full DI wiring (settings-driven Engine, JWKS cache, identity
-provider selection) lands in task 15. This file currently exposes:
+Exposes:
 
-* `build_app(*, ready_callback)` — minimal app with health endpoints,
-  used by Task 3's tests and Task 4's guard tests.
-* `build_app_for_test(...)` — test-only factory for the integration
-  suite (Tasks 9, 12, 13). Takes pre-built dependencies (Engine,
-  MetaData, HMAC secret, optional SCIM JWKS stub) and wires the
-  Zitadel router, SCIM Users router, SCIM Aliases router, and health
-  router. Production wiring lands in Task 15.
+* ``build_app(*, toml_path)`` — production factory. Reads PostinoSettings +
+  PostinodSettings from ``toml_path``, builds the services bundle, wires
+  HMAC + JWT verifiers, JWKS cache, all routers.
+* ``build_minimal_app(*, ready_callback)`` — minimal app with health endpoints
+  only, used by the Task 3 health unit tests.
+* ``build_app_for_test(...)`` — test-only factory for the integration suite
+  (Tasks 9, 12, 13). Takes pre-built dependencies (Engine, MetaData, HMAC
+  secret, optional SCIM JWKS stub) and wires all routers.
 """
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
 from litestar import Litestar
-from sqlalchemy import MetaData
+from sqlalchemy import MetaData, text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
+from postino_core.config import load_postino_settings
 from postino_core.fs import FilesystemAdapter
 from postino_core.hooks import HookRunner
 from postino_core.providers import NoAuthProvider
 from postino_core.services.alias import AliasService
+from postino_core.services.bundle import build_services
 from postino_core.services.mailbox import MailboxService
 from postinod.auth.hmac_guard import HmacVerifier
 from postinod.auth.jwks import JwksCache
 from postinod.auth.jwt_guard import JwksLike, JwtVerifier
+from postinod.config import load_postinod_settings
 from postinod.health import build_health_router
 from postinod.scim.aliases import build_aliases_router
 from postinod.scim.discovery import build_discovery_router
 from postinod.scim.users import build_users_router
 from postinod.zitadel.events import build_zitadel_router
 
+_logger = logging.getLogger(__name__)
+
 DEFAULT_TEST_QUOTA_BYTES = 1073741824  # 1 GiB
 
 
-def build_app(*, ready_callback: Callable[[], bool]) -> Litestar:
-    """Construct the Litestar app.
+def build_minimal_app(*, ready_callback: Callable[[], bool]) -> Litestar:
+    """Minimal Litestar app with health endpoints only.
 
-    `ready_callback` lets tests inject readiness state. In production
-    (task 15) this becomes a closure over the DB ping + JWKS cache.
+    Used by the Task 3 health unit tests. ``ready_callback`` lets tests
+    inject readiness state without standing up the full DI graph.
     """
     return Litestar(
         route_handlers=[build_health_router(ready_callback=ready_callback)],
+        debug=False,
+    )
+
+
+def build_app(*, toml_path: Path) -> Litestar:
+    """Production app factory — reads PostinoSettings + PostinodSettings from ``toml_path``."""
+    postino_settings = load_postino_settings(toml_path)
+    postinod_settings = load_postinod_settings(toml_path)
+
+    bundle = build_services(postino_settings, clock=_utc_now, echo=False)
+
+    hmac_verifier = HmacVerifier(
+        secret=postinod_settings.zitadel_hmac_secret.get_secret_value().encode(),
+    )
+    jwks = JwksCache(
+        jwks_url=f"{postinod_settings.scim_issuer}/.well-known/jwks.json",
+        refresh_seconds=postinod_settings.scim_jwks_refresh_seconds,
+    )
+    jwt_verifier = JwtVerifier(
+        issuer=postinod_settings.scim_issuer,
+        audience=postinod_settings.scim_audience,
+        jwks=jwks,
+    )
+
+    def _ready() -> bool:
+        try:
+            with bundle.engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+        except SQLAlchemyError as e:
+            _logger.warning("readiness DB ping failed: %s", e)
+            return False
+        return True
+
+    # NOTE (deferred): the postinod surface-attribution audit row currently
+    # rides outside the MailboxService mutation transaction. Resume-doc
+    # carry-over: plumb a shared Connection through MailboxService so the
+    # postinod audit row joins the mutation tx. Tracked separately; not
+    # fixed in PR-B14 to keep scope focused on production wiring.
+    return Litestar(
+        route_handlers=[
+            build_health_router(ready_callback=_ready),
+            build_zitadel_router(
+                mailbox_service=bundle.mailbox,
+                hmac_verifier=hmac_verifier,
+                engine=bundle.engine,
+                metadata=bundle.metadata,
+                clock=_utc_now,
+                default_quota_bytes=postino_settings.default_quota_bytes,
+            ),
+            build_users_router(
+                mailbox_service=bundle.mailbox,
+                jwt_verifier=jwt_verifier,
+                engine=bundle.engine,
+                metadata=bundle.metadata,
+                clock=_utc_now,
+                default_quota_bytes=postino_settings.default_quota_bytes,
+            ),
+            build_aliases_router(
+                alias_service=bundle.alias,
+                jwt_verifier=jwt_verifier,
+                engine=bundle.engine,
+                metadata=bundle.metadata,
+                clock=_utc_now,
+            ),
+            build_discovery_router(jwt_verifier=jwt_verifier),
+        ],
         debug=False,
     )
 
