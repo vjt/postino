@@ -6,7 +6,7 @@ code. Anything else propagates to Rich's traceback handler and exits 99."""
 from __future__ import annotations
 
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import NoReturn
 
 import typer
@@ -94,7 +94,7 @@ def _entry(  # pyright: ignore[reportUnusedFunction]
     install_traceback(show_locals=False)
     try:
         settings = _load_settings()
-        services = build_services(settings, clock=lambda: datetime.now(), echo=False)
+        services = build_services(settings, clock=lambda: datetime.now(UTC), echo=False)
     except MailctlError as e:
         exit_with_error(e)
     ctx.obj = {"services": services, "json": json}
