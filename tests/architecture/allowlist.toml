@@ -15,9 +15,9 @@
 18 = "WHY: passlib's hashers expose no public Protocol; PR-A5 wraps them behind a typed PasswordHasher Protocol."
 
 [test_no_any."src/postinod/zitadel/models.py"]
-85 = "WHY: unknown event_type fallback requires dict[str, Any]; no concrete type exists for arbitrary Zitadel extensions."
+85 = "WHY: event_payload union fallback uses dict[str, Any]; no concrete type exists for arbitrary Zitadel extensions."
 96 = "WHY: mirrors pydantic BaseModel.model_validate(obj: Any) — the boundary receives raw HTTP JSON, type cannot be narrowed at call site."
-100 = "WHY: pydantic BaseModel.model_validate context parameter is dict[str, Any] in the pydantic public API; cannot substitute a narrower type."
+97 = "WHY: **kwargs forwarded verbatim to BaseModel.model_validate; pydantic minors evolve the kwarg set (strict, extra, from_attributes, context, by_alias, by_name) — generic Any avoids LSP drift."
 
 [test_no_cast]
 [test_no_cast."src/postino/commands/alias.py"]
@@ -44,10 +44,10 @@
 
 [test_type_ignore_justified."src/postinod/zitadel/models.py"]
 90 = "WHY: event_payload union fallback member dict[str, Any] cannot be made concrete; arbitrary Zitadel extensions have no schema."
-94 = "WHY: model_validate override narrows obj to dict before pydantic union dispatch; override signature is intentionally compatible with BaseModel.model_validate."
+94 = "WHY: model_validate override dispatches typed payload before pydantic union resolution; LSP-compatible via **kwargs forwarding."
 96 = "WHY: mirrors pydantic BaseModel.model_validate(obj: Any) — HTTP boundary; type cannot be narrowed at call site."
-100 = "WHY: pydantic BaseModel.model_validate context is dict[str, Any] in the public API; no Protocol exists to substitute."
-105 = "WHY: obj is Any; isinstance(obj, dict) narrows to dict[Unknown, Unknown] in pyright strict — typed alias assignment needed for subsequent .get() calls."
+97 = "WHY: **kwargs: Any forwarded verbatim to BaseModel.model_validate; pydantic minors evolve the kwarg set, generic Any avoids drift."
+100 = "WHY: obj is Any; isinstance(obj, dict) narrows to dict[Unknown, Unknown] in pyright strict — typed alias assignment needed for subsequent .get() calls."
 
 [test_type_ignore_justified."src/postino/commands/alias.py"]
 18 = "WHY: typer Context.obj is dict[str, Any]; PR-A6 introduces a typed CliState dataclass."
@@ -111,9 +111,6 @@
 38 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_no_bare_dict]
-[test_no_bare_dict."src/postinod/zitadel/models.py"]
-100 = "WHY: pydantic BaseModel.model_validate context parameter is dict[str, Any] in the pydantic public API; cannot substitute a narrower type without breaking the override contract."
-
 [test_no_str_dispatch]
 [test_no_empty_str_sentinel]
 [test_no_empty_str_sentinel."src/postino/commands/quota.py"]

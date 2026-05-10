@@ -88,3 +88,26 @@ def test_invalid_email_rejected() -> None:
 def test_missing_required_field_rejected() -> None:
     with pytest.raises(ValidationError):
         ZitadelEvent.model_validate({"event_type": "user.human.added"})
+
+
+def test_model_validate_forwards_kwargs() -> None:
+    """Override forwards arbitrary BaseModel.model_validate kwargs verbatim."""
+    raw = _wrap(
+        "user.human.added",
+        {"email": "alice@example.org", "firstName": "A", "lastName": "B", "active": True},
+    )
+    e = ZitadelEvent.model_validate(raw, strict=False)
+    assert isinstance(e.event_payload, UserAddedPayload)
+
+
+def test_model_validate_non_string_event_type_falls_through() -> None:
+    """Non-string event_type bypasses dispatch; outer pydantic validator rejects."""
+    raw: dict[str, object] = {
+        "aggregateID": "agg-1",
+        "userID": "user-1",
+        "event_type": 42,
+        "created_at": "2026-05-10T11:00:00Z",
+        "event_payload": {},
+    }
+    with pytest.raises(ValidationError):
+        ZitadelEvent.model_validate(raw)

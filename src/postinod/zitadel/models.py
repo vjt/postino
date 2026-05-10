@@ -17,7 +17,7 @@ template.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Union
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -82,37 +82,26 @@ class ZitadelEvent(BaseModel):
     user_id: str = Field(alias="userID")
     event_type: str
     created_at: datetime
-    event_payload: Union[  # noqa: UP007  # WHY: explicit Union aids type narrowing in the model_validate dispatch below
-        UserAddedPayload,
-        HumanProfilePayload,
-        HumanEmailPayload,
-        LifecyclePayload,
-        dict[str, Any],  # type: ignore[type-arg]  # WHY: unknown event_type falls back to untyped dict; Any is structurally required here
-    ]
+    event_payload: (
+        UserAddedPayload
+        | HumanProfilePayload
+        | HumanEmailPayload
+        | LifecyclePayload
+        | dict[str, Any]  # type: ignore[type-arg]  # WHY: unknown event_type → untyped fallback dict; arbitrary Zitadel extensions have no schema
+    )
 
     @classmethod
-    def model_validate(  # type: ignore[override]  # WHY: narrows obj to dict before pydantic union resolution; matches BaseModel.model_validate(**kw) contract
+    def model_validate(  # type: ignore[override]  # WHY: dispatch typed payload before pydantic union resolution; kwargs forwarded verbatim to BaseModel.model_validate
         cls,
-        obj: Any,  # type: ignore[explicit-any]  # WHY: mirrors pydantic BaseModel.model_validate(obj: Any) — cannot be narrowed at call site
-        *,
-        strict: bool | None = None,
-        from_attributes: bool | None = None,
-        context: dict[str, Any] | None = None,  # type: ignore[explicit-any]  # WHY: pydantic BaseModel.model_validate context arg is dict[str, Any]
-        by_alias: bool | None = None,
-        by_name: bool | None = None,
+        obj: Any,  # type: ignore[explicit-any]  # WHY: mirrors BaseModel.model_validate(obj: Any) — HTTP boundary, cannot be narrowed at call site
+        **kwargs: Any,  # type: ignore[explicit-any]  # WHY: BaseModel.model_validate kwargs (strict, extra, from_attributes, context, by_alias, by_name) forwarded verbatim; pydantic minors evolve this set
     ) -> ZitadelEvent:
         if isinstance(obj, dict):
-            raw: dict[str, object] = obj  # type: ignore[assignment]  # WHY: obj is Any; isinstance narrows to dict but pyright keeps it Unknown — typed alias needed for .get() tracking
+            raw: dict[str, object] = obj  # type: ignore[assignment]  # WHY: obj is Any; isinstance narrows to dict[Unknown, Unknown] in pyright strict — typed alias needed for .get()
             event_type = raw.get("event_type")
-            payload_cls = _PAYLOAD_BY_TYPE.get(str(event_type))
-            if payload_cls is not None:
-                payload_data = raw.get("event_payload", {})
-                obj = {**raw, "event_payload": payload_cls.model_validate(payload_data)}
-        return super().model_validate(
-            obj,
-            strict=strict,
-            from_attributes=from_attributes,
-            context=context,
-            by_alias=by_alias,
-            by_name=by_name,
-        )
+            if isinstance(event_type, str):
+                payload_cls = _PAYLOAD_BY_TYPE.get(event_type)
+                if payload_cls is not None:
+                    payload_data = raw.get("event_payload", {})
+                    obj = {**raw, "event_payload": payload_cls.model_validate(payload_data)}
+        return super().model_validate(obj, **kwargs)
