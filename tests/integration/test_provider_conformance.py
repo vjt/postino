@@ -8,6 +8,7 @@ new provider ships and forgets one, this file fails.
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
 
 import pytest
 from pydantic import SecretStr
@@ -21,7 +22,7 @@ pytestmark = pytest.mark.integration
 
 
 def _build_local(md: MetaData) -> IdentityProvider:
-    return LocalProvider(metadata=md)
+    return LocalProvider(metadata=md, clock=lambda: datetime(2026, 5, 9, 12, 0, 0))
 
 
 def _build_noauth(md: MetaData) -> IdentityProvider:

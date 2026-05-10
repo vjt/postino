@@ -5,6 +5,9 @@ parameter is the Connection inside an outer `engine.begin()`)."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from datetime import datetime
+
 from pydantic import SecretStr
 from sqlalchemy import MetaData, update
 from sqlalchemy.engine import Connection
@@ -17,8 +20,9 @@ from postino_core.password import hash_password
 class LocalProvider:
     """IdentityProvider implementation against the PA mailbox.password column."""
 
-    def __init__(self, *, metadata: MetaData) -> None:
+    def __init__(self, *, metadata: MetaData, clock: Callable[[], datetime]) -> None:
         self._metadata = metadata
+        self._clock = clock
 
     def create_identity(
         self,
@@ -70,7 +74,9 @@ class LocalProvider:
         mailbox = self._metadata.tables["mailbox"]
         hashed = hash_password(password, scheme)
         result = conn.execute(
-            update(mailbox).where(mailbox.c.username == username).values(password=hashed)
+            update(mailbox)
+            .where(mailbox.c.username == username)
+            .values(password=hashed, modified=self._clock())
         )
         if must_exist and result.rowcount == 0:
             raise NotFoundError(f"mailbox {username} does not exist")

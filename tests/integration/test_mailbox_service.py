@@ -37,7 +37,7 @@ def _build_service(
     md.reflect(bind=db)
     return MailboxService(
         engine=db,
-        identity=LocalProvider(metadata=md),
+        identity=LocalProvider(metadata=md, clock=clock),
         fs=fs,
         hooks=hook,
         clock=clock,

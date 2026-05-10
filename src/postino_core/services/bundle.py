@@ -62,7 +62,7 @@ def build_services(
     creds = settings.mailbox_creds()
     engine = make_engine(creds, echo=echo)
     metadata = reflect_schema(engine)
-    identity = _provider_for(settings.identity_backend, metadata=metadata)
+    identity = _provider_for(settings.identity_backend, metadata=metadata, clock=clock)
     fs = FilesystemAdapter(
         mail_root=settings.virtual_mailbox_base,
         vmail_uid=settings.vmail_uid,
@@ -92,7 +92,12 @@ def build_services(
     )
 
 
-def _provider_for(backend: IdentityBackend, *, metadata: MetaData) -> IdentityProvider:
+def _provider_for(
+    backend: IdentityBackend,
+    *,
+    metadata: MetaData,
+    clock: Callable[[], datetime],
+) -> IdentityProvider:
     """Map IdentityBackend → IdentityProvider implementation.
 
     The PostinoSettings validator already rejects unknown values, so the
@@ -100,7 +105,7 @@ def _provider_for(backend: IdentityBackend, *, metadata: MetaData) -> IdentityPr
     forget to extend this dispatch.
     """
     if backend is IdentityBackend.LOCAL:
-        return LocalProvider(metadata=metadata)
+        return LocalProvider(metadata=metadata, clock=clock)
     if backend is IdentityBackend.NOAUTH:
         return NoAuthProvider()
     raise ConfigError(f"no IdentityProvider implementation for backend {backend.value!r}")
