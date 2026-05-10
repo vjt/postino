@@ -19,26 +19,19 @@ Roadmap: `docs/ROADMAP.md`
 
 ## Tech baseline
 
-- Python **3.11+** required (`requires-python = ">=3.11"`). Wider OS support
-  (FreeBSD pkg, RHEL 9, Debian 12) than 3.13. Stdlib `tomllib` lands at 3.11.
+- Python **3.13+** required (`requires-python = ">=3.13"`)
 - Pyright `strict` mode — non-negotiable. Use `# type: ignore[arg-type]` only
   for SQLAlchemy `Any`-typed `RowMapping` access; everywhere else fix the type.
-  Every ignore needs a `# WHY: ...` justification (enforced by
-  `tests/architecture/test_type_ignore_justified.py`).
-- Ruff selects: `E F W I B UP RUF SIM`. Line length 100. `target-version = "py311"`.
-- Pytest with `-x -q`. Markers: `integration` (needs `POSTINO_TEST_DB_URL`), `cli`,
-  `architecture` (static rule checks under `tests/architecture/`).
+- Ruff selects: `E F W I B UP RUF SIM`. Line length 100. `target-version = "py313"`.
+- Pytest with `-x -q`. Markers: `integration` (needs `POSTINO_TEST_DB_URL`), `cli`.
 - `bcrypt<5` is pinned: passlib 1.7.4 reads `bcrypt.__about__` which 5.x removed.
-- `./scripts/check.sh` must exit 0 before any commit. It auto-loads `.env` and runs
-  ruff → lint-imports → pyright → pytest.
-- `import-linter` enforces layered architecture (`postino_core < postino`) via
-  contracts in `pyproject.toml`. Adding postinod will extend the layer chain.
+- `./scripts/check.sh` must exit 0 before any commit. It auto-loads `.env`.
 
 ## Develop
 
 ```sh
 cd /srv/padmin
-. .venv/bin/activate     # python 3.11+ venv at repo root
+. .venv/bin/activate     # python 3.13 venv at repo root
 ./scripts/check.sh       # all-green precondition for commit
 ```
 
