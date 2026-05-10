@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import fcntl
 import os
+import shutil
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
 from pydantic import EmailStr
 
-from postino_core.errors import AlreadyExistsError, MlmmjError, NotFoundError
+from postino_core.errors import AlreadyExistsError, FilesystemError, MlmmjError, NotFoundError
 
 _DEFAULT_TIMEOUT = 30.0
 _STDERR_MAX = 512  # truncate noisy mlmmj stderr in error messages
@@ -97,6 +98,23 @@ class MlmmjAdapter:
         result = self._run(cmd)
         if result.returncode != 0:
             self._raise_mlmmj(cmd, result)
+
+    # -- delete -------------------------------------------------------------
+
+    def delete(self, *, address: EmailStr) -> None:
+        """Remove the list spool dir.
+
+        Raises:
+            NotFoundError: spool dir does not exist.
+            FilesystemError: rmtree failed (perm or partial-removal race).
+        """
+        listdir = self._listdir(address)
+        if not listdir.exists():
+            raise NotFoundError(f"mlmmj list {address} does not exist")
+        try:
+            shutil.rmtree(listdir)
+        except OSError as e:
+            raise FilesystemError(f"rmtree {listdir} failed: {e}") from e
 
     # -- owner management ---------------------------------------------------
 

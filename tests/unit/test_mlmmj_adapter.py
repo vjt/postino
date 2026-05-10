@@ -122,3 +122,18 @@ def test_append_owner_raises_not_found_if_listdir_missing(tmp_path: Path) -> Non
     a = _adapter(tmp_path)
     with pytest.raises(NotFoundError):
         a.append_owner(address="missing@lists.example.org", owner="alice@example.org")
+
+
+def test_delete_removes_spool_dir(tmp_path: Path) -> None:
+    listdir = tmp_path / "team@lists.example.org"
+    (listdir / "subscribers.d").mkdir(parents=True)
+    (listdir / "subscribers.d" / "alice@example.org").write_text("")
+    a = _adapter(tmp_path)
+    a.delete(address="team@lists.example.org")
+    assert not listdir.exists()
+
+
+def test_delete_raises_not_found_if_missing(tmp_path: Path) -> None:
+    a = _adapter(tmp_path)
+    with pytest.raises(NotFoundError):
+        a.delete(address="missing@lists.example.org")
