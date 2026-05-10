@@ -5,6 +5,7 @@ code. Anything else propagates to Rich's traceback handler and exits 99."""
 
 from __future__ import annotations
 
+import logging
 import sys
 from datetime import UTC, datetime
 from typing import NoReturn
@@ -34,6 +35,12 @@ from postino_core.errors import (
     NotFoundError,
 )
 from postino_core.services.bundle import build_services
+
+# passlib 1.7.4 reads bcrypt.__about__ which was removed in bcrypt 4.1+.
+# It catches the AttributeError but logs `(trapped) error reading bcrypt version`
+# at WARNING. Since the hash actually succeeds via passlib's fallback path,
+# silence the noise at the user-facing CLI surface.
+logging.getLogger("passlib").setLevel(logging.ERROR)
 
 app = typer.Typer(
     no_args_is_help=True,
