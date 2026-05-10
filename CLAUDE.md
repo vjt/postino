@@ -34,6 +34,20 @@ Roadmap: `docs/ROADMAP.md`
 - `import-linter` enforces layered architecture (`postino_core < postino`) via
   contracts in `pyproject.toml`. Adding postinod will extend the layer chain.
 
+## mlmmj integration (v0.3+)
+
+- Target version: **mlmmj 1.3.x** (Debian 12, Ubuntu 24.04 LTS, FreeBSD ports).
+- Spool root convention: `/var/spool/mlmmj` (env: `POSTINO_MLMMJ_SPOOL_DIR`).
+- uid/gid convention: `mlmmj:mlmmj` (system user/group); UID/GID must
+  match across `mta` and `agent` containers for shared-volume FS access.
+- Subprocess wrapper pattern: `MlmmjAdapter` shells out to the bundled
+  binaries — postino owns the flag surface, not the on-disk format.
+  Avoids the mailman2-style format-ownership lock-in.
+- List state of record: filesystem (spool dir + `control/owner` +
+  `subscribers.d/`). No new SQL table.
+- Per-list addressing handled at the `domain.transport='mlmmj'` layer;
+  no `master.cf` editing per list.
+
 ## Develop
 
 ```sh
