@@ -94,8 +94,20 @@ def test_mailbox_create_carries_secret() -> None:
         quota_bytes=0,
         scheme=PasswordScheme.BCRYPT,
     )
+    assert c.password is not None
     assert c.password.get_secret_value() == "hunter2"
     assert "hunter2" not in repr(c)
+
+
+def test_mailbox_create_password_and_scheme_default_to_none() -> None:
+    """NOAUTH backends pass no password/scheme; defaults make that legal."""
+    c = MailboxCreate(
+        username="foo@example.com",
+        name="",
+        quota_bytes=0,
+    )
+    assert c.password is None
+    assert c.scheme is None
 
 
 def test_alias_required_fields() -> None:

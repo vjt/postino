@@ -97,10 +97,25 @@ def test_settings_postcreation_hook_timeout_default() -> None:
     assert s.postcreation_hook_timeout == 30.0
 
 
-def test_zitadel_backend_rejected_in_mvp() -> None:
-    with pytest.raises(ConfigError):
+def test_noauth_backend_accepted() -> None:
+    s = PostinoSettings(
+        identity_backend=IdentityBackend.NOAUTH,
+        postfix_sql_dir=Path("/tmp"),
+        virtual_mailbox_base=Path("/srv/mail"),
+        postcreation_hook=Path("/x"),
+        vmail_uid=1006,
+        vmail_gid=1006,
+        default_password_scheme=PasswordScheme.BCRYPT,
+        default_quota_bytes=1024**3,
+    )
+    assert s.identity_backend is IdentityBackend.NOAUTH
+
+
+def test_unknown_backend_string_rejected() -> None:
+    """Unknown identity_backend string fails at the enum boundary, not the validator."""
+    with pytest.raises(ValueError):
         PostinoSettings(
-            identity_backend=IdentityBackend.ZITADEL,
+            identity_backend="zitadel",  # type: ignore[arg-type]  # WHY: deliberately exercising the enum coercion path with an invalid value.
             postfix_sql_dir=Path("/tmp"),
             virtual_mailbox_base=Path("/srv/mail"),
             postcreation_hook=Path("/x"),

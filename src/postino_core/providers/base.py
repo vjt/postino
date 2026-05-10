@@ -1,40 +1,62 @@
-"""IdentityProvider Protocol — the seam between local and Zitadel modes."""
+"""IdentityProvider Protocol — the seam between local and external identity backends.
+
+Two implementations ship in this build:
+
+* ``LocalProvider`` — passwords stored in PA ``mailbox.password``. The
+  CLI provisions them. ``supports_password_change`` and
+  ``supports_local_provisioning`` both return True.
+* ``NoAuthProvider`` — ``mailbox.password`` is left as ``{NOAUTH}``. An
+  external IdP authenticates dovecot via passdb. The CLI cannot
+  provision or rotate passwords; both ``supports_*`` predicates return
+  False.
+
+Boundary types: ``username`` is a plain ``str`` here. The
+``EmailStr`` validation lives at the CLI / model boundary
+(``MailboxCreate.username: EmailStr``); providers receive an already-
+validated string and do not re-validate.
+"""
 
 from __future__ import annotations
 
 from typing import Protocol
 
-from pydantic import EmailStr, SecretStr
+from pydantic import SecretStr
 from sqlalchemy.engine import Connection
 
 from postino_core.enums import PasswordScheme
 
+# Sentinel value written to PA `mailbox.password` whenever postino
+# cannot fill the column with a real hash — either as the bootstrap
+# placeholder before LocalProvider replaces it, or as the permanent
+# value under NoAuthProvider. Dovecot's passdb-sql query treats
+# `{NOAUTH}` as "no local credential; defer to other passdbs".
+SENTINEL_NOAUTH = "{NOAUTH}"
+
 
 class IdentityProvider(Protocol):
-    """Owner of authentication identity for a mailbox.
-
-    LocalProvider stores credentials in PA mailbox.password (with
-    {scheme} prefix). ZitadelProvider (V2) creates the identity in
-    Zitadel and writes the {NOAUTH} sentinel to mailbox.password.
-    """
+    """Owner of authentication identity for a mailbox."""
 
     def create_identity(
         self,
         conn: Connection,
-        username: EmailStr,
+        username: str,
         name: str,
-        password: SecretStr,
-        scheme: PasswordScheme,
+        password: SecretStr | None,
+        scheme: PasswordScheme | None,
     ) -> None:
         """Establish the identity. Called immediately after the mailbox
-        row INSERT (with sentinel password). LocalProvider UPDATEs the
-        password column. Returns None; raises ConfigError or DBError."""
+        row INSERT (with the ``{NOAUTH}`` sentinel password).
+
+        ``LocalProvider`` UPDATEs the password column with the hash
+        derived from ``password``/``scheme``, and raises ``ConfigError``
+        if either is None. ``NoAuthProvider`` is a no-op (the sentinel
+        already in place is the permanent value)."""
         ...
 
     def set_password(
         self,
         conn: Connection,
-        username: EmailStr,
+        username: str,
         password: SecretStr,
         scheme: PasswordScheme,
     ) -> None:
@@ -48,7 +70,7 @@ class IdentityProvider(Protocol):
     def delete_identity(
         self,
         conn: Connection,
-        username: EmailStr,
+        username: str,
     ) -> None:
         """Remove identity (idempotent — no error if absent).
 
@@ -57,7 +79,13 @@ class IdentityProvider(Protocol):
         ...
 
     def supports_password_change(self) -> bool:
-        """Whether `postino user passwd` is exposed.
+        """Whether ``postino user passwd`` is exposed."""
+        ...
 
-        LocalProvider: True. ZitadelProvider: False."""
+    def supports_local_provisioning(self) -> bool:
+        """Whether ``postino user add`` accepts a password.
+
+        Returns False for backends where the IdP owns user lifecycle —
+        in that mode users must be created in the IdP first and the
+        mailbox row gets the ``{NOAUTH}`` sentinel."""
         ...

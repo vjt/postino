@@ -13,10 +13,11 @@ from sqlalchemy.engine import Engine
 
 from postino_core.config import PostinoSettings
 from postino_core.db import make_engine, reflect_schema
+from postino_core.enums import IdentityBackend
+from postino_core.errors import ConfigError
 from postino_core.fs import FilesystemAdapter
 from postino_core.hooks import HookRunner
-from postino_core.providers.base import IdentityProvider
-from postino_core.providers.local import LocalProvider
+from postino_core.providers import IdentityProvider, LocalProvider, NoAuthProvider
 from postino_core.services.alias import AliasService
 from postino_core.services.domain import DomainService
 from postino_core.services.mailbox import MailboxService
@@ -58,7 +59,7 @@ def build_services(
     creds = settings.mailbox_creds()
     engine = make_engine(creds, echo=echo)
     metadata = reflect_schema(engine)
-    identity = LocalProvider(metadata=metadata)
+    identity = _provider_for(settings.identity_backend, metadata=metadata)
     fs = FilesystemAdapter(
         mail_root=settings.virtual_mailbox_base,
         vmail_uid=settings.vmail_uid,
@@ -85,3 +86,17 @@ def build_services(
         quota=QuotaService(engine=engine, metadata=metadata),
         settings=settings,
     )
+
+
+def _provider_for(backend: IdentityBackend, *, metadata: MetaData) -> IdentityProvider:
+    """Map IdentityBackend → IdentityProvider implementation.
+
+    The PostinoSettings validator already rejects unknown values, so the
+    fallback is defence-in-depth against future enum additions that
+    forget to extend this dispatch.
+    """
+    if backend is IdentityBackend.LOCAL:
+        return LocalProvider(metadata=metadata)
+    if backend is IdentityBackend.NOAUTH:
+        return NoAuthProvider()
+    raise ConfigError(f"no IdentityProvider implementation for backend {backend.value!r}")

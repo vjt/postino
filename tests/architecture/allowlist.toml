@@ -30,7 +30,7 @@
 37 = "WHY: same Renderer.render variance issue — fix in PR-A6."
 
 [test_no_cast."src/postino/commands/user.py"]
-112 = "WHY: same Renderer.render variance issue — fix in PR-A6."
+122 = "WHY: same Renderer.render variance issue — fix in PR-A6."
 
 [test_no_cast."src/postino_core/password.py"]
 35 = "WHY: passlib's hash()/verify() return Any; PR-A5 introduces a typed PasswordHasher Protocol replacing the cast."
@@ -61,7 +61,7 @@
 
 [test_type_ignore_justified."src/postino/commands/user.py"]
 34 = "WHY: typer Context.obj is dict[str, Any]; PR-A6 typed CliState."
-182 = "WHY: Renderer.render is invariant on list[BaseModel]; PR-A6 generifies it."
+192 = "WHY: Renderer.render is invariant on list[BaseModel]; PR-A6 generifies it."
 
 [test_type_ignore_justified."src/postino_core/password.py"]
 12 = "WHY: passlib lacks a typed __init__; PR-A5 wraps via PasswordHasher Protocol."
@@ -90,12 +90,12 @@
 213 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/mailbox.py"]
-138 = "WHY: SQLAlchemy RowMapping access yields Any."
+134 = "WHY: SQLAlchemy RowMapping access yields Any."
+206 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+209 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 210 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-213 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-214 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-215 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-252 = "WHY: SQLAlchemy RowMapping access yields Any."
+211 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+248 = "WHY: SQLAlchemy RowMapping access yields Any."
 
 [test_type_ignore_justified."src/postino_core/services/quota.py"]
 23 = "WHY: SQLAlchemy Row._mapping attribute access not in stubs."

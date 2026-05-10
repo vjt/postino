@@ -133,10 +133,14 @@ class PostinoSettings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_backend_supported(self) -> PostinoSettings:
-        if self.identity_backend is IdentityBackend.ZITADEL:
+        # Positive allow-list: any future backend is rejected until it
+        # ships in `services/bundle.py::build_services`. Order: easier to
+        # add a backend than to forget removing this guard.
+        supported = (IdentityBackend.LOCAL, IdentityBackend.NOAUTH)
+        if self.identity_backend not in supported:
             raise ConfigError(
-                "ZITADEL identity backend is not implemented in this postino build "
-                "(MVP supports LOCAL only)"
+                f"identity_backend {self.identity_backend.value!r} not supported "
+                f"(supported: {[b.value for b in supported]})"
             )
         return self
 

@@ -57,13 +57,23 @@ def add(
     Prompts for the password twice. The password is never accepted on
     the command line: it would appear in shell history, the process
     tree, and CI logs.
+
+    Refuses to run under ``identity_backend = "noauth"``: in that mode
+    the external IdP owns provisioning (postinod / IdP admin UI), and
+    the mailbox row is later reconciled — letting `user add` create one
+    here would silently bypass the IdP.
     """
     from postino.cli import exit_with_error as _exit
     from postino_core.errors import MailctlError
 
     try:
-        password = _prompt_new_password()
         s = _services(ctx)
+        if not s.identity.supports_local_provisioning():
+            raise ConfigError(
+                "identity_backend=noauth: provision mailboxes via the external IdP, "
+                "not `postino user add`"
+            )
+        password = _prompt_new_password()
         m = s.mailbox.add(
             MailboxCreate(
                 username=username,

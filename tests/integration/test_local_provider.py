@@ -4,8 +4,9 @@ from sqlalchemy import MetaData, select
 from sqlalchemy.engine import Connection, Engine
 
 from postino_core.enums import PasswordScheme
-from postino_core.errors import NotFoundError
+from postino_core.errors import ConfigError, NotFoundError
 from postino_core.password import verify_password
+from postino_core.providers import SENTINEL_NOAUTH
 from postino_core.providers.local import LocalProvider
 
 pytestmark = pytest.mark.integration
@@ -30,7 +31,7 @@ def _seed_mailbox(conn: Connection, md: MetaData, username: str) -> None:
     conn.execute(
         mailbox.insert().values(
             username=username,
-            password="{NOAUTH}",
+            password=SENTINEL_NOAUTH,
             name="Foo",
             maildir="example.com/foo/",
             quota=0,
@@ -97,3 +98,33 @@ def test_local_set_password_missing_raises(db: Engine) -> None:
 def test_supports_password_change_true() -> None:
     prov = LocalProvider(metadata=MetaData())
     assert prov.supports_password_change() is True
+
+
+def test_supports_local_provisioning_true() -> None:
+    prov = LocalProvider(metadata=MetaData())
+    assert prov.supports_local_provisioning() is True
+
+
+def test_create_identity_without_password_raises(db: Engine) -> None:
+    """LocalProvider refuses to provision a mailbox without password+scheme."""
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.begin() as conn:
+        _seed_mailbox(conn, md, "foo@example.com")
+        prov = LocalProvider(metadata=md)
+        with pytest.raises(ConfigError):
+            prov.create_identity(
+                conn,
+                "foo@example.com",
+                name="",
+                password=None,
+                scheme=PasswordScheme.BCRYPT,
+            )
+        with pytest.raises(ConfigError):
+            prov.create_identity(
+                conn,
+                "foo@example.com",
+                name="",
+                password=SecretStr("p"),
+                scheme=None,
+            )

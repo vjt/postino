@@ -41,7 +41,13 @@ class DomainTransport(StrEnum):
 
 
 class IdentityBackend(StrEnum):
-    """Selects which IdentityProvider postino uses at runtime."""
+    """Selects which IdentityProvider postino uses at runtime.
+
+    LOCAL — passwords stored in PA ``mailbox.password`` (this CLI provisions).
+    NOAUTH — ``mailbox.password`` carries the ``{NOAUTH}`` sentinel; an
+    external IdP authenticates via dovecot-side passdb (LDAP/OIDC), and
+    this CLI refuses to provision or rotate passwords.
+    """
 
     LOCAL = "local"
-    ZITADEL = "zitadel"
+    NOAUTH = "noauth"

@@ -42,15 +42,24 @@ class Mailbox(BaseModel):
 
 
 class MailboxCreate(BaseModel):
-    """Inputs for `postino user add`. Built at the CLI boundary."""
+    """Inputs for `postino user add`. Built at the CLI boundary.
+
+    ``password`` and ``scheme`` are optional so the same payload covers
+    both the LOCAL backend (which provisions ``mailbox.password`` from
+    these fields) and the NOAUTH backend (where dovecot authenticates
+    via an external IdP and the ``{NOAUTH}`` sentinel stays in place).
+    ``LocalProvider.create_identity`` raises ``ConfigError`` if either
+    field is None, so callers can't silently provision a passwordless
+    local mailbox.
+    """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     username: EmailStr
-    password: SecretStr
+    password: SecretStr | None = None
     name: str
     quota_bytes: int
-    scheme: PasswordScheme
+    scheme: PasswordScheme | None = None
 
 
 class MailboxUsage(BaseModel):

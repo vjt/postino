@@ -31,7 +31,8 @@ def test_domain_transport_members() -> None:
 
 def test_identity_backend_members() -> None:
     assert IdentityBackend.LOCAL.value == "local"
-    assert IdentityBackend.ZITADEL.value == "zitadel"
+    assert IdentityBackend.NOAUTH.value == "noauth"
+    assert {b.value for b in IdentityBackend} == {"local", "noauth"}
 
 
 def test_unknown_enum_raises() -> None:

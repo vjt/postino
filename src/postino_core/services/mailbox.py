@@ -35,13 +35,9 @@ from postino_core.errors import (
 from postino_core.fs import FilesystemAdapter
 from postino_core.hooks import HookRunner
 from postino_core.models import Mailbox, MailboxCreate
-from postino_core.providers.base import IdentityProvider
+from postino_core.providers import SENTINEL_NOAUTH, IdentityProvider
 
 _logger = logging.getLogger(__name__)
-
-# {NOAUTH} sentinel — see spec §5. Used as initial value for password
-# column (NOT NULL) before LocalProvider replaces it with a hashed value.
-_SENTINEL = "{NOAUTH}"
 
 
 class MailboxService:
@@ -84,7 +80,7 @@ class MailboxService:
                 self._insert_quota_row(conn, str(create.username))
                 self._identity.create_identity(
                     conn,
-                    create.username,
+                    str(create.username),
                     name=create.name,
                     password=create.password,
                     scheme=create.scheme,
@@ -167,7 +163,7 @@ class MailboxService:
             conn.execute(
                 mailbox.insert().values(
                     username=str(create.username),
-                    password=_SENTINEL,
+                    password=SENTINEL_NOAUTH,
                     name=create.name,
                     maildir=str(maildir) + "/",
                     quota=create.quota_bytes,
@@ -225,7 +221,7 @@ class MailboxService:
             raise NotFoundError(f"mailbox {username} does not exist")
         relative = existing.maildir
         with self._engine.begin() as conn:
-            self._identity.delete_identity(conn, username)
+            self._identity.delete_identity(conn, str(username))
             quota2 = self._md.tables["quota2"]
             conn.execute(quota2.delete().where(quota2.c.username == str(username)))
             conn.execute(mailbox.delete().where(mailbox.c.username == str(username)))
@@ -259,7 +255,20 @@ class MailboxService:
     ) -> None:
         """Change password via the active IdentityProvider."""
         with self._engine.begin() as conn:
-            self._identity.set_password(conn, username, password, scheme)
+            self._identity.set_password(conn, str(username), password, scheme)
+
+    def set_name(self, username: EmailStr, name: str) -> None:
+        """Update the mailbox display name."""
+        mailbox = self._md.tables["mailbox"]
+        now = self._clock()
+        with self._engine.begin() as conn:
+            result = conn.execute(
+                mailbox.update()
+                .where(mailbox.c.username == str(username))
+                .values(name=name, modified=now)
+            )
+            if result.rowcount == 0:
+                raise NotFoundError(f"mailbox {username} does not exist")
 
     def set_status(self, username: EmailStr, status: MailboxStatus) -> None:
         """Enable / disable the mailbox."""
