@@ -469,6 +469,49 @@ def test_set_status(
     assert m is not None and m.status is MailboxStatus.DISABLED
 
 
+def test_mailbox_add_resets_stale_quota_row(
+    db: Engine,
+    tmp_mail_root: Path,
+    fake_postcreation_hook: Path,
+    frozen_clock: datetime,
+) -> None:
+    """A prior partial add can leave a quota2 row with stale counters.
+    A subsequent successful add for the same username must zero them
+    out (UPSERT semantics) — otherwise the new mailbox starts already
+    over its quota."""
+    _seed_domain(db, "example.com", max_mailboxes=10)
+    md = MetaData()
+    md.reflect(bind=db)
+    quota2 = md.tables["quota2"]
+    with db.begin() as conn:
+        conn.execute(
+            quota2.insert().values(username="foo@example.com", bytes=999_999_999, messages=42)
+        )
+
+    svc = _build_service(
+        db,
+        FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1),
+        HookRunner(script_path=fake_postcreation_hook),
+        lambda: frozen_clock,
+    )
+    svc.add(
+        MailboxCreate(
+            username="foo@example.com",
+            password=SecretStr("p"),
+            name="",
+            quota_bytes=0,
+            scheme=PasswordScheme.BCRYPT,
+        )
+    )
+    with db.begin() as conn:
+        row = conn.execute(
+            select(quota2.c.bytes, quota2.c.messages).where(quota2.c.username == "foo@example.com")
+        ).fetchone()
+    assert row is not None
+    assert int(row[0]) == 0  # type: ignore[arg-type]  # WHY: SQLAlchemy Row indexing yields Any.
+    assert int(row[1]) == 0  # type: ignore[arg-type]  # WHY: SQLAlchemy Row indexing yields Any.
+
+
 def test_set_quota(
     db: Engine,
     tmp_mail_root: Path,

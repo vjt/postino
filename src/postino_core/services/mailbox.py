@@ -21,6 +21,7 @@ from pathlib import Path
 
 from pydantic import EmailStr, SecretStr
 from sqlalchemy import MetaData, func, select
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.exc import IntegrityError
@@ -178,18 +179,15 @@ class MailboxService:
             raise AlreadyExistsError(f"mailbox {create.username} already exists") from e
 
     def _insert_quota_row(self, conn: Connection, username: str) -> None:
+        """UPSERT a fresh quota2 row.
+
+        Resets bytes/messages to 0 if a stale row survived a prior partial
+        add — the round-trip via INSERT-then-IntegrityError-catch left
+        whatever counters the orphan row had, which would mis-bill the
+        new mailbox under its `username`."""
         quota2 = self._md.tables["quota2"]
-        try:
-            conn.execute(
-                quota2.insert().values(
-                    username=username,
-                    bytes=0,
-                    messages=0,
-                )
-            )
-        except IntegrityError:
-            # quota2 may already have a row from a prior partial run; ignore.
-            return None
+        stmt = mysql_insert(quota2).values(username=username, bytes=0, messages=0)
+        conn.execute(stmt.on_duplicate_key_update(bytes=0, messages=0))
 
     def _delete_mailbox_row(self, username: str) -> None:
         mailbox = self._md.tables["mailbox"]
