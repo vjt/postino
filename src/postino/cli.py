@@ -31,6 +31,7 @@ from postino_core.errors import (
     FilesystemError,
     HookError,
     MailctlError,
+    MlmmjError,
     NotFoundError,
 )
 from postino_core.services.bundle import build_services
@@ -60,6 +61,7 @@ _EXIT_CODES: dict[type[MailctlError], int] = {
     FilesystemError: 6,
     HookError: 7,
     DeadlockError: 8,
+    MlmmjError: 9,
 }
 
 

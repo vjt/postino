@@ -44,3 +44,9 @@ class DeadlockError(MailctlError):
     code; callers (postino + future postinod) can retry idempotent
     mutations on this signal where a generic DBError must not be
     retried."""
+
+
+class MlmmjError(MailctlError):
+    """An mlmmj subprocess exited non-zero, timed out, or produced an
+    unparseable output. The detail message includes the truncated stderr
+    from the failed subprocess for ops debugging."""
