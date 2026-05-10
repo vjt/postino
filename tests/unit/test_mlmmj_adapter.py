@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from postino_core.adapters.mlmmj import MlmmjAdapter
-from postino_core.errors import AlreadyExistsError, MlmmjError
+from postino_core.errors import AlreadyExistsError, MlmmjError, NotFoundError
 
 
 def _adapter(tmp_path: Path) -> MlmmjAdapter:
@@ -87,3 +87,38 @@ def test_create_drops_privileges_when_uid_gid_set(tmp_path: Path) -> None:
     _, kwargs = run.call_args
     assert "preexec_fn" in kwargs
     assert callable(kwargs["preexec_fn"])
+
+
+def test_append_owner_creates_owner_file_if_absent(tmp_path: Path) -> None:
+    listdir = tmp_path / "team@lists.example.org"
+    (listdir / "control").mkdir(parents=True)
+    a = _adapter(tmp_path)
+    a.append_owner(address="team@lists.example.org", owner="bob@example.org")
+    contents = (listdir / "control" / "owner").read_text()
+    assert contents == "bob@example.org\n"
+
+
+def test_append_owner_appends_when_file_exists(tmp_path: Path) -> None:
+    listdir = tmp_path / "team@lists.example.org"
+    (listdir / "control").mkdir(parents=True)
+    (listdir / "control" / "owner").write_text("alice@example.org\n")
+    a = _adapter(tmp_path)
+    a.append_owner(address="team@lists.example.org", owner="bob@example.org")
+    contents = (listdir / "control" / "owner").read_text()
+    assert contents.splitlines() == ["alice@example.org", "bob@example.org"]
+
+
+def test_append_owner_idempotent_on_duplicate(tmp_path: Path) -> None:
+    listdir = tmp_path / "team@lists.example.org"
+    (listdir / "control").mkdir(parents=True)
+    (listdir / "control" / "owner").write_text("alice@example.org\n")
+    a = _adapter(tmp_path)
+    a.append_owner(address="team@lists.example.org", owner="alice@example.org")
+    contents = (listdir / "control" / "owner").read_text()
+    assert contents.splitlines() == ["alice@example.org"]
+
+
+def test_append_owner_raises_not_found_if_listdir_missing(tmp_path: Path) -> None:
+    a = _adapter(tmp_path)
+    with pytest.raises(NotFoundError):
+        a.append_owner(address="missing@lists.example.org", owner="alice@example.org")

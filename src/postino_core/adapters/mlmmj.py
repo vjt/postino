@@ -7,6 +7,7 @@ in this module touches mlmmj's internal files except ``control/owner``
 
 from __future__ import annotations
 
+import fcntl
 import os
 import subprocess
 from collections.abc import Callable
@@ -14,7 +15,7 @@ from pathlib import Path
 
 from pydantic import EmailStr
 
-from postino_core.errors import AlreadyExistsError, MlmmjError
+from postino_core.errors import AlreadyExistsError, MlmmjError, NotFoundError
 
 _DEFAULT_TIMEOUT = 30.0
 _STDERR_MAX = 512  # truncate noisy mlmmj stderr in error messages
@@ -96,3 +97,30 @@ class MlmmjAdapter:
         result = self._run(cmd)
         if result.returncode != 0:
             self._raise_mlmmj(cmd, result)
+
+    # -- owner management ---------------------------------------------------
+
+    def append_owner(self, *, address: EmailStr, owner: EmailStr) -> None:
+        """Append ``owner`` to ``<listdir>/control/owner`` under flock.
+
+        Idempotent: a duplicate owner is a no-op. Raises
+        ``NotFoundError`` if the list spool dir is missing."""
+        listdir = self._listdir(address)
+        if not listdir.exists():
+            raise NotFoundError(f"mlmmj list {address} does not exist")
+        owner_file = listdir / "control" / "owner"
+        owner_file.parent.mkdir(parents=True, exist_ok=True)
+        if not owner_file.exists():
+            owner_file.touch()
+        with owner_file.open("r+", encoding="utf-8") as fh:
+            try:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+                contents = fh.read()
+                existing = {ln.strip() for ln in contents.splitlines() if ln.strip()}
+                if str(owner) in existing:
+                    return
+                if contents and not contents.endswith("\n"):
+                    fh.write("\n")
+                fh.write(f"{owner}\n")
+            finally:
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
