@@ -58,19 +58,12 @@ git push origin main v0.1.1
 9. **Audit log** — postino writes its own ops to the PostfixAdmin `log`
    table so PA web UI shows them.
 
-## v0.3 — Zitadel pivot (the real V2)
+## v0.3 — mlmmj mailing lists (shipped 2026-05-10)
 
-1. **`ZitadelProvider`** — implements `IdentityProvider` Protocol.
-   `create_identity` calls SCIM, then writes `{NOAUTH}` sentinel into
-   `mailbox.password`. Dovecot `passdb` checks Zitadel via OIDC.
-2. **`postino user passwd`** — when `identity_backend=zitadel`, prints
-   the Zitadel self-service URL and exits 0. (`supports_password_change`
-   already returns False on the Protocol.)
-3. **`reconcile` gains Zitadel diff** — compare Zitadel users vs
-   PostfixAdmin mailboxes, flag orphans on either side.
-4. **Migration playbook**: how to migrate live mailboxes from local
-   `{BLF-CRYPT}` to Zitadel without forcing password resets (hint:
-   `set_password` writes the same hash to Zitadel during the cutover).
+`postino list add/sub/unsub/show/ls/rm` shells out to mlmmj 1.3.x
+binaries against a `lists.<domain>` PA subdomain with `transport='mlmmj'`.
+Operator notes: `docs/postino-mlmmj.md`. Design spec:
+`docs/superpowers/specs/2026-05-10-postino-v0.3-mlmmj-design.md`.
 
 ## Production hardening (anytime)
 
