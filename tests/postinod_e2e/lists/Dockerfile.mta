@@ -1,0 +1,12 @@
+FROM debian:12-slim
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       postfix mlmmj rsyslog \
+    && rm -rf /var/lib/apt/lists/*
+RUN useradd -r -d /var/spool/mlmmj -s /usr/sbin/nologin mlmmj 2>/dev/null || true \
+    && mkdir -p /var/spool/mlmmj /var/spool/lists_inbox \
+    && chown mlmmj:mlmmj /var/spool/mlmmj
+COPY postfix-stub/main.cf   /etc/postfix/main.cf
+COPY postfix-stub/master.cf /etc/postfix/master.cf
+EXPOSE 25
+CMD ["postfix", "start-fg"]

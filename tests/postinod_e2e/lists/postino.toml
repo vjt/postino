@@ -1,0 +1,11 @@
+identity_backend = "noauth"
+postfix_sql_dir = "/etc/postino/postfix"
+virtual_mailbox_base = "/var/spool/vmail"
+postcreation_hook = "/usr/local/bin/postino-postcreate"
+vmail_uid = 5000
+vmail_gid = 5000
+default_password_scheme = "BLF-CRYPT"
+default_quota_bytes = 1073741824
+mlmmj_spool_dir = "/var/spool/mlmmj"
+mlmmj_uid = -1
+mlmmj_gid = -1

@@ -1,0 +1,3 @@
+smtp inet n - n - - smtpd
+mlmmj unix - n n - - pipe
+   flags=DRhu user=mlmmj argv=/usr/bin/mlmmj-receive -L /var/spool/mlmmj/$nexthop

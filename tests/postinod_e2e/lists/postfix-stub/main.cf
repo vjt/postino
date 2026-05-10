@@ -1,0 +1,9 @@
+myhostname = mta.test.local
+mydomain = test.local
+mydestination =
+virtual_mailbox_domains = lists.example.org
+virtual_transport = mlmmj
+transport_maps = hash:/etc/postfix/transport
+recipient_delimiter = +
+local_recipient_maps =
+maillog_file = /dev/stdout

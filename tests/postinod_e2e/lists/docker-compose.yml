@@ -1,0 +1,47 @@
+services:
+  mariadb:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: rootpw
+      MARIADB_DATABASE: postfix
+      MARIADB_USER: postfix
+      MARIADB_PASSWORD: postfixpw
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-prootpw"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  mta:
+    build:
+      context: .
+      dockerfile: Dockerfile.mta
+    volumes:
+      - lists_spool:/var/spool/mlmmj
+      - lists_inbox:/var/spool/lists_inbox
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+  agent:
+    build:
+      context: ../../..
+      dockerfile: docker/postinod/Dockerfile
+    user: "0:0"
+    working_dir: /app
+    volumes:
+      - lists_spool:/var/spool/mlmmj
+      - ./postino.toml:/etc/postino/postino.toml:ro
+    environment:
+      POSTINO_CONFIG: /etc/postino/postino.toml
+      POSTINO_MLMMJ_SPOOL_DIR: /var/spool/mlmmj
+      POSTINO_MLMMJ_UID: "-1"
+      POSTINO_MLMMJ_GID: "-1"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    command: ["sleep", "infinity"]
+
+volumes:
+  lists_spool:
+  lists_inbox:
