@@ -36,6 +36,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Forward-compat: keep `dependencies` self-contained so `pip install
+# il-postino` continues to ship a working CLI today. `[cli]` / `[daemon]`
+# are placeholders that the postinod V2 release (v0.2.x) will populate
+# — `[cli]` will host typer/rich once `[daemon]` lands litestar/httpx,
+# letting library consumers opt out of either edge.
+cli = []
+daemon = []
 dev = [
     "pytest>=8.0",
     "pytest-freezer>=0.4",
