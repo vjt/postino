@@ -24,6 +24,7 @@ from sqlalchemy.engine import Connection, Engine
 from postino_core.adapters.mlmmj import MlmmjAdapter
 from postino_core.audit import mk_action, write_audit
 from postino_core.db import translate_db_errors
+from postino_core.enums import DomainTransport
 from postino_core.errors import (
     AlreadyExistsError,
     CapacityError,
@@ -133,17 +134,25 @@ class MailingListService:
 
         Refuses (CapacityError) if ``subscriber_count > 0`` and ``force`` is False.
         Raises NotFoundError if the list spool dir does not exist.
+
+        DB-first: audit row commits before the spool tree is removed. If the
+        post-commit ``adapter.delete`` fails, the audit is over-inclusive but
+        the spool tree is recoverable; the inverse leaves a ghost mutation.
         """
         _, _, domain = str(address).partition("@")
-        ml = self._adapter.get(address=address)
-        if ml is None:
-            raise NotFoundError(f"mailing list {address!r} does not exist")
-        if ml.subscriber_count > 0 and not force:
-            raise CapacityError(
-                f"mailing list {address!r} has {ml.subscriber_count} subscribers; "
-                f"pass --force to delete anyway"
-            )
-        self._adapter.delete(address=address)
+        if force:
+            if not self._adapter.exists(address=address):  # type: ignore[arg-type]  # WHY: adapter accepts EmailStr; address is a validated str at the boundary
+                raise NotFoundError(f"mailing list {address!r} does not exist")
+        else:
+            ml = self._adapter.get(address=address)
+            if ml is None:
+                raise NotFoundError(f"mailing list {address!r} does not exist")
+            if ml.subscriber_count > 0:
+                raise CapacityError(
+                    f"mailing list {address!r} has {ml.subscriber_count} subscribers; "
+                    f"pass --force to delete anyway"
+                )
+
         with translate_db_errors(), self._engine.begin() as conn:
             write_audit(
                 conn,
@@ -154,6 +163,16 @@ class MailingListService:
                 data=f"{address} force={force}",
             )
 
+        try:
+            self._adapter.delete(address=address)
+        except Exception as fs_err:
+            _logger.error(
+                "post-audit: adapter.delete(%s) failed: %s",
+                address,
+                fs_err,
+            )
+            raise
+
     def list_all(self, *, domain: str | None = None) -> list[MailingList]:
         """List all mlmmj lists, optionally filtered by FQDN."""
         return self._adapter.list_all(domain=domain)
@@ -163,10 +182,11 @@ class MailingListService:
         row = conn.execute(select(d.c.transport).where(d.c.domain == domain)).fetchone()
         if row is None:
             raise ConfigError(f"domain {domain!r} does not exist")
-        if str(row[0]) != "mlmmj":
+        if str(row[0]) != DomainTransport.MLMMJ.value:
             raise ConfigError(
                 f"domain {domain!r} has transport={row[0]!r}, "
-                f"expected 'mlmmj'. Run `postino domain add` with --transport mlmmj first."
+                f"expected {DomainTransport.MLMMJ.value!r}. "
+                f"Run `postino domain add` with --transport mlmmj first."
             )
 
     def _validate_no_collision(self, conn: Connection, address: str) -> None:
@@ -182,5 +202,5 @@ class MailingListService:
             is not None
         ):
             raise AlreadyExistsError(f"alias row already exists for {address!r}")
-        if self._adapter.get(address=address) is not None:  # type: ignore[arg-type]  # WHY: adapter.get accepts EmailStr; address is a validated str at the boundary
+        if self._adapter.exists(address=address):  # type: ignore[arg-type]  # WHY: adapter accepts EmailStr; address is a validated str at the boundary
             raise AlreadyExistsError(f"mailing list {address!r} already exists")

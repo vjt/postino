@@ -68,7 +68,16 @@ class MlmmjAdapter:
         raise MlmmjError(f"{cmd[0]}: exit {result.returncode}: {stderr}")
 
     def _listdir(self, address: EmailStr) -> Path:
-        return self._spool_root / str(address)
+        joined = (self._spool_root / str(address)).resolve()
+        if not str(joined).startswith(str(self._spool_root.resolve())):
+            raise FilesystemError(
+                f"path traversal: {address!r} escapes spool_root {self._spool_root}"
+            )
+        return joined
+
+    def exists(self, *, address: EmailStr) -> bool:
+        """True iff the list spool dir is present. Pure FS, no subprocess."""
+        return self._listdir(address).exists()
 
     # -- create -------------------------------------------------------------
 
@@ -196,9 +205,16 @@ class MlmmjAdapter:
                 _, _, fqdn = address.partition("@")
                 if fqdn != domain:
                     continue
-            ml = self.get(address=address)  # type: ignore[arg-type]  # WHY: spool dir name is a list address by convention; pydantic validates at MailingList construction
-            if ml is not None:
-                out.append(ml)
+            owners = self._read_owners(child)
+            subscribers = self._read_subscribers(child)
+            out.append(
+                MailingList(
+                    address=address,
+                    owners=owners,
+                    subscriber_count=len(subscribers),
+                    spool_dir=child,
+                )
+            )
         return out
 
     def _read_owners(self, listdir: Path) -> list[str]:

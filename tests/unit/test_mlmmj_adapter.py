@@ -11,7 +11,7 @@ from unittest.mock import patch
 import pytest
 
 from postino_core.adapters.mlmmj import MlmmjAdapter
-from postino_core.errors import AlreadyExistsError, MlmmjError, NotFoundError
+from postino_core.errors import AlreadyExistsError, FilesystemError, MlmmjError, NotFoundError
 
 
 def _adapter(tmp_path: Path) -> MlmmjAdapter:
@@ -122,6 +122,26 @@ def test_append_owner_raises_not_found_if_listdir_missing(tmp_path: Path) -> Non
     a = _adapter(tmp_path)
     with pytest.raises(NotFoundError):
         a.append_owner(address="missing@lists.example.org", owner="alice@example.org")
+
+
+def test_listdir_rejects_path_traversal(tmp_path: Path) -> None:
+    """Defence-in-depth: address with .. must not escape spool_root."""
+    a = _adapter(tmp_path)
+    with pytest.raises(FilesystemError):
+        # Pydantic EmailStr would normally block this; adapter must defend itself too.
+        a._listdir("../escape@x.org")  # type: ignore[arg-type]  # WHY: testing the guard against a value that bypassed EmailStr validation
+
+
+def test_exists_returns_true_when_listdir_present(tmp_path: Path) -> None:
+    listdir = tmp_path / "team@lists.example.org"
+    (listdir / "control").mkdir(parents=True)
+    a = _adapter(tmp_path)
+    assert a.exists(address="team@lists.example.org") is True
+
+
+def test_exists_returns_false_when_listdir_absent(tmp_path: Path) -> None:
+    a = _adapter(tmp_path)
+    assert a.exists(address="missing@lists.example.org") is False
 
 
 def test_delete_removes_spool_dir(tmp_path: Path) -> None:
