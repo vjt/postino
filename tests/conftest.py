@@ -22,20 +22,27 @@ def _test_db_url() -> str | None:
     return os.environ.get("POSTINO_TEST_DB_URL")
 
 
+_SQL_STMT_START = ("CREATE", "ALTER", "DROP", "INSERT", "SET", "LOCK", "UNLOCK", "USE", "/*")
+
+
 @pytest.fixture(scope="session")
 def integration_engine() -> Iterator[Engine]:
     url = _test_db_url()
     if url is None:
         pytest.skip("POSTINO_TEST_DB_URL not set — skipping integration tests")
     engine = create_engine(url, future=True)
-    # Load schema once per session.
+    # Load schema once per session. Tolerate preamble noise (e.g. mysqldump
+    # warnings on stderr-merged dumps) by skipping statements that don't
+    # start with a known SQL keyword.
     schema_sql = FIXTURE_SQL.read_text()
     with engine.begin() as conn:
-        # Drop all tables we know about, then reload.
         for stmt in schema_sql.split(";"):
             stmt = stmt.strip()
-            if stmt:
-                conn.execute(text(stmt))
+            if not stmt:
+                continue
+            if not stmt.upper().startswith(_SQL_STMT_START):
+                continue
+            conn.execute(text(stmt))
     yield engine
     engine.dispose()
 
