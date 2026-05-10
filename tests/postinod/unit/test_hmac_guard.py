@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import inspect
+import re
 
 from postinod.auth.hmac_guard import HmacVerifier
 
@@ -57,5 +58,11 @@ def test_constant_time_comparison_is_used() -> None:
     assert "compare_digest" in src, "verify() must use hmac.compare_digest"
     # Reject naive '==' on the computed digest. (Approximate check; we
     # accept that comparing other things with == is fine.)
-    assert "expected ==" not in src.replace(" ", "")
-    assert "==expected" not in src.replace(" ", "")
+    assert not re.search(r"\bexpected\b\s*==", src), "verify() must not use == on the digest"
+    assert not re.search(r"==\s*\bexpected\b", src), "verify() must not use == on the digest"
+
+
+def test_repr_does_not_leak_secret() -> None:
+    v = HmacVerifier(secret=b"super-secret-value")
+    assert "super-secret" not in repr(v)
+    assert "****" in repr(v)
