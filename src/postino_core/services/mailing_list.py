@@ -17,6 +17,7 @@ import logging
 from collections.abc import Callable
 from datetime import datetime
 
+from pydantic import EmailStr
 from sqlalchemy import MetaData, select
 from sqlalchemy.engine import Connection, Engine
 
@@ -92,6 +93,38 @@ class MailingListService:
                 f"mailing list {create.address} vanished after adapter.create — check spool perms"
             )
         return ml
+
+    def subscribe(self, *, address: EmailStr, email: EmailStr) -> None:
+        """Subscribe ``email`` to the list. Idempotent (mlmmj-sub -f)."""
+        _, _, domain = str(address).partition("@")
+        self._adapter.subscribe(address=address, email=email)
+        with translate_db_errors(), self._engine.begin() as conn:
+            write_audit(
+                conn,
+                self._md,
+                clock=self._clock,
+                action=mk_action("mailing_list", "subscribe"),
+                domain=domain,
+                data=f"{address} {email}",
+            )
+
+    def unsubscribe(self, *, address: EmailStr, email: EmailStr) -> None:
+        """Unsubscribe ``email`` from the list. Idempotent."""
+        _, _, domain = str(address).partition("@")
+        self._adapter.unsubscribe(address=address, email=email)
+        with translate_db_errors(), self._engine.begin() as conn:
+            write_audit(
+                conn,
+                self._md,
+                clock=self._clock,
+                action=mk_action("mailing_list", "unsubscribe"),
+                domain=domain,
+                data=f"{address} {email}",
+            )
+
+    def get(self, address: EmailStr) -> MailingList | None:
+        """Pure read; returns None if list does not exist."""
+        return self._adapter.get(address=address)
 
     def _validate_domain_is_mlmmj(self, conn: Connection, domain: str) -> None:
         d = self._md.tables["domain"]

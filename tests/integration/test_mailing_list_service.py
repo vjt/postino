@@ -192,3 +192,41 @@ def test_add_compensating_cleanup_removes_spool_on_owner_append_failure(
             )
         )
     assert not (spool / "team@lists.example.org").exists()
+
+
+def test_subscribe_unsubscribe_round_trip(
+    db: Engine, frozen_clock: datetime, tmp_path: Path
+) -> None:
+    spool = tmp_path / "spool"
+    spool.mkdir()
+    _seed_mlmmj_domain(db, frozen_clock, "lists.example.org")
+    svc = _service(db, frozen_clock, spool)
+    svc.add(MailingListCreate(address="team@lists.example.org", owners=["alice@example.org"]))
+    svc.subscribe(address="team@lists.example.org", email="bob@example.org")
+    ml = svc.get("team@lists.example.org")
+    assert ml is not None
+    assert ml.subscriber_count == 1
+
+    svc.unsubscribe(address="team@lists.example.org", email="bob@example.org")
+    ml = svc.get("team@lists.example.org")
+    assert ml is not None
+    assert ml.subscriber_count == 0
+
+
+def test_subscribe_writes_audit_row(db: Engine, frozen_clock: datetime, tmp_path: Path) -> None:
+    spool = tmp_path / "spool"
+    spool.mkdir()
+    _seed_mlmmj_domain(db, frozen_clock, "lists.example.org")
+    svc = _service(db, frozen_clock, spool)
+    svc.add(MailingListCreate(address="team@lists.example.org", owners=["alice@example.org"]))
+    svc.subscribe(address="team@lists.example.org", email="bob@example.org")
+
+    md = MetaData()
+    md.reflect(bind=db)
+    log = md.tables["log"]
+    with db.begin() as conn:
+        rows = conn.execute(
+            select(log.c.action, log.c.data).where(log.c.action == "postino.mailing_list.subscribe")
+        ).fetchall()
+    assert len(rows) == 1
+    assert rows[0][1] == "team@lists.example.org bob@example.org"
