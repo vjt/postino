@@ -7,8 +7,8 @@ from typing import cast
 import typer
 from pydantic import BaseModel
 
+from postino.output import Renderer
 from postino_core.errors import NotFoundError
-from postino_core.output import Renderer
 from postino_core.services.bundle import ServicesBundle
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)

@@ -22,6 +22,7 @@ from postino_core.services.alias import AliasService
 from postino_core.services.domain import DomainService
 from postino_core.services.mailbox import MailboxService
 from postino_core.services.quota import QuotaService
+from postino_core.services.status import StatusService
 
 
 class ServicesBundle:
@@ -35,6 +36,7 @@ class ServicesBundle:
         alias: AliasService,
         domain: DomainService,
         quota: QuotaService,
+        status: StatusService,
         settings: PostinoSettings,
     ) -> None:
         self.engine = engine
@@ -44,6 +46,7 @@ class ServicesBundle:
         self.alias = alias
         self.domain = domain
         self.quota = quota
+        self.status = status
         self.settings = settings
 
 
@@ -84,6 +87,7 @@ def build_services(
         alias=AliasService(engine=engine, metadata=metadata, clock=clock),
         domain=DomainService(engine=engine, metadata=metadata, clock=clock, fs=fs),
         quota=QuotaService(engine=engine, metadata=metadata),
+        status=StatusService(engine=engine, metadata=metadata),
         settings=settings,
     )
 

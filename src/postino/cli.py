@@ -5,7 +5,6 @@ code. Anything else propagates to Rich's traceback handler and exits 99."""
 
 from __future__ import annotations
 
-import os
 import sys
 from datetime import datetime
 from typing import NoReturn
@@ -62,17 +61,14 @@ _EXIT_CODES: dict[type[MailctlError], int] = {
 }
 
 
-def _settings_with_db_override() -> PostinoSettings:
-    """Build PostinoSettings from TOML + env.
+def _load_settings() -> PostinoSettings:
+    """Build PostinoSettings from TOML + env, with friendly error mapping.
 
-    Test-only escape hatch: POSTINO_DB_URL_OVERRIDE forces the engine URL by
-    rewriting the postfix sql-virtual_mailbox_maps.cf file in-place; never
-    set in production.
-
-    Raises ConfigError with a human-readable message on missing/invalid config.
+    Translates pydantic-settings ValidationError into a human-readable
+    ConfigError so the CLI can exit with code 4 and a useful message.
     """
     try:
-        s = PostinoSettings()  # type: ignore[call-arg]
+        return PostinoSettings()  # type: ignore[call-arg]  # WHY: pydantic-settings raises ValidationError for missing fields; pyright thinks PostinoSettings() is missing args. Captured in PR-A6 cleanup.
     except ValidationError as e:
         missing = [err["loc"][0] for err in e.errors() if err["type"] == "missing"]
         if missing:
@@ -84,20 +80,10 @@ def _settings_with_db_override() -> PostinoSettings:
                 "~/.config/postino/postino.toml.\n"
                 "  See `postino --help` and the README for the full schema."
             ) from e
-        # Non-missing validation errors (bad enum, wrong type, etc.).
         details = "; ".join(
             f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors()
         )
         raise ConfigError(f"invalid config: {details}") from e
-    override = os.environ.get("POSTINO_DB_URL_OVERRIDE")
-    if override:
-        sql_cf = s.postfix_sql_dir / "sql-virtual_mailbox_maps.cf"
-        body = override.replace("mysql+pymysql://", "")
-        auth, _, hostdb = body.partition("@")
-        user, _, pwd = auth.partition(":")
-        host, _, dbname = hostdb.partition("/")
-        sql_cf.write_text(f"hosts = {host}\nuser = {user}\npassword = {pwd}\ndbname = {dbname}\n")
-    return s
 
 
 @app.callback()
@@ -107,7 +93,7 @@ def _entry(  # pyright: ignore[reportUnusedFunction]
 ) -> None:
     install_traceback(show_locals=False)
     try:
-        settings = _settings_with_db_override()
+        settings = _load_settings()
         services = build_services(settings, clock=lambda: datetime.now(), echo=False)
     except MailctlError as e:
         exit_with_error(e)

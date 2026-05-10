@@ -35,6 +35,15 @@ def seed_domain(db: Engine, domain: str) -> None:
 
 
 def env_for_cli(db_url: str, mail_root: Path, hook: Path, sql_dir: Path) -> dict[str, str]:
+    """Build the env that drives `postino` against the test DB.
+
+    The ``db_url`` argument is honored implicitly: ``make_postfix_cf``
+    writes the test creds into the postfix sql-virtual_*.cf files at
+    ``sql_dir`` and ``POSTINO_POSTFIX_SQL_DIR`` points the CLI there.
+    No back-channel env var exists in production code paths (PR-A6 ripped
+    out ``POSTINO_DB_URL_OVERRIDE`` — postfix is the single source of
+    truth for SQL credentials)."""
+    del db_url  # routed through make_postfix_cf → sql_dir; kept for caller-API symmetry.
     return {
         **os.environ,
         "POSTINO_IDENTITY_BACKEND": "local",
@@ -45,7 +54,6 @@ def env_for_cli(db_url: str, mail_root: Path, hook: Path, sql_dir: Path) -> dict
         "POSTINO_VMAIL_GID": "-1",
         "POSTINO_DEFAULT_PASSWORD_SCHEME": "BLF-CRYPT",
         "POSTINO_DEFAULT_QUOTA_BYTES": "1073741824",
-        "POSTINO_DB_URL_OVERRIDE": db_url,
     }
 
 

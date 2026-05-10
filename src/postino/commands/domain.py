@@ -7,9 +7,9 @@ from typing import Annotated, cast
 import typer
 from pydantic import BaseModel
 
+from postino.output import Renderer
 from postino_core.enums import DomainTransport
 from postino_core.errors import MailctlError
-from postino_core.output import Renderer
 from postino_core.quota import parse_quota
 from postino_core.services.bundle import ServicesBundle
 

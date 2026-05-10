@@ -5,9 +5,9 @@ from pathlib import Path
 import pytest
 from rich.console import Console
 
+from postino.output import Renderer
 from postino_core.enums import MailboxStatus
 from postino_core.models import Mailbox
-from postino_core.output import Renderer
 
 
 def _sample_mailbox() -> Mailbox:

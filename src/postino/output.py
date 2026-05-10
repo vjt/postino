@@ -1,10 +1,14 @@
-"""Output renderer — Rich tables in human mode, JSON in --json mode."""
+"""Output renderer — Rich tables in human mode, JSON in --json mode.
+
+Lives in the CLI layer (``postino``) — Rich and JSON-formatted CLI output
+have no place inside ``postino_core``, which must stay free of UI deps.
+The import-linter contract enforces that.
+"""
 
 from __future__ import annotations
 
 import json
 import sys
-from typing import Any
 
 from pydantic import BaseModel
 from rich.console import Console
@@ -24,10 +28,10 @@ class Renderer:
 
     def _render_json(self, payload: BaseModel | list[BaseModel]) -> None:
         if isinstance(payload, list):
-            data: Any = [m.model_dump(mode="json") for m in payload]
+            data = [m.model_dump(mode="json") for m in payload]
+            json.dump(data, sys.stdout)
         else:
-            data = payload.model_dump(mode="json")
-        json.dump(data, sys.stdout)
+            json.dump(payload.model_dump(mode="json"), sys.stdout)
         sys.stdout.write("\n")
 
     def _render_human(self, payload: BaseModel | list[BaseModel]) -> None:
@@ -43,7 +47,7 @@ class Renderer:
             table.add_row(*[self._render_cell(getattr(item, f)) for f in type(first).model_fields])
         self._console.print(table)
 
-    def _render_cell(self, value: Any) -> str:
+    def _render_cell(self, value: object) -> str:
         if value is None:
             return ""
         return str(value)

@@ -11,10 +11,6 @@
 #   compromise of last resort.
 
 [test_no_any]
-[test_no_any."src/postino_core/output.py"]
-27 = "WHY: tmp local that mirrors model_dump's untyped JSON return; fix lands in PR-A6 when Renderer moves to postino/."
-46 = "WHY: row cell is the JSON payload of a Pydantic field via getattr — typing it would require a structural Protocol that JSON has no equivalent for; fix in PR-A6."
-
 [test_no_any."src/postino_core/password.py"]
 18 = "WHY: passlib's hashers expose no public Protocol; PR-A5 wraps them behind a typed PasswordHasher Protocol."
 
@@ -40,9 +36,6 @@
 # Most pre-existing ignores are SQLAlchemy `RowMapping` access returning Any
 # (documented in CLAUDE.md). PR-A5 wraps passlib; PR-A6 replaces typer's
 # `ctx.obj` dict with a typed CliState. Until then snapshot here.
-
-[test_type_ignore_justified."src/postino/cli.py"]
-75 = "WHY: pydantic-settings raises ValidationError for missing fields; pyright thinks PostinoSettings() is missing args. Captured in PR-A6 cleanup."
 
 [test_type_ignore_justified."src/postino/commands/alias.py"]
 18 = "WHY: typer Context.obj is dict[str, Any]; PR-A6 introduces a typed CliState dataclass."

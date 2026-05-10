@@ -117,11 +117,6 @@ name = "postino_core stays free of UI/CLI/HTTP dependencies"
 type = "forbidden"
 source_modules = ["postino_core"]
 forbidden_modules = ["typer", "rich", "click", "litestar", "httpx"]
-# Renderer currently lives under postino_core/output.py and depends on rich;
-# PR-A6 (review H9 / S20) moves it to postino/output.py. Until then, ignore.
-ignore_imports = [
-    "postino_core.output -> rich",
-]
 
 [[tool.importlinter.contracts]]
 name = "postino CLI must not import HTTP/daemon stack or postinod"

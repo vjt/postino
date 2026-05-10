@@ -7,10 +7,10 @@ from typing import Annotated, cast
 import typer
 from pydantic import BaseModel, SecretStr
 
+from postino.output import Renderer
 from postino_core.enums import MailboxStatus, PasswordScheme
 from postino_core.errors import ConfigError
 from postino_core.models import MailboxCreate
-from postino_core.output import Renderer
 from postino_core.quota import parse_quota
 from postino_core.services.bundle import ServicesBundle
 
