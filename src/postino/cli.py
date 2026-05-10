@@ -17,6 +17,7 @@ from rich.traceback import install as install_traceback
 from postino.commands import alias as alias_cmd
 from postino.commands import check as check_cmd
 from postino.commands import domain as domain_cmd
+from postino.commands import list as list_cmd
 from postino.commands import quota as quota_cmd
 from postino.commands import reconcile as reconcile_cmd
 from postino.commands import status as status_cmd
@@ -46,6 +47,7 @@ app = typer.Typer(
 app.add_typer(user_cmd.app, name="user", help="Mailbox CRUD.")
 app.add_typer(alias_cmd.app, name="alias", help="Alias CRUD.")
 app.add_typer(domain_cmd.app, name="domain", help="Domain CRUD.")
+app.add_typer(list_cmd.app, name="list", help="Mailing-list (mlmmj) CRUD.")
 app.add_typer(quota_cmd.app, name="quota", help="Quota inspection.")
 app.command("check", help="Validate consistency between postino and the mail stack.")(check_cmd.run)
 app.command("status", help="Snapshot of mail stack health.")(status_cmd.run)

@@ -37,6 +37,9 @@
 [test_no_cast."src/postino/commands/user.py"]
 122 = "WHY: same Renderer.render variance issue — fix in PR-A6."
 
+[test_no_cast."src/postino/commands/list.py"]
+112 = "WHY: same Renderer.render variance issue — list[MailingList] not assignable to list[BaseModel]; fix in PR-A6."
+
 [test_no_cast."src/postino_core/password.py"]
 35 = "WHY: passlib's hash()/verify() return Any; PR-A5 introduces a typed PasswordHasher Protocol replacing the cast."
 55 = "WHY: same — passlib returns Any, fixed in PR-A5 by Protocol wrapper."
@@ -61,6 +64,13 @@
 
 [test_type_ignore_justified."src/postino/commands/domain.py"]
 20 = "WHY: typer Context.obj is dict[str, Any]; PR-A6 typed CliState."
+
+[test_type_ignore_justified."src/postino/commands/list.py"]
+24 = "WHY: typer Context.obj is dict[str, Any]; PR-A6 typed CliState."
+71 = "WHY: EmailStr accepts str at the CLI boundary; type narrowing would require an extra validated intermediate — fix in PR-A6 CLI cleanup."
+85 = "WHY: same EmailStr/str boundary as line 71."
+95 = "WHY: same EmailStr/str boundary — service.get() accepts EmailStr; raw CLI str fed directly."
+135 = "WHY: same EmailStr/str boundary — service.delete() accepts EmailStr; raw CLI str fed directly."
 
 [test_type_ignore_justified."src/postino/commands/quota.py"]
 18 = "WHY: typer Context.obj is dict[str, Any]; PR-A6 typed CliState."
