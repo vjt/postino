@@ -32,6 +32,7 @@ from postinod.auth.jwks import JwksCache
 from postinod.auth.jwt_guard import JwksLike, JwtVerifier
 from postinod.health import build_health_router
 from postinod.scim.aliases import build_aliases_router
+from postinod.scim.discovery import build_discovery_router
 from postinod.scim.users import build_users_router
 from postinod.zitadel.events import build_zitadel_router
 
@@ -129,6 +130,7 @@ def build_app_for_test(
                 metadata=metadata,
                 clock=_utc_now,
             ),
+            build_discovery_router(jwt_verifier=jwt_verifier),
         ],
         debug=False,
     )
