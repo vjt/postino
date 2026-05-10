@@ -24,6 +24,10 @@ def _test_db_url() -> str | None:
 
 _SQL_STMT_START = ("CREATE", "ALTER", "DROP", "INSERT", "SET", "LOCK", "UNLOCK", "USE", "/*")
 
+# mysqldump emits these for GTID/replication; they require BINLOG ADMIN
+# which the test runner doesn't have (and doesn't need for schema-only tests).
+_SKIP_PATTERNS = ("SQL_LOG_BIN", "GTID_PURGED", "MYSQLDUMP_TEMP_LOG_BIN")
+
 
 @pytest.fixture(scope="session")
 def integration_engine() -> Iterator[Engine]:
@@ -32,15 +36,18 @@ def integration_engine() -> Iterator[Engine]:
         pytest.skip("POSTINO_TEST_DB_URL not set — skipping integration tests")
     engine = create_engine(url, future=True)
     # Load schema once per session. Tolerate preamble noise (e.g. mysqldump
-    # warnings on stderr-merged dumps) by skipping statements that don't
-    # start with a known SQL keyword.
+    # warnings on stderr-merged dumps) and skip replication/GTID statements
+    # that need privileges we don't grant the test runner.
     schema_sql = FIXTURE_SQL.read_text()
     with engine.begin() as conn:
         for stmt in schema_sql.split(";"):
             stmt = stmt.strip()
             if not stmt:
                 continue
-            if not stmt.upper().startswith(_SQL_STMT_START):
+            stmt_up = stmt.upper()
+            if not stmt_up.startswith(_SQL_STMT_START):
+                continue
+            if any(p in stmt_up for p in _SKIP_PATTERNS):
                 continue
             conn.execute(text(stmt))
     yield engine
