@@ -36,19 +36,22 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Forward-compat: keep `dependencies` self-contained so `pip install
-# il-postino` continues to ship a working CLI today. `[cli]` / `[daemon]`
-# are placeholders that the postinod V2 release (v0.2.x) will populate
-# — `[cli]` will host typer/rich once `[daemon]` lands litestar/httpx,
-# letting library consumers opt out of either edge.
-cli = []
-daemon = []
+cli = []  # postino CLI deps already in project.dependencies; reserved for future split
+daemon = [
+    "litestar>=2.13,<3",
+    "uvicorn>=0.30",
+    "pyjwt[crypto]>=2.8",
+    "httpx>=0.27",
+]
 dev = [
     "pytest>=8.0",
     "pytest-freezer>=0.4",
     "pyright>=1.1.370",
     "ruff>=0.5",
     "import-linter>=2.0",
+    # postinod test deps — pulled in via `pip install -e .[dev,daemon]`
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
 ]
 
 [project.scripts]
@@ -59,7 +62,7 @@ Homepage = "https://github.com/vjt/postino"
 Issues = "https://github.com/vjt/postino/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/postino", "src/postino_core"]
+packages = ["src/postino", "src/postino_core", "src/postinod"]
 
 [tool.hatch.build.targets.sdist]
 include = [
@@ -105,14 +108,14 @@ markers = [
 ]
 
 [tool.importlinter]
-root_packages = ["postino_core", "postino"]
+root_packages = ["postino_core", "postino", "postinod"]
 include_external_packages = true
 
 [[tool.importlinter.contracts]]
-name = "Layered architecture: postino_core < postino"
+name = "Layered architecture: postino_core < postino, postinod"
 type = "layers"
 layers = [
-    "postino",
+    "postino | postinod",
     "postino_core",
 ]
 containers = []
@@ -123,10 +126,16 @@ ignore_imports = []
 name = "postino_core stays free of UI/CLI/HTTP dependencies"
 type = "forbidden"
 source_modules = ["postino_core"]
-forbidden_modules = ["typer", "rich", "click", "litestar", "httpx"]
+forbidden_modules = ["typer", "rich", "click", "litestar", "httpx", "jwt"]
 
 [[tool.importlinter.contracts]]
 name = "postino CLI must not import HTTP/daemon stack or postinod"
 type = "forbidden"
 source_modules = ["postino"]
-forbidden_modules = ["litestar", "httpx", "postinod"]
+forbidden_modules = ["litestar", "httpx", "jwt", "postinod"]
+
+[[tool.importlinter.contracts]]
+name = "postinod must not import the postino CLI"
+type = "forbidden"
+source_modules = ["postinod"]
+forbidden_modules = ["postino", "typer", "rich"]

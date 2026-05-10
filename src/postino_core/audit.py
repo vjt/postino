@@ -64,3 +64,12 @@ def write_audit(
 def mk_action(resource: str, verb: str) -> str:
     """Compose `postino.<resource>.<verb>` (spec §5.6 namespacing)."""
     return f"{ACTION_PREFIX}.{resource}.{verb}"
+
+
+# postinod surface — written by postinod, kept alongside postino.* for one-glance audit reading.
+POSTINOD_ACTION_PREFIX = "postinod"
+
+
+def mk_postinod_action(resource: str, verb: str) -> str:
+    """Compose `postinod.<resource>.<verb>` (spec §5.6 namespacing)."""
+    return f"{POSTINOD_ACTION_PREFIX}.{resource}.{verb}"
