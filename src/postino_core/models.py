@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, EmailStr, SecretStr
+from pydantic import BaseModel, ConfigDict, EmailStr, SecretStr, field_validator
 
 from postino_core.enums import (
     DomainTransport,
@@ -101,3 +101,36 @@ class Domain(BaseModel):
     status: MailboxStatus
     created: datetime
     modified: datetime
+
+
+class MailingListCreate(BaseModel):
+    """Inputs for `postino list add`. Multi-owner: the first owner is
+    handed to ``mlmmj-make-ml -o``; the rest are appended to the spool's
+    ``control/owner`` file under flock."""
+
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
+
+    address: EmailStr
+    owners: list[EmailStr]
+
+    @field_validator("owners")
+    @classmethod
+    def _at_least_one(cls, v: list[EmailStr]) -> list[EmailStr]:
+        if not v:
+            raise ValueError("at least one owner required")
+        return v
+
+
+class MailingList(BaseModel):
+    """A mlmmj mailing list as observed on the filesystem.
+
+    ``spool_dir`` is the absolute on-disk path under
+    ``mlmmj_spool_dir / address``; useful for ops debugging via
+    ``postino list show``."""
+
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
+
+    address: EmailStr
+    owners: list[EmailStr]
+    subscriber_count: int
+    spool_dir: Path

@@ -15,6 +15,8 @@ from postino_core.models import (
     Mailbox,
     MailboxCreate,
     MailboxUsage,
+    MailingList,
+    MailingListCreate,
 )
 
 
@@ -146,3 +148,37 @@ def test_mailbox_usage_basic() -> None:
         messages=3,
     )
     assert u.bytes_used == 1024
+
+
+def test_mailing_list_create_requires_at_least_one_owner() -> None:
+    with pytest.raises(ValidationError):
+        MailingListCreate(address="team@lists.example.org", owners=[])
+
+
+def test_mailing_list_create_accepts_multiple_owners() -> None:
+    m = MailingListCreate(
+        address="team@lists.example.org",
+        owners=["alice@example.org", "bob@example.org"],
+    )
+    assert len(m.owners) == 2
+    assert str(m.address) == "team@lists.example.org"
+
+
+def test_mailing_list_is_frozen() -> None:
+    m = MailingList(
+        address="team@lists.example.org",
+        owners=["alice@example.org"],
+        subscriber_count=0,
+        spool_dir=Path("/var/spool/mlmmj/team@lists.example.org"),
+    )
+    with pytest.raises(ValidationError):
+        m.subscriber_count = 5  # type: ignore[misc]  # WHY: testing frozen-model rejection
+
+
+def test_mailing_list_create_rejects_extra_fields() -> None:
+    with pytest.raises(ValidationError):
+        MailingListCreate(
+            address="team@lists.example.org",
+            owners=["alice@example.org"],
+            subscriber_count=0,  # type: ignore[call-arg]  # WHY: testing extra="forbid"
+        )
