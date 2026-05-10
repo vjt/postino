@@ -97,3 +97,39 @@ def test_scim_alias_round_trip() -> None:
     a = ScimAlias.model_validate(raw)
     assert a.address == "team@example.org"
     assert a.goto == "alice@example.org,bob@example.org"
+
+
+def test_scim_list_response_empty_resources_default() -> None:
+    """RFC 7644 §3.4.2: Resources may be absent when totalResults is 0."""
+    lr = ScimListResponse.model_validate({"totalResults": 0})
+    j = lr.model_dump(by_alias=True)
+    assert j["totalResults"] == 0
+    assert j["Resources"] == []
+
+
+def test_scim_alias_wrong_schema_rejected() -> None:
+    with pytest.raises(ValidationError):
+        ScimAlias.model_validate(
+            {
+                "schemas": ["urn:wrong"],
+                "address": "team@example.org",
+                "goto": "alice@example.org",
+            }
+        )
+
+
+def test_scim_user_round_trip_alias_serialization() -> None:
+    """Confirm Python-side names serialise to RFC 7644 alias names on the wire."""
+    raw = {
+        "schemas": [USER_SCHEMA],
+        "userName": "alice@example.org",
+        "name": {"formatted": "Alice Rossi", "givenName": "Alice", "familyName": "Rossi"},
+        "externalId": "ext-123",
+        "active": True,
+    }
+    u = ScimUser.model_validate(raw)
+    j = u.model_dump(by_alias=True, exclude_none=True)
+    assert j["userName"] == "alice@example.org"
+    assert j["externalId"] == "ext-123"
+    assert j["name"]["givenName"] == "Alice"
+    assert j["name"]["familyName"] == "Rossi"

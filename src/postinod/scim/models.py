@@ -18,7 +18,7 @@ LIST_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:ListResponse"
 
 
 class _StrictModel(BaseModel):
-    model_config = ConfigDict(strict=True, populate_by_name=True, extra="ignore")
+    model_config = ConfigDict(strict=True, populate_by_name=True, extra="ignore", frozen=True)
 
 
 class ScimName(_StrictModel):
@@ -37,7 +37,7 @@ class ScimUser(_StrictModel):
     schemas: list[str]
     user_name: EmailStr = Field(alias="userName")
     name: ScimName
-    emails: list[ScimEmail] = []
+    emails: list[ScimEmail] = []  # pydantic v2 deep-copies list defaults; literal is safe here
     active: bool = True
     id: str | None = None  # set by server
     external_id: str | None = Field(default=None, alias="externalId")
@@ -56,6 +56,13 @@ class ScimAlias(_StrictModel):
     goto: str  # comma-separated email list per Postfix convention
     id: str | None = None
     external_id: str | None = Field(default=None, alias="externalId")
+
+    @field_validator("schemas")
+    @classmethod
+    def _must_contain_alias_schema(cls, v: list[str]) -> list[str]:
+        if ALIAS_SCHEMA not in v:
+            raise ValueError(f"schemas must include {ALIAS_SCHEMA!r}")
+        return v
 
 
 class ScimError(_StrictModel):
@@ -88,4 +95,4 @@ class ScimListResponse(_StrictModel):
     total_results: int = Field(alias="totalResults")
     items_per_page: int | None = Field(default=None, alias="itemsPerPage")
     start_index: int | None = Field(default=None, alias="startIndex")
-    resources: list[dict[str, Any]] = Field(alias="Resources")
+    resources: list[dict[str, Any]] = Field(default_factory=lambda: [], alias="Resources")

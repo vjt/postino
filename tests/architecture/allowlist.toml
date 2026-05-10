@@ -20,8 +20,8 @@
 97 = "WHY: **kwargs forwarded verbatim to BaseModel.model_validate; pydantic minors evolve the kwarg set (strict, extra, from_attributes, context, by_alias, by_name) — generic Any avoids LSP drift."
 
 [test_no_any."src/postinod/scim/models.py"]
-71 = "WHY: RFC 7644 §3.5.2 PatchOp.value is an arbitrary JSON node (string, bool, object, array, null) — no narrower type exists at the model layer."
-91 = "WHY: ListResponse.resources is a heterogeneous container of SCIM resource objects (User, Alias, Error) returned as dicts; concrete type is resolved by the router, not the envelope model."
+78 = "WHY: RFC 7644 §3.5.2 PatchOp.value is an arbitrary JSON node (string, bool, object, array, null) — no narrower type exists at the model layer."
+98 = "WHY: ListResponse.resources is a heterogeneous container of SCIM resource objects (User, Alias, Error) returned as dicts; concrete type is resolved by the router, not the envelope model."
 
 [test_no_cast]
 [test_no_cast."src/postino/commands/alias.py"]
