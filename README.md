@@ -8,11 +8,11 @@ Zitadel/SCIM). Built for FreeBSD mail hosts but portable.
 
 ## Status
 
-Pre-implementation. Design spec: [`docs/superpowers/specs/2026-05-09-postino-design.md`](docs/superpowers/specs/2026-05-09-postino-design.md).
+MVP shipping. Design spec: [`docs/superpowers/specs/2026-05-09-postino-design.md`](docs/superpowers/specs/2026-05-09-postino-design.md).
+
+Requires Python 3.13+.
 
 ## Install
-
-Not yet released. Once the MVP lands:
 
 ```sh
 pipx install il-postino
@@ -21,6 +21,19 @@ pipx install il-postino
 Import name remains `postino`. The PyPI distribution is published as
 `il-postino` because the bare `postino` name is squatted by an unrelated
 2017 package.
+
+### From git (mail host / production)
+
+```sh
+git clone https://github.com/vjt/postino.git /usr/local/src/postino
+cd /usr/local/src/postino
+python3.13 -m venv .venv
+. .venv/bin/activate
+pip install .
+ln -s /usr/local/src/postino/.venv/bin/postino /usr/local/bin/postino
+
+# update later: cd /usr/local/src/postino && git pull && .venv/bin/pip install .
+```
 
 ## Usage
 
@@ -61,7 +74,7 @@ Set up a test MySQL/MariaDB schema (see
 Prerequisites for the DDL), then:
 
 ```sh
-python3.12 -m venv .venv
+python3.13 -m venv .venv
 . .venv/bin/activate
 pip install -e '.[dev]'
 export POSTINO_TEST_DB_URL='mysql+pymysql://postino_test:postino_test_dev@localhost/postino_test'
