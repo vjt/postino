@@ -268,3 +268,24 @@ def test_delete_raises_not_found_for_unknown_list(
     svc = _service(db, frozen_clock, spool)
     with pytest.raises(NotFoundError):
         svc.delete("missing@lists.example.org")
+
+
+def test_list_all_returns_seeded_lists_with_domain_filter(
+    db: Engine, frozen_clock: datetime, tmp_path: Path
+) -> None:
+    spool = tmp_path / "spool"
+    spool.mkdir()
+    _seed_mlmmj_domain(db, frozen_clock, "lists.example.org")
+    _seed_mlmmj_domain(db, frozen_clock, "lists.other.org")
+    svc = _service(db, frozen_clock, spool)
+    svc.add(MailingListCreate(address="team@lists.example.org", owners=["alice@example.org"]))
+    svc.add(MailingListCreate(address="ops@lists.other.org", owners=["carol@example.org"]))
+
+    all_lists = svc.list_all()
+    assert sorted(ml.address for ml in all_lists) == [
+        "ops@lists.other.org",
+        "team@lists.example.org",
+    ]
+
+    filtered = svc.list_all(domain="lists.example.org")
+    assert [ml.address for ml in filtered] == ["team@lists.example.org"]

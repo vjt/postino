@@ -154,6 +154,10 @@ class MailingListService:
                 data=f"{address} force={force}",
             )
 
+    def list_all(self, *, domain: str | None = None) -> list[MailingList]:
+        """List all mlmmj lists, optionally filtered by FQDN."""
+        return self._adapter.list_all(domain=domain)
+
     def _validate_domain_is_mlmmj(self, conn: Connection, domain: str) -> None:
         d = self._md.tables["domain"]
         row = conn.execute(select(d.c.transport).where(d.c.domain == domain)).fetchone()
