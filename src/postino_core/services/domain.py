@@ -21,11 +21,23 @@ from sqlalchemy.exc import IntegrityError
 from postino_core.audit import mk_action, write_audit
 from postino_core.db import translate_db_errors
 from postino_core.enums import DomainTransport, MailboxStatus
-from postino_core.errors import AlreadyExistsError, CapacityError, DBError, NotFoundError
+from postino_core.errors import (
+    AlreadyExistsError,
+    CapacityError,
+    ConfigError,
+    DBError,
+    NotFoundError,
+)
 from postino_core.fs import FilesystemAdapter
 from postino_core.models import Domain
 
 _logger = logging.getLogger(__name__)
+
+# PostfixAdmin's `domain` table reserves the literal `'ALL'` row as a permission
+# system marker (super-admin scope in `domain_admins`). It has no routable mail
+# semantics — empty `transport`, zero capacities, fixed `created`/`modified`.
+# All read paths exclude it; write paths reject the name.
+_PA_PERMISSION_PSEUDO_DOMAIN = "ALL"
 
 
 class DomainService:
@@ -75,6 +87,11 @@ class DomainService:
         transport: DomainTransport,
         backupmx: bool,
     ) -> Domain:
+        if domain == _PA_PERMISSION_PSEUDO_DOMAIN:
+            raise ConfigError(
+                f"'{_PA_PERMISSION_PSEUDO_DOMAIN}' is reserved by PostfixAdmin "
+                "and cannot be used as a domain name"
+            )
         d = self._md.tables["domain"]
         now = self._clock()
         with translate_db_errors(), self._engine.begin() as conn:
@@ -110,12 +127,14 @@ class DomainService:
         return got
 
     def get(self, domain: str) -> Domain | None:
+        if domain == _PA_PERMISSION_PSEUDO_DOMAIN:
+            return None
         d = self._md.tables["domain"]
         with self._engine.connect() as conn:
             row = conn.execute(select(d).where(d.c.domain == domain)).fetchone()
         if row is None:
             return None
-        return self._row_to_model(row._mapping)  # type: ignore[arg-type]
+        return self._row_to_model(row._mapping)  # type: ignore[arg-type]  # WHY: SQLAlchemy RowMapping is typed Any; we access known columns
 
     def delete(self, domain: str, *, force: bool = False) -> None:
         """Delete a domain row.
@@ -129,6 +148,11 @@ class DomainService:
         → domain) inside one transaction, then removes the per-domain
         maildir tree on disk best-effort.
         """
+        if domain == _PA_PERMISSION_PSEUDO_DOMAIN:
+            raise NotFoundError(
+                f"domain '{_PA_PERMISSION_PSEUDO_DOMAIN}' does not exist "
+                "(it is PostfixAdmin's internal permission marker)"
+            )
         d = self._md.tables["domain"]
         mailbox = self._md.tables["mailbox"]
         alias = self._md.tables["alias"]
@@ -234,8 +258,10 @@ class DomainService:
     def list(self) -> list[Domain]:
         d = self._md.tables["domain"]
         with self._engine.connect() as conn:
-            rows = conn.execute(select(d).order_by(d.c.domain)).fetchall()
-        return [self._row_to_model(r._mapping) for r in rows]  # type: ignore[arg-type]
+            rows = conn.execute(
+                select(d).where(d.c.domain != _PA_PERMISSION_PSEUDO_DOMAIN).order_by(d.c.domain)
+            ).fetchall()
+        return [self._row_to_model(r._mapping) for r in rows]  # type: ignore[arg-type]  # WHY: SQLAlchemy RowMapping is typed Any; we access known columns
 
     def _row_to_model(self, m: RowMapping) -> Domain:
         return Domain(

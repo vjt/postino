@@ -6,7 +6,7 @@ from sqlalchemy import MetaData, select
 from sqlalchemy.engine import Engine
 
 from postino_core.enums import DomainTransport
-from postino_core.errors import AlreadyExistsError, CapacityError, NotFoundError
+from postino_core.errors import AlreadyExistsError, CapacityError, ConfigError, NotFoundError
 from postino_core.fs import FilesystemAdapter
 from postino_core.services.domain import DomainService
 
@@ -352,3 +352,78 @@ def test_domain_list(db: Engine, frozen_clock: datetime) -> None:
         )
     out = {d.domain for d in svc.list()}
     assert out == {"a.example.org", "b.example.org"}
+
+
+# ---------------------------------------------------------------------------
+# PA ALL pseudo-domain regression tests (production crash on postino domain list)
+# ---------------------------------------------------------------------------
+
+
+def _insert_pa_all_row(db: Engine, md: MetaData, frozen_clock: datetime) -> None:
+    """Seed PostfixAdmin's 'ALL' pseudo-row directly — bypassing DomainService.add()."""
+    domain = md.tables["domain"]
+    with db.begin() as conn:
+        conn.execute(
+            domain.insert().values(
+                domain="ALL",
+                description="",
+                aliases=0,
+                mailboxes=0,
+                maxquota=0,
+                quota=0,
+                transport="",  # empty transport is the PA convention
+                backupmx=0,
+                created=frozen_clock,
+                modified=frozen_clock,
+                active=1,
+            )
+        )
+
+
+def test_domain_list_skips_pa_all_pseudo_row(db: Engine, frozen_clock: datetime) -> None:
+    """PostfixAdmin's `domain='ALL'` pseudo-row must not appear in list().
+
+    Regression: DomainTransport('') raised ValueError when list() tried to
+    map the empty transport string to the enum, crashing `postino domain list`
+    on any PostfixAdmin-managed server with super-admin accounts configured.
+    """
+    md = MetaData()
+    md.reflect(bind=db)
+    _insert_pa_all_row(db, md, frozen_clock)
+
+    svc = _service(db, frozen_clock)
+    items = svc.list()
+    assert all(d.domain != "ALL" for d in items)
+
+
+def test_domain_get_returns_none_for_pa_all_pseudo_row(db: Engine, frozen_clock: datetime) -> None:
+    """get('ALL') must return None — the pseudo-row has no routable semantics."""
+    md = MetaData()
+    md.reflect(bind=db)
+    _insert_pa_all_row(db, md, frozen_clock)
+
+    svc = _service(db, frozen_clock)
+    assert svc.get("ALL") is None
+
+
+def test_domain_delete_rejects_pa_all_pseudo_row(db: Engine, frozen_clock: datetime) -> None:
+    """delete('ALL') must raise NotFoundError — admins must not drop PA's permission row."""
+    svc = _service(db, frozen_clock)
+    with pytest.raises(NotFoundError, match="ALL"):
+        svc.delete("ALL")
+
+
+def test_domain_add_rejects_pa_all_name(db: Engine, frozen_clock: datetime) -> None:
+    """Domain literally named 'ALL' is reserved by PostfixAdmin; reject with ConfigError."""
+    svc = _service(db, frozen_clock)
+    with pytest.raises(ConfigError, match="ALL"):
+        svc.add(
+            domain="ALL",
+            description="",
+            max_aliases=0,
+            max_mailboxes=0,
+            max_quota_bytes=0,
+            default_quota_bytes=0,
+            transport=DomainTransport.VIRTUAL,
+            backupmx=False,
+        )
