@@ -12,12 +12,21 @@ Settings load order (pydantic-settings):
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    TomlConfigSettingsSource,
+)
 
 from postino_core.enums import IdentityBackend, PasswordScheme
 from postino_core.errors import ConfigError
+
+_SYSTEM_TOML = Path("/usr/local/etc/postino/postino.toml")
+_USER_TOML = Path.home() / ".config" / "postino" / "postino.toml"
 
 
 class PostfixSqlCredentials(BaseModel):
@@ -69,6 +78,7 @@ class PostinoSettings(BaseSettings):
         env_prefix="POSTINO_",
         env_nested_delimiter="__",
         extra="forbid",
+        toml_file=[_SYSTEM_TOML, _USER_TOML],
     )
 
     identity_backend: IdentityBackend
@@ -79,6 +89,25 @@ class PostinoSettings(BaseSettings):
     vmail_gid: int
     default_password_scheme: PasswordScheme
     default_quota_bytes: int
+
+    _toml_paths: ClassVar[tuple[Path, ...]] = (_SYSTEM_TOML, _USER_TOML)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        # Precedence: env vars > user toml > system toml > init/secret defaults.
+        return (
+            init_settings,
+            env_settings,
+            TomlConfigSettingsSource(settings_cls),
+            file_secret_settings,
+        )
 
     @model_validator(mode="after")
     def _validate_backend_supported(self) -> PostinoSettings:
