@@ -116,6 +116,49 @@ class MlmmjAdapter:
         except OSError as e:
             raise FilesystemError(f"rmtree {listdir} failed: {e}") from e
 
+    # -- subscriber management ----------------------------------------------
+
+    def subscribe(self, *, address: EmailStr, email: EmailStr) -> None:
+        """Run ``mlmmj-sub -L <listdir> -a <email> -s -c -f``.
+
+        Idempotent at the binary level (``-f`` makes already-subscribed a 0-exit)."""
+        listdir = self._listdir(address)
+        if not listdir.exists():
+            raise NotFoundError(f"mlmmj list {address} does not exist")
+        cmd = [
+            "mlmmj-sub",
+            "-L",
+            str(listdir),
+            "-a",
+            str(email),
+            "-s",  # silent: no welcome mail
+            "-c",  # bypass confirmation
+            "-f",  # force: don't reject already-subscribed
+        ]
+        result = self._run(cmd)
+        if result.returncode != 0:
+            self._raise_mlmmj(cmd, result)
+
+    def unsubscribe(self, *, address: EmailStr, email: EmailStr) -> None:
+        """Run ``mlmmj-unsub -L <listdir> -a <email> -s -c``.
+
+        Idempotent: not-subscribed is a 0-exit when ``-c`` is set."""
+        listdir = self._listdir(address)
+        if not listdir.exists():
+            raise NotFoundError(f"mlmmj list {address} does not exist")
+        cmd = [
+            "mlmmj-unsub",
+            "-L",
+            str(listdir),
+            "-a",
+            str(email),
+            "-s",
+            "-c",
+        ]
+        result = self._run(cmd)
+        if result.returncode != 0:
+            self._raise_mlmmj(cmd, result)
+
     # -- owner management ---------------------------------------------------
 
     def append_owner(self, *, address: EmailStr, owner: EmailStr) -> None:

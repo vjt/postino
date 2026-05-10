@@ -137,3 +137,62 @@ def test_delete_raises_not_found_if_missing(tmp_path: Path) -> None:
     a = _adapter(tmp_path)
     with pytest.raises(NotFoundError):
         a.delete(address="missing@lists.example.org")
+
+
+def test_subscribe_invokes_mlmmj_sub_with_correct_argv(tmp_path: Path) -> None:
+    listdir = tmp_path / "team@lists.example.org"
+    listdir.mkdir()
+    a = _adapter(tmp_path)
+    with patch("postino_core.adapters.mlmmj.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        a.subscribe(address="team@lists.example.org", email="bob@example.org")
+    cmd = run.call_args[0][0]
+    assert cmd[0] == "mlmmj-sub"
+    assert "-L" in cmd
+    assert str(listdir) in cmd
+    assert "-a" in cmd
+    assert "bob@example.org" in cmd
+    assert "-s" in cmd  # silent
+    assert "-c" in cmd  # no confirm
+    assert "-f" in cmd  # force
+
+
+def test_subscribe_raises_not_found_if_listdir_missing(tmp_path: Path) -> None:
+    a = _adapter(tmp_path)
+    with pytest.raises(NotFoundError):
+        a.subscribe(address="missing@lists.example.org", email="bob@example.org")
+
+
+def test_subscribe_raises_mlmmj_error_on_nonzero(tmp_path: Path) -> None:
+    listdir = tmp_path / "team@lists.example.org"
+    listdir.mkdir()
+    a = _adapter(tmp_path)
+    with patch("postino_core.adapters.mlmmj.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="invalid email"
+        )
+        with pytest.raises(MlmmjError):
+            a.subscribe(address="team@lists.example.org", email="bob@example.org")
+
+
+def test_unsubscribe_invokes_mlmmj_unsub_with_correct_argv(tmp_path: Path) -> None:
+    listdir = tmp_path / "team@lists.example.org"
+    listdir.mkdir()
+    a = _adapter(tmp_path)
+    with patch("postino_core.adapters.mlmmj.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        a.unsubscribe(address="team@lists.example.org", email="bob@example.org")
+    cmd = run.call_args[0][0]
+    assert cmd[0] == "mlmmj-unsub"
+    assert "-L" in cmd
+    assert str(listdir) in cmd
+    assert "-a" in cmd
+    assert "bob@example.org" in cmd
+    assert "-s" in cmd
+    assert "-c" in cmd
+
+
+def test_unsubscribe_raises_not_found_if_listdir_missing(tmp_path: Path) -> None:
+    a = _adapter(tmp_path)
+    with pytest.raises(NotFoundError):
+        a.unsubscribe(address="missing@lists.example.org", email="bob@example.org")
