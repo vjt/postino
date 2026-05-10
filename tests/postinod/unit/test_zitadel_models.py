@@ -100,6 +100,19 @@ def test_model_validate_forwards_kwargs() -> None:
     assert isinstance(e.event_payload, UserAddedPayload)
 
 
+def test_lifecycle_dispatch_via_dict_path_resolves_lifecycle_payload() -> None:
+    """Locks the documented router contract: dict-path dispatch picks LifecyclePayload.
+
+    model_validate_json bypasses the override and would coerce the lifecycle
+    body (email-only) to HumanEmailPayload via plain pydantic union resolution.
+    The router goes through json.loads + model_validate(dict) precisely so the
+    override fires and the LifecyclePayload class is selected.
+    """
+    raw = _wrap("user.deactivated", {"email": "alice@example.org"})
+    e = ZitadelEvent.model_validate(raw)
+    assert isinstance(e.event_payload, LifecyclePayload)
+
+
 def test_model_validate_non_string_event_type_falls_through() -> None:
     """Non-string event_type bypasses dispatch; outer pydantic validator rejects."""
     raw: dict[str, object] = {

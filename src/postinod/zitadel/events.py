@@ -103,7 +103,7 @@ def build_zitadel_router(
     @post("/zitadel/events", status_code=HTTP_200_OK)
     async def events(request: Request[None, None, State]) -> dict[str, bool]:
         body = await request.body()
-        sig = request.headers.get(hmac_verifier.header_name.lower())
+        sig = request.headers.get(hmac_verifier.header_name)
         if not sig or not hmac_verifier.verify(body, sig):
             raise HTTPException(status_code=401, detail="invalid HMAC signature")
 

@@ -96,6 +96,10 @@ class ZitadelEvent(BaseModel):
         obj: Any,  # type: ignore[explicit-any]  # WHY: mirrors BaseModel.model_validate(obj: Any) — HTTP boundary, cannot be narrowed at call site
         **kwargs: Any,  # type: ignore[explicit-any]  # WHY: BaseModel.model_validate kwargs (strict, extra, from_attributes, context, by_alias, by_name) forwarded verbatim; pydantic minors evolve this set
     ) -> ZitadelEvent:
+        # Callers MUST go through this dict path: model_validate_json bypasses
+        # the override and falls back to plain pydantic union resolution, which
+        # collapses LifecyclePayload (only `email`) onto HumanEmailPayload.
+        # Router parses with json.loads + model_validate(dict) for that reason.
         if isinstance(obj, dict):
             raw: dict[str, object] = obj  # type: ignore[assignment]  # WHY: obj is Any; isinstance narrows to dict[Unknown, Unknown] in pyright strict — typed alias needed for .get()
             event_type = raw.get("event_type")

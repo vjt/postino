@@ -34,10 +34,6 @@ class HmacVerifier:
 
     secret: bytes
     header_name: str = "ZITADEL-Signature"
-    # NOTE: Litestar (via Starlette) normalises HTTP header keys to lowercase
-    # in `request.headers`. Callers must `.lower()` this value before
-    # `request.headers.get(...)` lookup, or the lookup silently returns None
-    # and the caller would auth-bypass on every request.
 
     def __repr__(self) -> str:
         return f"HmacVerifier(secret=****, header_name={self.header_name!r})"
