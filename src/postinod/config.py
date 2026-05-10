@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from tomllib import TOMLDecodeError
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic.fields import FieldInfo
@@ -38,8 +39,11 @@ class _PostinodTomlSource(PydanticBaseSettingsSource):
     def __call__(self) -> dict[str, object]:
         if not self._toml_path.is_file():
             return {}
-        with self._toml_path.open("rb") as f:
-            raw = tomllib.load(f)  # dict[str, Any] from tomllib stubs
+        try:
+            with self._toml_path.open("rb") as f:
+                raw = tomllib.load(f)  # dict[str, Any] from tomllib stubs
+        except TOMLDecodeError as e:
+            raise RuntimeError(f"failed to parse TOML config at {self._toml_path}: {e}") from e
         section = raw.get("postinod", {})
         if not isinstance(section, dict):
             return {}
@@ -63,8 +67,7 @@ class PostinodSettings(BaseSettings):
     # Zitadel surface
     zitadel_issuer: str
     zitadel_hmac_secret: SecretStr = Field(
-        ...,
-        alias="POSTINOD_ZITADEL_HMAC_SECRET",
+        default=SecretStr(""),
         description="Provided ONLY via POSTINOD_ZITADEL_HMAC_SECRET env. "
         "TOML defaults are not allowed for this field.",
     )
@@ -87,7 +90,7 @@ class PostinodSettings(BaseSettings):
 def load_postinod_settings(toml_path: Path) -> PostinodSettings:
     """Build PostinodSettings from `[postinod]` in toml_path + env overrides."""
 
-    class _Configured(PostinodSettings):
+    class _PostinodSettingsImpl(PostinodSettings):
         @classmethod
         def settings_customise_sources(
             cls,
@@ -103,4 +106,4 @@ def load_postinod_settings(toml_path: Path) -> PostinodSettings:
                 _PostinodTomlSource(settings_cls, toml_path),
             )
 
-    return _Configured()  # type: ignore[call-arg]  # WHY: pydantic-settings populates from sources, not init kwargs
+    return _PostinodSettingsImpl()  # type: ignore[call-arg]  # WHY: pydantic-settings populates from sources, not init kwargs

@@ -102,3 +102,12 @@ def test_default_jwks_refresh_seconds(tmp_path: Path, monkeypatch: pytest.Monkey
     )
     s = load_postinod_settings(toml)
     assert s.scim_jwks_refresh_seconds == 3600
+
+
+def test_malformed_toml_raises_with_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("POSTINOD_ZITADEL_HMAC_SECRET", "x")
+    p = tmp_path / "postino.toml"
+    p.write_text("this = is = not valid toml\n[unclosed", encoding="utf-8")
+    with pytest.raises(RuntimeError) as exc:
+        load_postinod_settings(p)
+    assert str(p) in str(exc.value)
