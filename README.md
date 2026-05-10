@@ -1,5 +1,7 @@
 # postino
 
+![postino — il postino delivers your mail config](docs/assets/cover.jpg)
+
 [![PyPI](https://img.shields.io/pypi/v/il-postino.svg)](https://pypi.org/project/il-postino/)
 [![Python](https://img.shields.io/pypi/pyversions/il-postino.svg)](https://pypi.org/project/il-postino/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
