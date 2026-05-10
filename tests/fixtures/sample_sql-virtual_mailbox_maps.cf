@@ -1,0 +1,8 @@
+hosts = localhost
+user = postfix
+password = sekret
+dbname = postfix
+
+table = mailbox
+select_field = maildir
+where_field = username
