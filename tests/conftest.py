@@ -22,11 +22,12 @@ def _test_db_url() -> str | None:
     return os.environ.get("POSTINO_TEST_DB_URL")
 
 
-_SQL_STMT_START = ("CREATE", "ALTER", "DROP", "INSERT", "SET", "LOCK", "UNLOCK", "USE", "/*")
-
-# mysqldump emits these for GTID/replication; they require BINLOG ADMIN
-# which the test runner doesn't have (and doesn't need for schema-only tests).
-_SKIP_PATTERNS = ("SQL_LOG_BIN", "GTID_PURGED", "MYSQLDUMP_TEMP_LOG_BIN")
+# Schema-only fixture: we only care about CREATE TABLE / DROP TABLE / ALTER
+# TABLE. mysqldump's session-housekeeping noise (SET charset/timezone
+# save+restore, SQL_LOG_BIN toggle, GTID_PURGED, version-conditional
+# comments) is irrelevant for tests and frequently lacks the privileges
+# or correct ordering when replayed against a fresh user.
+_DDL_STMT_START = ("CREATE TABLE", "DROP TABLE", "ALTER TABLE", "CREATE INDEX")
 
 
 @pytest.fixture(scope="session")
@@ -35,19 +36,17 @@ def integration_engine() -> Iterator[Engine]:
     if url is None:
         pytest.skip("POSTINO_TEST_DB_URL not set — skipping integration tests")
     engine = create_engine(url, future=True)
-    # Load schema once per session. Tolerate preamble noise (e.g. mysqldump
-    # warnings on stderr-merged dumps) and skip replication/GTID statements
-    # that need privileges we don't grant the test runner.
     schema_sql = FIXTURE_SQL.read_text()
     with engine.begin() as conn:
         for stmt in schema_sql.split(";"):
             stmt = stmt.strip()
             if not stmt:
                 continue
-            stmt_up = stmt.upper()
-            if not stmt_up.startswith(_SQL_STMT_START):
-                continue
-            if any(p in stmt_up for p in _SKIP_PATTERNS):
+            # Strip leading conditional-version comment so we can match keywords.
+            inner = stmt
+            if inner.startswith("/*!") and "*/" in inner:
+                inner = inner[inner.index("*/") + 2 :].strip()
+            if not inner.upper().startswith(_DDL_STMT_START):
                 continue
             conn.execute(text(stmt))
     yield engine
