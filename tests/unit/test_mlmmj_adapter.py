@@ -196,3 +196,68 @@ def test_unsubscribe_raises_not_found_if_listdir_missing(tmp_path: Path) -> None
     a = _adapter(tmp_path)
     with pytest.raises(NotFoundError):
         a.unsubscribe(address="missing@lists.example.org", email="bob@example.org")
+
+
+def _seed_list(spool: Path, addr: str, owners: list[str]) -> Path:
+    listdir = spool / addr
+    (listdir / "control").mkdir(parents=True)
+    (listdir / "control" / "owner").write_text("\n".join(owners) + "\n")
+    return listdir
+
+
+def test_get_returns_none_when_listdir_missing(tmp_path: Path) -> None:
+    a = _adapter(tmp_path)
+    assert a.get(address="missing@lists.example.org") is None
+
+
+def test_get_parses_owners_and_subscriber_count(tmp_path: Path) -> None:
+    _seed_list(tmp_path, "team@lists.example.org", ["alice@example.org", "bob@example.org"])
+    a = _adapter(tmp_path)
+    with patch("postino_core.adapters.mlmmj.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout="carol@example.org\ndan@example.org\n",
+            stderr="",
+        )
+        ml = a.get(address="team@lists.example.org")
+    assert ml is not None
+    assert ml.address == "team@lists.example.org"
+    assert ml.owners == ["alice@example.org", "bob@example.org"]
+    assert ml.subscriber_count == 2
+    assert ml.spool_dir == tmp_path / "team@lists.example.org"
+
+
+def test_get_raises_mlmmj_error_when_mlmmj_list_fails(tmp_path: Path) -> None:
+    _seed_list(tmp_path, "team@lists.example.org", ["alice@example.org"])
+    a = _adapter(tmp_path)
+    with patch("postino_core.adapters.mlmmj.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="oops"
+        )
+        with pytest.raises(MlmmjError):
+            a.get(address="team@lists.example.org")
+
+
+def test_list_all_scans_spool_root(tmp_path: Path) -> None:
+    _seed_list(tmp_path, "team@lists.example.org", ["alice@example.org"])
+    _seed_list(tmp_path, "ops@lists.example.org", ["carol@example.org"])
+    # A non-list dir at the same level — must be skipped.
+    (tmp_path / "scratch").mkdir()
+    a = _adapter(tmp_path)
+    with patch("postino_core.adapters.mlmmj.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        result = a.list_all()
+    addrs = sorted(ml.address for ml in result)
+    assert addrs == ["ops@lists.example.org", "team@lists.example.org"]
+
+
+def test_list_all_filters_by_domain(tmp_path: Path) -> None:
+    _seed_list(tmp_path, "team@lists.example.org", ["alice@example.org"])
+    _seed_list(tmp_path, "ops@lists.other.org", ["carol@example.org"])
+    a = _adapter(tmp_path)
+    with patch("postino_core.adapters.mlmmj.subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        result = a.list_all(domain="lists.example.org")
+    addrs = [ml.address for ml in result]
+    assert addrs == ["team@lists.example.org"]

@@ -17,6 +17,7 @@ from pathlib import Path
 from pydantic import EmailStr
 
 from postino_core.errors import AlreadyExistsError, FilesystemError, MlmmjError, NotFoundError
+from postino_core.models import MailingList
 
 _DEFAULT_TIMEOUT = 30.0
 _STDERR_MAX = 512  # truncate noisy mlmmj stderr in error messages
@@ -158,6 +159,60 @@ class MlmmjAdapter:
         result = self._run(cmd)
         if result.returncode != 0:
             self._raise_mlmmj(cmd, result)
+
+    # -- read ---------------------------------------------------------------
+
+    def get(self, *, address: EmailStr) -> MailingList | None:
+        """Read owners + subscriber count for one list.
+
+        Returns None if the spool dir is missing.
+        Raises MlmmjError if ``mlmmj-list`` fails."""
+        listdir = self._listdir(address)
+        if not listdir.exists():
+            return None
+        owners = self._read_owners(listdir)
+        subscribers = self._read_subscribers(listdir)
+        return MailingList(
+            address=str(address),
+            owners=owners,
+            subscriber_count=len(subscribers),
+            spool_dir=listdir,
+        )
+
+    def list_all(self, *, domain: str | None = None) -> list[MailingList]:
+        """Scan ``spool_root`` for list dirs, optionally filtered by FQDN.
+
+        A directory counts as a list if it contains ``control/owner``."""
+        if not self._spool_root.exists():
+            return []
+        out: list[MailingList] = []
+        for child in sorted(self._spool_root.iterdir()):
+            if not child.is_dir():
+                continue
+            if not (child / "control" / "owner").exists():
+                continue
+            address = child.name
+            if domain is not None:
+                _, _, fqdn = address.partition("@")
+                if fqdn != domain:
+                    continue
+            ml = self.get(address=address)  # type: ignore[arg-type]  # WHY: spool dir name is a list address by convention; pydantic validates at MailingList construction
+            if ml is not None:
+                out.append(ml)
+        return out
+
+    def _read_owners(self, listdir: Path) -> list[str]:
+        owner_file = listdir / "control" / "owner"
+        if not owner_file.exists():
+            return []
+        return [ln.strip() for ln in owner_file.read_text().splitlines() if ln.strip()]
+
+    def _read_subscribers(self, listdir: Path) -> list[str]:
+        cmd = ["mlmmj-list", "-L", str(listdir)]
+        result = self._run(cmd)
+        if result.returncode != 0:
+            self._raise_mlmmj(cmd, result)
+        return [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
 
     # -- owner management ---------------------------------------------------
 
