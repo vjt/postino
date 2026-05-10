@@ -226,3 +226,81 @@ async def test_audit_row_written(
     with prepared_test_db.engine.connect() as conn:
         rows = conn.execute(select(log).where(log.c.action == "postinod.user.create")).fetchall()
     assert len(rows) >= 1
+
+
+@pytest.fixture
+async def short_window_client(
+    prepared_test_db: PreparedTestDB,
+    hmac_secret: bytes,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> collections.abc.AsyncGenerator[AsyncTestClient[Litestar], None]:
+    """Variant of `client` with a 300s replay window for replay-attack tests."""
+    from postinod.app import build_app_for_test
+
+    mail_root = tmp_path / "vmail"
+    mail_root.mkdir()
+    app = build_app_for_test(
+        db_engine=prepared_test_db.engine,
+        metadata=prepared_test_db.metadata,
+        hmac_secret=hmac_secret,
+        mail_root=mail_root,
+        postcreation_hook=fake_postcreation_hook,
+        replay_window_seconds=300,
+    )
+    async with AsyncTestClient(app=app) as c:
+        yield c
+
+
+async def test_replayed_event_rejected_and_audited(
+    short_window_client: AsyncTestClient[Litestar],
+    hmac_secret: bytes,
+    prepared_test_db: PreparedTestDB,
+) -> None:
+    """Event with `created_at` far outside the replay window → 400 + replay audit row."""
+    body = json.dumps(
+        {
+            "aggregateID": "a",
+            "userID": "u-replay",
+            "event_type": "user.human.added",
+            "created_at": "2020-01-01T00:00:00Z",  # years in the past
+            "event_payload": {
+                "email": "replay@example.org",
+                "firstName": "R",
+                "lastName": "R",
+                "active": True,
+            },
+        }
+    ).encode()
+    r = await short_window_client.post(
+        "/zitadel/events",
+        content=body,
+        headers={"ZITADEL-Signature": _sign(hmac_secret, body)},
+    )
+    assert r.status_code == 400
+    assert "replay window" in r.text
+
+    log = prepared_test_db.metadata.tables["log"]
+    with prepared_test_db.engine.connect() as conn:
+        rows = conn.execute(select(log).where(log.c.action == "postinod.zitadel.replay")).fetchall()
+    assert len(rows) >= 1
+
+
+async def test_invalid_hmac_rejected(
+    client: AsyncTestClient[Litestar],
+) -> None:
+    body = json.dumps(
+        {
+            "aggregateID": "a",
+            "userID": "u",
+            "event_type": "user.human.added",
+            "created_at": "2026-05-10T11:00:00Z",
+            "event_payload": {},
+        }
+    ).encode()
+    r = await client.post(
+        "/zitadel/events",
+        content=body,
+        headers={"ZITADEL-Signature": "00" * 32},  # wrong signature
+    )
+    assert r.status_code == 401

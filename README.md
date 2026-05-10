@@ -302,6 +302,41 @@ twine check dist/* && twine upload dist/*
 
 Token in `~/.pypirc` under `[pypi]` with `username = __token__`.
 
+## Running postinod (daemon)
+
+`postinod` is the litestar daemon shipped alongside the CLI. It exposes
+two HTTP surfaces:
+
+- `POST /zitadel/events` — Zitadel Actions HMAC webhook. Inbound only.
+- `/scim/v2/*` — JWT-bearer SCIM 2.0 for non-Zitadel clients (scim-cli,
+  audit scripts).
+
+### HMAC secret and rotation
+
+The Zitadel HMAC secret is **env-only**: postinod refuses to start if
+`POSTINOD_ZITADEL_HMAC_SECRET` is unset or shorter than 32 bytes. The
+secret never lives in TOML. Generate with:
+
+```sh
+openssl rand -hex 32
+```
+
+To rotate without an outage, publish the new secret to Zitadel as the
+Action's signing secret, then run postinod with **both** secrets
+comma-separated so signatures under either one verify:
+
+```sh
+export POSTINOD_ZITADEL_HMAC_SECRET="$OLD,$NEW"
+systemctl restart postinod
+# wait until Zitadel has flipped to $NEW for all targets
+export POSTINOD_ZITADEL_HMAC_SECRET="$NEW"
+systemctl restart postinod
+```
+
+The replay window (`POSTINOD_ZITADEL_REPLAY_WINDOW_SEC`, default 300s)
+rejects events whose `created_at` is too far from the server clock —
+keep the postinod host's clock in NTP sync.
+
 ## Status
 
 MVP shipping (v0.1.0 on PyPI). Local identity backend implemented.

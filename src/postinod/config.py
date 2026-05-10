@@ -6,24 +6,37 @@ operators see one config file, not two.
 
 Env override prefix: POSTINOD_ (single underscore, no nesting).
 
-The HMAC secret is the only secret postinod stores; it MUST come from
-POSTINOD_ZITADEL_HMAC_SECRET env, never from TOML. Startup fails fast
-if the env is unset or empty so a misconfigured deployment never boots.
+Secrets are env-only: the HMAC secret for the Zitadel webhook NEVER lives
+in TOML — `read_zitadel_hmac_secrets()` reads `POSTINOD_ZITADEL_HMAC_SECRET`
+directly, validates entropy and parses comma-separated rotation overlap, and
+raises `ConfigError` on anything missing/too-short. The replay window for
+incoming events is similarly env-only (`POSTINOD_ZITADEL_REPLAY_WINDOW_SEC`).
 """
 
 from __future__ import annotations
 
+import os
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from tomllib import TOMLDecodeError
 
-from pydantic import Field, SecretStr, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
+
+from postino_core.errors import ConfigError
+
+HMAC_MIN_BYTES = 32
+"""Minimum acceptable HMAC secret length, in bytes. 32 bytes ≈ 256 bits,
+the same entropy the openssl-rand-hex-32 generator hint produces."""
+
+DEFAULT_REPLAY_WINDOW_SEC = 300
+"""Default replay window: reject Zitadel events whose `created_at` is
+more than this many seconds away from the local clock."""
 
 
 class _PostinodTomlSource(PydanticBaseSettingsSource):
@@ -51,7 +64,12 @@ class _PostinodTomlSource(PydanticBaseSettingsSource):
 
 
 class PostinodSettings(BaseSettings):
-    """Daemon configuration; constructed via `load_postinod_settings`."""
+    """Daemon configuration; constructed via `load_postinod_settings`.
+
+    Secrets (HMAC, future tokens) are NOT modelled here — they are
+    read separately via `read_zitadel_hmac_secrets()` from env only, so a
+    TOML defaulting accident cannot leak them into config storage.
+    """
 
     model_config = SettingsConfigDict(
         env_prefix="POSTINOD_",
@@ -66,25 +84,11 @@ class PostinodSettings(BaseSettings):
 
     # Zitadel surface
     zitadel_issuer: str
-    zitadel_hmac_secret: SecretStr = Field(
-        default=SecretStr(""),
-        description="Provided ONLY via POSTINOD_ZITADEL_HMAC_SECRET env. "
-        "TOML defaults are not allowed for this field.",
-    )
 
     # SCIM surface
     scim_issuer: str
     scim_audience: str
     scim_jwks_refresh_seconds: int = 3600
-
-    @model_validator(mode="after")
-    def _validate_hmac_nonempty(self) -> PostinodSettings:
-        if not self.zitadel_hmac_secret.get_secret_value():
-            raise ValueError(
-                "POSTINOD_ZITADEL_HMAC_SECRET env var is empty; "
-                "set a non-empty shared secret matching Zitadel's Action target."
-            )
-        return self
 
 
 def load_postinod_settings(toml_path: Path) -> PostinodSettings:
@@ -107,3 +111,57 @@ def load_postinod_settings(toml_path: Path) -> PostinodSettings:
             )
 
     return _PostinodSettingsImpl()  # type: ignore[call-arg]  # WHY: pydantic-settings populates from sources, not init kwargs
+
+
+def read_zitadel_hmac_secrets(
+    env: Mapping[str, str] | None = None,
+) -> tuple[bytes, ...]:
+    """Read `POSTINOD_ZITADEL_HMAC_SECRET` from env as a non-empty tuple of secrets.
+
+    Comma-separated values are supported for rotation overlap: callers
+    can publish two secrets to Zitadel during a key roll, accept both
+    here, drop the old one once Zitadel cuts over.
+
+    Every secret is validated `len >= HMAC_MIN_BYTES`. Failures raise
+    `ConfigError` with the openssl-rand-hex-32 hint.
+    """
+    raw = (env or os.environ).get("POSTINOD_ZITADEL_HMAC_SECRET", "").strip()
+    if not raw:
+        raise ConfigError(
+            "POSTINOD_ZITADEL_HMAC_SECRET env var is empty or unset; "
+            "set a shared secret matching Zitadel's Action target "
+            "(generate via 'openssl rand -hex 32')."
+        )
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    if not parts:
+        raise ConfigError(
+            "POSTINOD_ZITADEL_HMAC_SECRET parsed to zero non-empty values; "
+            "rotation overlap takes comma-separated secrets."
+        )
+    secrets: list[bytes] = []
+    for i, part in enumerate(parts):
+        if len(part) < HMAC_MIN_BYTES:
+            raise ConfigError(
+                f"POSTINOD_ZITADEL_HMAC_SECRET entry #{i + 1} is "
+                f"{len(part)} bytes; minimum is {HMAC_MIN_BYTES} "
+                f"(generate via 'openssl rand -hex 32')."
+            )
+        secrets.append(part.encode())
+    return tuple(secrets)
+
+
+def read_zitadel_replay_window_sec(env: Mapping[str, str] | None = None) -> int:
+    """Read `POSTINOD_ZITADEL_REPLAY_WINDOW_SEC` from env, default 300s.
+
+    Raises `ConfigError` if the env value is set but not a positive int.
+    """
+    raw = (env or os.environ).get("POSTINOD_ZITADEL_REPLAY_WINDOW_SEC")
+    if raw is None or raw.strip() == "":
+        return DEFAULT_REPLAY_WINDOW_SEC
+    try:
+        value = int(raw)
+    except ValueError as e:
+        raise ConfigError(f"POSTINOD_ZITADEL_REPLAY_WINDOW_SEC={raw!r} is not an integer") from e
+    if value <= 0:
+        raise ConfigError(f"POSTINOD_ZITADEL_REPLAY_WINDOW_SEC={value} must be a positive int")
+    return value

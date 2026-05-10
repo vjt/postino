@@ -20,7 +20,7 @@ def postino_toml(
     prepared_test_db: PreparedTestDB,
     app_paths: tuple[Path, Path],
 ) -> Path:
-    monkeypatch.setenv("POSTINOD_ZITADEL_HMAC_SECRET", "boot-secret")
+    monkeypatch.setenv("POSTINOD_ZITADEL_HMAC_SECRET", "a" * 32)
     mail_root, postcreation_hook = app_paths
     p = tmp_path / "postino.toml"
     url = prepared_test_db.engine.url

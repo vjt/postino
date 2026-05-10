@@ -35,7 +35,11 @@ from postino_core.services.mailbox import MailboxService
 from postinod.auth.hmac_guard import HmacVerifier
 from postinod.auth.jwks import JwksCache
 from postinod.auth.jwt_guard import JwksLike, JwtVerifier
-from postinod.config import load_postinod_settings
+from postinod.config import (
+    load_postinod_settings,
+    read_zitadel_hmac_secrets,
+    read_zitadel_replay_window_sec,
+)
 from postinod.health import build_health_router
 from postinod.scim.aliases import build_aliases_router
 from postinod.scim.discovery import build_discovery_router
@@ -64,12 +68,12 @@ def build_app(*, toml_path: Path) -> Litestar:
     """Production app factory — reads PostinoSettings + PostinodSettings from ``toml_path``."""
     postino_settings = load_postino_settings(toml_path)
     postinod_settings = load_postinod_settings(toml_path)
+    hmac_secrets = read_zitadel_hmac_secrets()
+    replay_window = read_zitadel_replay_window_sec()
 
     bundle = build_services(postino_settings, clock=_utc_now, echo=False)
 
-    hmac_verifier = HmacVerifier(
-        secret=postinod_settings.zitadel_hmac_secret.get_secret_value().encode(),
-    )
+    hmac_verifier = HmacVerifier(secrets=hmac_secrets)
     jwks = JwksCache(
         jwks_url=f"{postinod_settings.scim_issuer}/.well-known/jwks.json",
         refresh_seconds=postinod_settings.scim_jwks_refresh_seconds,
@@ -104,6 +108,7 @@ def build_app(*, toml_path: Path) -> Litestar:
                 metadata=bundle.metadata,
                 clock=_utc_now,
                 default_quota_bytes=postino_settings.default_quota_bytes,
+                replay_window_seconds=replay_window,
             ),
             build_users_router(
                 mailbox_service=bundle.mailbox,
@@ -145,6 +150,7 @@ def build_app_for_test(
     scim_issuer: str = "https://idp.test",
     scim_audience: str = "postinod",
     jwks: JwksLike | None = None,
+    replay_window_seconds: int = 86400,
 ) -> Litestar:
     """Test-only Litestar app factory.
 
@@ -177,7 +183,7 @@ def build_app_for_test(
         fs=fs,
         lmtp_destination="localhost:24",
     )
-    verifier = HmacVerifier(secret=hmac_secret)
+    verifier = HmacVerifier(secrets=(hmac_secret,))
 
     if jwks is None:
         jwks = JwksCache(
@@ -200,6 +206,7 @@ def build_app_for_test(
                 metadata=metadata,
                 clock=_utc_now,
                 default_quota_bytes=default_quota_bytes,
+                replay_window_seconds=replay_window_seconds,
             ),
             build_users_router(
                 mailbox_service=mailbox,

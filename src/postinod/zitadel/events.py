@@ -71,12 +71,18 @@ def build_zitadel_router(
     metadata: MetaData,
     clock: Callable[[], datetime],
     default_quota_bytes: int,
+    replay_window_seconds: int = 300,
 ) -> Router:
     """Build the /zitadel/events sub-router.
 
     `engine` and `metadata` are injected separately (rather than reaching
     into `mailbox_service._engine` / `._md`) so the audit write opens its
     own transaction without depending on private MailboxService state.
+
+    `replay_window_seconds` rejects events whose `created_at` is outside
+    [now - window, now + window]. A small clock skew either direction is
+    tolerated; replay attacks past the window are rejected with 400 and
+    a `postinod.zitadel.replay` audit row tagged with the event identifiers.
     """
 
     def _audit(
@@ -121,6 +127,34 @@ def build_zitadel_router(
             event = ZitadelEvent.model_validate(raw)
         except ValidationError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
+
+        skew = abs((clock() - event.created_at).total_seconds())
+        if skew > replay_window_seconds:
+            _logger.warning(
+                "rejecting replayed event_type=%s user_id=%s skew=%ds",
+                event.event_type,
+                event.user_id,
+                int(skew),
+            )
+            try:
+                _audit(
+                    resource="zitadel",
+                    verb="replay",
+                    domain="",
+                    external_id=event.user_id,
+                    payload={
+                        "event_type": event.event_type,
+                        "skew_sec": str(int(skew)),
+                    },
+                )
+            except Exception:
+                # WHY: audit failure must not mask the replay rejection —
+                # the 400 below is the primary signal; replay audit is best-effort.
+                _logger.exception("failed to write replay audit row")
+            raise HTTPException(
+                status_code=400,
+                detail=f"event outside replay window ({int(skew)}s > {replay_window_seconds}s)",
+            )
 
         outcome = dispatch_event(event.event_type)
 
