@@ -10,7 +10,12 @@ Per spec §5.4:
 
 The cache is shared across coroutines; concurrent kid lookups during
 a refresh are serialised by an asyncio.Lock to avoid duplicate fetches
-under load.
+under load. Two coroutines that both observe `_needs_refresh()` before
+either acquires the lock will fetch sequentially (the second fetch is
+redundant but idempotent — JWKS rotation tolerates duplicate writes).
+A double-checked-lock pattern would deduplicate but the burst window
+is one async yield point; the cost isn't worth the complexity for the
+SCIM auth surface's request volume.
 """
 
 from __future__ import annotations
@@ -73,7 +78,11 @@ class JwksCache:
                     raise
                 return  # keep serving stale keys
             new_keys: dict[str, dict[str, object]] = {}
-            for k in data.get("keys", []):
+            # Coerce `{"keys": null}` (or missing key) to `[]` so a buggy IdP
+            # doesn't bypass the stale-on-failure path with a naked TypeError.
+            raw = data.get("keys")
+            keys_iter: list[object] = raw if isinstance(raw, list) else []  # type: ignore[assignment]  # WHY: raw narrowed by isinstance; pyright still sees list[Any] as partially unknown — element validation happens per-iter below
+            for k in keys_iter:
                 if isinstance(k, dict) and "kid" in k:
                     new_keys[k["kid"]] = k  # type: ignore[assignment]  # WHY: k is dict[Any, Any] from JSON; narrowed by isinstance check, kid values are safe as dict[str, object]
             self._keys = new_keys
