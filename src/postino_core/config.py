@@ -32,7 +32,7 @@ _USER_TOML = Path.home() / ".config" / "postino" / "postino.toml"
 class PostfixSqlCredentials(BaseModel):
     """Parsed credentials from sql-virtual_*.cf."""
 
-    model_config = ConfigDict(frozen=True, strict=True)
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     host: str
     user: str

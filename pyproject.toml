@@ -9,13 +9,15 @@ description = "Typed Python CLI for administering Postfix + Dovecot mail servers
 readme = "README.md"
 license = "MIT"
 authors = [{ name = "Marcello Barnaba", email = "marcello.barnaba@gmail.com" }]
-requires-python = ">=3.13"
+requires-python = ">=3.11"
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: System Administrators",
     "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Communications :: Email",
     "Topic :: System :: Systems Administration",
@@ -39,6 +41,7 @@ dev = [
     "pytest-freezer>=0.4",
     "pyright>=1.1.370",
     "ruff>=0.5",
+    "import-linter>=2.0",
 ]
 
 [project.scripts]
@@ -63,7 +66,7 @@ include = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
@@ -78,7 +81,7 @@ select = [
 
 [tool.pyright]
 include = ["src", "tests"]
-pythonVersion = "3.13"
+pythonVersion = "3.11"
 typeCheckingMode = "strict"
 reportMissingTypeStubs = false
 useLibraryCodeForTypes = true
@@ -91,4 +94,37 @@ addopts = "-x -q"
 markers = [
     "integration: tests that require POSTINO_TEST_DB_URL",
     "cli: end-to-end CLI tests",
+    "architecture: static rule checks under tests/architecture",
 ]
+
+[tool.importlinter]
+root_packages = ["postino_core", "postino"]
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture: postino_core < postino"
+type = "layers"
+layers = [
+    "postino",
+    "postino_core",
+]
+containers = []
+exhaustive = false
+ignore_imports = []
+
+[[tool.importlinter.contracts]]
+name = "postino_core stays free of UI/CLI/HTTP dependencies"
+type = "forbidden"
+source_modules = ["postino_core"]
+forbidden_modules = ["typer", "rich", "click", "litestar", "httpx"]
+# Renderer currently lives under postino_core/output.py and depends on rich;
+# PR-A6 (review H9 / S20) moves it to postino/output.py. Until then, ignore.
+ignore_imports = [
+    "postino_core.output -> rich",
+]
+
+[[tool.importlinter.contracts]]
+name = "postino CLI must not import HTTP/daemon stack or postinod"
+type = "forbidden"
+source_modules = ["postino"]
+forbidden_modules = ["litestar", "httpx", "postinod"]

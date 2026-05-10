@@ -28,7 +28,7 @@ class Mailbox(BaseModel):
     Raises: pydantic.ValidationError on schema mismatch.
     """
 
-    model_config = ConfigDict(frozen=True, strict=True)
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     username: EmailStr
     name: str
@@ -44,7 +44,7 @@ class Mailbox(BaseModel):
 class MailboxCreate(BaseModel):
     """Inputs for `postino user add`. Built at the CLI boundary."""
 
-    model_config = ConfigDict(frozen=True, strict=True)
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     username: EmailStr
     password: SecretStr
@@ -56,7 +56,7 @@ class MailboxCreate(BaseModel):
 class MailboxUsage(BaseModel):
     """Live usage row from the quota2 table."""
 
-    model_config = ConfigDict(frozen=True, strict=True)
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     username: EmailStr
     bytes_used: int
@@ -66,7 +66,7 @@ class MailboxUsage(BaseModel):
 class Alias(BaseModel):
     """An alias row from the PostfixAdmin alias table."""
 
-    model_config = ConfigDict(frozen=True, strict=True)
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     address: EmailStr
     goto: str
@@ -79,7 +79,7 @@ class Alias(BaseModel):
 class Domain(BaseModel):
     """A domain row from the PostfixAdmin domain table."""
 
-    model_config = ConfigDict(frozen=True, strict=True)
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     domain: str
     description: str
