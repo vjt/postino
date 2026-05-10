@@ -109,3 +109,57 @@ def test_extra_forbid_rejects_unknown_toml_key(
     sys_toml.write_text(_BASE_TOML + 'unknown_field = "rogue"\n')
     with pytest.raises(ValidationError):
         _make_settings_class(sys_toml, user_toml)()  # type: ignore[call-arg]  # WHY: pydantic-settings hydrates from toml; pyright sees BaseSettings's positional signature.
+
+
+def test_mlmmj_settings_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    sql_dir = tmp_path / "postfix"
+    sql_dir.mkdir()
+    (sql_dir / "sql-virtual_mailbox_maps.cf").write_text(
+        "user = u\npassword = p\nhosts = h\ndbname = d\n"
+    )
+
+    monkeypatch.setenv("POSTINO_IDENTITY_BACKEND", "noauth")
+    monkeypatch.setenv("POSTINO_POSTFIX_SQL_DIR", str(sql_dir))
+    monkeypatch.setenv("POSTINO_VIRTUAL_MAILBOX_BASE", str(tmp_path / "mail"))
+    monkeypatch.setenv("POSTINO_POSTCREATION_HOOK", str(tmp_path / "hook.sh"))
+    monkeypatch.setenv("POSTINO_VMAIL_UID", "5000")
+    monkeypatch.setenv("POSTINO_VMAIL_GID", "5000")
+    monkeypatch.setenv("POSTINO_DEFAULT_PASSWORD_SCHEME", "BLF-CRYPT")
+    monkeypatch.setenv("POSTINO_DEFAULT_QUOTA_BYTES", "1073741824")
+    monkeypatch.setenv("POSTINO_MLMMJ_SPOOL_DIR", str(tmp_path / "spool"))
+    monkeypatch.setenv("POSTINO_MLMMJ_UID", "1234")
+    monkeypatch.setenv("POSTINO_MLMMJ_GID", "5678")
+
+    from postino_core.config import PostinoSettings
+
+    s = PostinoSettings()  # type: ignore[call-arg]  # WHY: pydantic-settings populates from env
+    assert s.mlmmj_spool_dir == tmp_path / "spool"
+    assert s.mlmmj_uid == 1234
+    assert s.mlmmj_gid == 5678
+
+
+def test_mlmmj_settings_default_to_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    sql_dir = tmp_path / "postfix"
+    sql_dir.mkdir()
+    (sql_dir / "sql-virtual_mailbox_maps.cf").write_text(
+        "user = u\npassword = p\nhosts = h\ndbname = d\n"
+    )
+
+    monkeypatch.setenv("POSTINO_IDENTITY_BACKEND", "noauth")
+    monkeypatch.setenv("POSTINO_POSTFIX_SQL_DIR", str(sql_dir))
+    monkeypatch.setenv("POSTINO_VIRTUAL_MAILBOX_BASE", str(tmp_path / "mail"))
+    monkeypatch.setenv("POSTINO_POSTCREATION_HOOK", str(tmp_path / "hook.sh"))
+    monkeypatch.setenv("POSTINO_VMAIL_UID", "5000")
+    monkeypatch.setenv("POSTINO_VMAIL_GID", "5000")
+    monkeypatch.setenv("POSTINO_DEFAULT_PASSWORD_SCHEME", "BLF-CRYPT")
+    monkeypatch.setenv("POSTINO_DEFAULT_QUOTA_BYTES", "1073741824")
+    monkeypatch.delenv("POSTINO_MLMMJ_SPOOL_DIR", raising=False)
+    monkeypatch.delenv("POSTINO_MLMMJ_UID", raising=False)
+    monkeypatch.delenv("POSTINO_MLMMJ_GID", raising=False)
+
+    from postino_core.config import PostinoSettings
+
+    s = PostinoSettings()  # type: ignore[call-arg]  # WHY: pydantic-settings populates from env
+    assert s.mlmmj_spool_dir is None
+    assert s.mlmmj_uid == -1
+    assert s.mlmmj_gid == -1

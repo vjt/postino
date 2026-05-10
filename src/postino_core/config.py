@@ -119,6 +119,14 @@ class PostinoSettings(BaseSettings):
     # canonical PA + dovecot layout.
     lmtp_destination: str = "unix:private/dovecot-lmtp"
 
+    # mlmmj (v0.3+) — optional. When `mlmmj_spool_dir` is None, the
+    # `MailingListService` is still wired but every mutating call raises
+    # ConfigError. uid/gid sentinel `-1` mirrors FilesystemAdapter's
+    # "do not drop privileges" convention used in tests + dev.
+    mlmmj_spool_dir: Path | None = None
+    mlmmj_uid: int = -1
+    mlmmj_gid: int = -1
+
     _toml_paths: ClassVar[tuple[Path, ...]] = (_SYSTEM_TOML, _USER_TOML)
 
     @classmethod
