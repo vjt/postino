@@ -349,3 +349,27 @@ def test_postino_alias_del_nonexistent_exits_1(e2e_write_env: WriteEnv) -> None:
         e2e_write_env.env,
     )
     assert code == 1
+
+
+# ---------------------------------------------------------------------------
+# passlib / bcrypt shim regression
+# ---------------------------------------------------------------------------
+
+
+def test_postino_user_add_no_passlib_trapped_warning(e2e_write_env: WriteEnv) -> None:
+    """Regression: passlib's '(trapped) error reading bcrypt version' must not surface.
+
+    bcrypt 4.1+ removed __about__; passlib 1.7.4 reads it. We shim
+    bcrypt.__about__ in postino_core/__init__.py so passlib's backend
+    load never trips. Production-visible: this warning leaked into
+    `postino user add` interactive runs on m42 (vjt 2026-05-10).
+    """
+    code, out, err = _run(
+        ["--json", "user", "add", "shim-test@write.example.com", "--quota", "100M"],
+        e2e_write_env.env,
+        input="testpw\ntestpw\n",
+    )
+    assert code == 0, f"stderr={err!r} stdout={out!r}"
+    combined = out + err
+    assert "(trapped)" not in combined, f"passlib trapped-warning leaked: {combined!r}"
+    assert "__about__" not in combined, f"bcrypt __about__ AttributeError leaked: {combined!r}"
