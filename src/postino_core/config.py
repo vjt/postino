@@ -111,6 +111,10 @@ class PostinoSettings(BaseSettings):
     vmail_gid: int
     default_password_scheme: PasswordScheme
     default_quota_bytes: int
+    # Postfix transport_maps nexthop appended to `lmtp:` for domains with
+    # `transport=lmtp`. Default targets dovecot-lmtp's unix socket on the
+    # canonical PA + dovecot layout.
+    lmtp_destination: str = "unix:private/dovecot-lmtp"
 
     _toml_paths: ClassVar[tuple[Path, ...]] = (_SYSTEM_TOML, _USER_TOML)
 

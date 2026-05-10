@@ -34,11 +34,32 @@ class DomainService:
         metadata: MetaData,
         clock: Callable[[], datetime],
         fs: FilesystemAdapter,
+        lmtp_destination: str,
     ) -> None:
         self._engine = engine
         self._md = metadata
         self._clock = clock
         self._fs = fs
+        self._lmtp_destination = lmtp_destination
+
+    def _transport_to_db(self, transport: DomainTransport) -> str:
+        """Render an enum value into postfix's transport_maps cell.
+
+        LMTP needs a `lmtp:<nexthop>` pair; other protocols stand alone."""
+        if transport is DomainTransport.LMTP:
+            return f"lmtp:{self._lmtp_destination}"
+        return transport.value
+
+    @staticmethod
+    def _transport_from_db(raw: str) -> DomainTransport:
+        """Parse a postfix transport_maps cell back to the enum.
+
+        Any value starting with ``lmtp:`` collapses to ``LMTP`` regardless
+        of the embedded nexthop — postino owns the protocol choice; the
+        nexthop is stack-config and read from PostinoSettings."""
+        if raw.startswith("lmtp:") or raw == "lmtp":
+            return DomainTransport.LMTP
+        return DomainTransport(raw)
 
     def add(
         self,
@@ -64,7 +85,7 @@ class DomainService:
                         mailboxes=max_mailboxes,
                         maxquota=max_quota_bytes,
                         quota=default_quota_bytes,
-                        transport=transport.value,
+                        transport=self._transport_to_db(transport),
                         backupmx=int(backupmx),
                         active=int(MailboxStatus.ACTIVE),
                         created=now,
@@ -206,7 +227,7 @@ class DomainService:
             max_mailboxes=int(m["mailboxes"]),  # type: ignore[arg-type]
             max_quota_bytes=int(m["maxquota"]),  # type: ignore[arg-type]
             default_quota_bytes=int(m["quota"]),  # type: ignore[arg-type]
-            transport=DomainTransport(m["transport"]),  # type: ignore[arg-type]
+            transport=self._transport_from_db(str(m["transport"])),
             backupmx=bool(int(m["backupmx"])),  # type: ignore[arg-type]
             status=MailboxStatus(int(m["active"])),  # type: ignore[arg-type]
             created=m["created"],  # type: ignore[arg-type]

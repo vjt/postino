@@ -26,7 +26,8 @@ def test_quota_unit_members() -> None:
 
 def test_domain_transport_members() -> None:
     assert DomainTransport.VIRTUAL.value == "virtual"
-    assert "lmtp" in DomainTransport.LMTP.value
+    assert DomainTransport.LMTP.value == "lmtp"
+    assert DomainTransport.RELAY.value == "relay"
 
 
 def test_identity_backend_members() -> None:

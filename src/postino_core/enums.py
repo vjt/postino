@@ -33,10 +33,15 @@ class QuotaUnit(StrEnum):
 
 
 class DomainTransport(StrEnum):
-    """Postfix transport for a virtual domain."""
+    """Postfix transport protocol for a virtual domain.
+
+    Holds only the protocol — the LMTP nexthop (e.g. ``unix:private/
+    dovecot-lmtp``) is configured on PostinoSettings, not baked into
+    the enum, so a stack with a TCP-listening dovecot can pick a
+    different destination without code change."""
 
     VIRTUAL = "virtual"
-    LMTP = "lmtp:unix:private/dovecot-lmtp"
+    LMTP = "lmtp"
     RELAY = "relay"
 
 

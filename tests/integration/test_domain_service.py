@@ -22,7 +22,13 @@ def _service(
         # Sentinel adapter pointing at a tmp dir that doesn't exist; OK when
         # the test never exercises the FS path.
         fs = FilesystemAdapter(mail_root=Path("/tmp/postino-noop"), vmail_uid=-1, vmail_gid=-1)
-    return DomainService(engine=db, metadata=md, clock=lambda: frozen_clock, fs=fs)
+    return DomainService(
+        engine=db,
+        metadata=md,
+        clock=lambda: frozen_clock,
+        fs=fs,
+        lmtp_destination="unix:private/dovecot-lmtp",
+    )
 
 
 def test_domain_add_get(db: Engine, frozen_clock: datetime) -> None:
@@ -41,6 +47,42 @@ def test_domain_add_get(db: Engine, frozen_clock: datetime) -> None:
     assert d is not None
     assert d.transport is DomainTransport.LMTP
     assert d.max_mailboxes == 10
+
+
+def test_domain_add_lmtp_writes_full_transport_string(db: Engine, frozen_clock: datetime) -> None:
+    """The DB cell must hold postfix's full ``lmtp:<nexthop>`` value so
+    the postfix transport_maps lookup resolves; the enum carries only
+    the protocol (``lmtp``), nexthop comes from PostinoSettings."""
+    md = MetaData()
+    md.reflect(bind=db)
+    svc = DomainService(
+        engine=db,
+        metadata=md,
+        clock=lambda: frozen_clock,
+        fs=FilesystemAdapter(mail_root=Path("/tmp/postino-noop"), vmail_uid=-1, vmail_gid=-1),
+        lmtp_destination="inet:127.0.0.1:24",
+    )
+    svc.add(
+        domain="lmtp.example.com",
+        description="",
+        max_aliases=0,
+        max_mailboxes=0,
+        max_quota_bytes=0,
+        default_quota_bytes=0,
+        transport=DomainTransport.LMTP,
+        backupmx=False,
+    )
+    with db.begin() as conn:
+        raw = conn.execute(
+            select(md.tables["domain"].c.transport).where(
+                md.tables["domain"].c.domain == "lmtp.example.com"
+            )
+        ).scalar_one()
+    assert raw == "lmtp:inet:127.0.0.1:24"
+    # And the round-trip parses back to the protocol enum.
+    d = svc.get("lmtp.example.com")
+    assert d is not None
+    assert d.transport is DomainTransport.LMTP
 
 
 def test_domain_add_duplicate(db: Engine, frozen_clock: datetime) -> None:
