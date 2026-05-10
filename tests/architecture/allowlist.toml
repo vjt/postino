@@ -87,7 +87,7 @@
 208 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 209 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 210 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-247 = "WHY: SQLAlchemy RowMapping access yields Any."
+277 = "WHY: SQLAlchemy RowMapping access yields Any."
 
 [test_type_ignore_justified."src/postino_core/services/quota.py"]
 23 = "WHY: SQLAlchemy Row._mapping attribute access not in stubs."

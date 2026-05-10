@@ -512,6 +512,102 @@ def test_mailbox_add_resets_stale_quota_row(
     assert int(row[1]) == 0  # type: ignore[arg-type]  # WHY: SQLAlchemy Row indexing yields Any.
 
 
+def test_delete_logs_warning_for_orphan_aliases(
+    db: Engine,
+    tmp_mail_root: Path,
+    fake_postcreation_hook: Path,
+    frozen_clock: datetime,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Deleting a mailbox referenced by an alias's goto must surface a
+    WARNING — the alias survives but now points at a missing recipient."""
+    import logging
+
+    _seed_domain(db, "example.com", max_mailboxes=10)
+    svc = _build_service(
+        db,
+        FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1),
+        HookRunner(script_path=fake_postcreation_hook),
+        lambda: frozen_clock,
+    )
+    svc.add(
+        MailboxCreate(
+            username="foo@example.com",
+            password=SecretStr("p"),
+            name="",
+            quota_bytes=0,
+            scheme=PasswordScheme.BCRYPT,
+        )
+    )
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.begin() as conn:
+        conn.execute(
+            md.tables["alias"]
+            .insert()
+            .values(
+                address="team@example.com",
+                goto="foo@example.com,bar@example.com",
+                domain="example.com",
+                created=frozen_clock,
+                modified=frozen_clock,
+                active=1,
+            )
+        )
+    with caplog.at_level(logging.WARNING, logger="postino_core.services.mailbox"):
+        svc.delete("foo@example.com", keep_maildir=True)
+    messages = [r.getMessage() for r in caplog.records]
+    assert any("team@example.com" in m and "foo@example.com" in m for m in messages)
+
+
+def test_delete_does_not_warn_on_substring_only_match(
+    db: Engine,
+    tmp_mail_root: Path,
+    fake_postcreation_hook: Path,
+    frozen_clock: datetime,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`bbob@example.com` referenced by an alias must not trip the orphan
+    warning when `bob@example.com` is deleted — comma-split exact match
+    only."""
+    import logging
+
+    _seed_domain(db, "example.com", max_mailboxes=10)
+    svc = _build_service(
+        db,
+        FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1),
+        HookRunner(script_path=fake_postcreation_hook),
+        lambda: frozen_clock,
+    )
+    svc.add(
+        MailboxCreate(
+            username="bob@example.com",
+            password=SecretStr("p"),
+            name="",
+            quota_bytes=0,
+            scheme=PasswordScheme.BCRYPT,
+        )
+    )
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.begin() as conn:
+        conn.execute(
+            md.tables["alias"]
+            .insert()
+            .values(
+                address="x@example.com",
+                goto="bbob@example.com",
+                domain="example.com",
+                created=frozen_clock,
+                modified=frozen_clock,
+                active=1,
+            )
+        )
+    with caplog.at_level(logging.WARNING, logger="postino_core.services.mailbox"):
+        svc.delete("bob@example.com", keep_maildir=True)
+    assert not caplog.records
+
+
 def test_set_quota(
     db: Engine,
     tmp_mail_root: Path,

@@ -213,19 +213,49 @@ class MailboxService:
     def delete(self, username: EmailStr, *, keep_maildir: bool) -> None:
         """Delete the mailbox row + quota row + (optionally) maildir.
 
-        Idempotent on FS removal but DB row absence raises NotFoundError."""
+        Idempotent on FS removal but DB row absence raises NotFoundError.
+
+        Logs a WARNING for every alias whose `goto` references this
+        username — the alias survives but now has a dead recipient. The
+        admin chooses whether to clean up; spec policy is non-blocking."""
         mailbox = self._md.tables["mailbox"]
         existing = self.get(username)
         if existing is None:
             raise NotFoundError(f"mailbox {username} does not exist")
         relative = existing.maildir
+        orphan_aliases = self._aliases_targeting(str(username))
         with translate_db_errors(), self._engine.begin() as conn:
             self._identity.delete_identity(conn, str(username))
             quota2 = self._md.tables["quota2"]
             conn.execute(quota2.delete().where(quota2.c.username == str(username)))
             conn.execute(mailbox.delete().where(mailbox.c.username == str(username)))
+        if orphan_aliases:
+            _logger.warning(
+                "deleted %s; %d alias(es) still target it: %s",
+                username,
+                len(orphan_aliases),
+                ", ".join(sorted(orphan_aliases)),
+            )
         if not keep_maildir:
             self._fs.remove_maildir(relative)
+
+    def _aliases_targeting(self, username: str) -> list[str]:
+        """Aliases whose `goto` contains an exact (comma-split, trimmed)
+        match for `username`. PA stores multi-recipient aliases as a
+        comma-separated list — substring match would over-flag (e.g.
+        `bob@example.com` would alarm on `bbob@example.com`)."""
+        alias = self._md.tables["alias"]
+        with self._engine.connect() as conn:
+            candidates = conn.execute(
+                select(alias.c.address, alias.c.goto).where(alias.c.goto.contains(username))
+            ).fetchall()
+        out: list[str] = []
+        for r in candidates:
+            address = str(r._mapping["address"])  # type: ignore[index]  # WHY: SQLAlchemy RowMapping[str, Any] indexing.
+            goto = str(r._mapping["goto"])  # type: ignore[index]  # WHY: SQLAlchemy RowMapping[str, Any] indexing.
+            if username in {part.strip() for part in goto.split(",")}:
+                out.append(address)
+        return out
 
     def list(
         self,
