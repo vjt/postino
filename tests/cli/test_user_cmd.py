@@ -62,6 +62,14 @@ def make_postfix_cf(db_url: str, sql_dir: Path) -> None:
     auth, _, hostdb = body.partition("@")
     user, _, pwd = auth.partition(":")
     host, _, dbname = hostdb.partition("/")
+    # Postfix sql-virtual_*.cf `hosts = ...` field expects a bare hostname.
+    # Strip any `:port` suffix from URL forms like `127.0.0.1:3306` — the
+    # port is implicit MySQL 3306 in cf semantics. Without this, SQLAlchemy
+    # URL.create stuffs `host:port` into the hostname and PyMySQL fails
+    # getaddrinfo with EAI_NONAME ("Name or service not known"). CI hit
+    # this because GH Actions services use 127.0.0.1:3306 in the URL;
+    # local .env uses bare `localhost` so the bug stayed hidden.
+    host, _, _port = host.partition(":")
     sql_dir.mkdir(exist_ok=True)
     cf_body = f"hosts = {host}\nuser = {user}\npassword = {pwd}\ndbname = {dbname}\n"
     # All three cf files written so `postino check` (which now verifies
