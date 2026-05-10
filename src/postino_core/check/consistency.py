@@ -1,31 +1,67 @@
-"""postino check — consistency validator (read-only)."""
+"""postino check — consistency validator (read-only).
+
+Two modes:
+
+* default — environmental preconditions: DB reachable, schema present,
+  mail_root mounted, postcreation hook executable + owned by root +
+  not world/group writable, postfix sql `.cf` files present and the
+  credentials in them match the engine URL postino is using.
+
+* `--deep` — actual state-drift detection: mailbox rows reconciled
+  against maildirs on disk, quota2 row presence, FK substitutes
+  (mailbox.domain ∈ domain, alias.domain ∈ domain), maildir ownership
+  matches `vmail_uid:vmail_gid`, Maildir++ skeleton (`cur`/`new`/`tmp`)
+  exists.
+"""
 
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import MetaData, text
+from sqlalchemy import MetaData, select, text
 from sqlalchemy.engine import Engine
 
-from postino_core.config import PostinoSettings
+from postino_core.config import PostinoSettings, parse_postfix_sql_cf
+from postino_core.errors import ConfigError
+
+Severity = Literal["info", "warn", "error"]
+
+_REQUIRED_TABLES = frozenset({"mailbox", "alias", "domain", "quota2", "log"})
+_POSTFIX_CF_FILES = (
+    "sql-virtual_mailbox_maps.cf",
+    "sql-virtual_alias_maps.cf",
+    "sql-virtual_domain_maps.cf",
+)
+_MAILDIRPP_SUBDIRS = ("cur", "new", "tmp")
+_HOOK_WRITE_BITS = 0o022
 
 
 class Finding(BaseModel):
+    """One row in a `postino check` report."""
+
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
+
     name: str
-    ok: bool
+    severity: Severity
     message: str
 
+    @property
+    def ok(self) -> bool:
+        return self.severity == "info"
 
-@dataclass(frozen=True)
-class CheckResult:
+
+class CheckResult(BaseModel):
+    """Aggregate of all findings produced by `run_consistency_check`."""
+
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
+
     findings: list[Finding]
 
     @property
     def ok(self) -> bool:
-        return all(f.ok for f in self.findings)
+        return not any(f.severity == "error" for f in self.findings)
 
 
 def run_consistency_check(
@@ -33,14 +69,25 @@ def run_consistency_check(
     settings: PostinoSettings,
     engine: Engine,
     metadata: MetaData,
+    deep: bool = False,
 ) -> CheckResult:
     findings: list[Finding] = []
     findings.append(_check_db_reachable(engine))
     findings.append(_check_required_tables(metadata))
     findings.append(_check_mailbox_base(settings))
     findings.append(_check_postcreation_hook(settings))
-    findings.append(_check_postfix_sql_credentials_match(settings))
+    findings.extend(_check_postfix_sql_cfs(settings, engine))
+    if deep:
+        findings.extend(_check_deep(settings, engine, metadata))
     return CheckResult(findings=findings)
+
+
+def _ok(name: str, message: str) -> Finding:
+    return Finding(name=name, severity="info", message=message)
+
+
+def _err(name: str, message: str) -> Finding:
+    return Finding(name=name, severity="error", message=message)
 
 
 def _check_db_reachable(engine: Engine) -> Finding:
@@ -48,56 +95,274 @@ def _check_db_reachable(engine: Engine) -> Finding:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
     except Exception as e:
-        return Finding(name="db_reachable", ok=False, message=f"DB unreachable: {e}")
-    return Finding(name="db_reachable", ok=True, message="DB reachable")
+        return _err("db_reachable", f"DB unreachable: {e}")
+    return _ok("db_reachable", "DB reachable")
 
 
 def _check_required_tables(md: MetaData) -> Finding:
-    required = {"mailbox", "alias", "domain", "quota2", "log"}
-    missing = required - set(md.tables.keys())
+    missing = _REQUIRED_TABLES - set(md.tables.keys())
     if missing:
-        return Finding(
-            name="schema_tables",
-            ok=False,
-            message=f"missing tables: {sorted(missing)}",
-        )
-    return Finding(name="schema_tables", ok=True, message="all required tables present")
+        return _err("schema_tables", f"missing tables: {sorted(missing)}")
+    return _ok("schema_tables", "all required tables present")
 
 
 def _check_mailbox_base(s: PostinoSettings) -> Finding:
     p = s.virtual_mailbox_base
     if not p.is_dir():
-        return Finding(
-            name="mailbox_base",
-            ok=False,
-            message=f"virtual_mailbox_base does not exist or is not a directory: {p}",
+        return _err(
+            "mailbox_base",
+            f"virtual_mailbox_base does not exist or is not a directory: {p}",
         )
-    return Finding(name="mailbox_base", ok=True, message=f"{p} exists")
+    return _ok("mailbox_base", f"{p} exists")
 
 
 def _check_postcreation_hook(s: PostinoSettings) -> Finding:
     h = s.postcreation_hook
     if not h.exists():
-        return Finding(
-            name="postcreation_hook",
-            ok=False,
-            message=f"postcreation hook missing: {h}",
-        )
+        return _err("postcreation_hook", f"postcreation hook missing: {h}")
     if not os.access(h, os.X_OK):
-        return Finding(
-            name="postcreation_hook",
-            ok=False,
-            message=f"postcreation hook not executable: {h}",
+        return _err("postcreation_hook", f"postcreation hook not executable: {h}")
+    st = h.stat()
+    # Ownership is enforced only when postino itself runs as root (the
+    # production case). Non-root invocations cannot fix or even meaningfully
+    # interpret a "not owned by root" finding, and would otherwise force
+    # tests using user-owned tmpfiles to flip an error.
+    if os.geteuid() == 0 and st.st_uid != 0:
+        return _err(
+            "postcreation_hook",
+            f"postcreation hook not owned by root: uid={st.st_uid} ({h})",
         )
-    return Finding(name="postcreation_hook", ok=True, message=f"{h} executable")
+    if st.st_mode & _HOOK_WRITE_BITS:
+        return _err(
+            "postcreation_hook",
+            f"postcreation hook is group/world writable (mode={oct(st.st_mode & 0o777)}): {h}",
+        )
+    return _ok("postcreation_hook", f"{h} executable, mode tight")
 
 
-def _check_postfix_sql_credentials_match(s: PostinoSettings) -> Finding:
-    cf = s.postfix_sql_dir / "sql-virtual_mailbox_maps.cf"
-    if not cf.exists():
-        return Finding(
-            name="postfix_sql_cf",
-            ok=False,
-            message=f"postfix sql cf missing: {cf}",
+def _check_postfix_sql_cfs(s: PostinoSettings, engine: Engine) -> list[Finding]:
+    """Verify each postfix sql-virtual_*.cf is present AND matches engine.url.
+
+    Postfix is the source of truth. Any drift between the file and the
+    engine postino is currently using is a config-correctness bug.
+    """
+    out: list[Finding] = []
+    for filename in _POSTFIX_CF_FILES:
+        cf = s.postfix_sql_dir / filename
+        name = f"postfix_sql_cf:{filename}"
+        if not cf.exists():
+            out.append(_err(name, f"postfix sql cf missing: {cf}"))
+            continue
+        try:
+            parsed = parse_postfix_sql_cf(cf)
+        except ConfigError as e:
+            out.append(_err(name, f"unparseable postfix sql cf {cf}: {e}"))
+            continue
+        url = engine.url
+        eu_user = url.username or ""
+        eu_host = url.host or ""
+        eu_db = url.database or ""
+        eu_pwd = url.password or ""
+        diffs: list[str] = []
+        if parsed.user != eu_user:
+            diffs.append(f"user {parsed.user!r}≠engine {eu_user!r}")
+        if parsed.host != eu_host:
+            diffs.append(f"host {parsed.host!r}≠engine {eu_host!r}")
+        if parsed.dbname != eu_db:
+            diffs.append(f"dbname {parsed.dbname!r}≠engine {eu_db!r}")
+        if parsed.password.get_secret_value() != eu_pwd:
+            diffs.append("password mismatch")
+        if diffs:
+            out.append(_err(name, f"{cf}: " + ", ".join(diffs)))
+        else:
+            out.append(_ok(name, f"{cf} matches engine URL"))
+    return out
+
+
+class _MailboxRow(BaseModel):
+    """Materialized mailbox tuple used by deep checks.
+
+    Existing as a typed payload lets `_check_deep` push pyright-strict
+    SQLAlchemy `Any`-typed accesses to a single conversion point.
+    """
+
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
+
+    username: str
+    maildir: str
+    domain: str
+
+
+def _check_deep(s: PostinoSettings, engine: Engine, md: MetaData) -> list[Finding]:
+    out: list[Finding] = []
+    mailbox_t = md.tables.get("mailbox")
+    domain_t = md.tables.get("domain")
+    alias_t = md.tables.get("alias")
+    quota2_t = md.tables.get("quota2")
+    if mailbox_t is None or domain_t is None or alias_t is None or quota2_t is None:
+        out.append(_err("deep_skipped", "deep checks skipped: required tables missing"))
+        return out
+
+    with engine.connect() as conn:
+        mailbox_rows = [
+            _MailboxRow(
+                username=str(r._mapping["username"]),  # type: ignore[index]  # WHY: SQLAlchemy RowMapping[str, Any] indexing.
+                maildir=str(r._mapping["maildir"]),  # type: ignore[index]  # WHY: SQLAlchemy RowMapping[str, Any] indexing.
+                domain=str(r._mapping["domain"]),  # type: ignore[index]  # WHY: SQLAlchemy RowMapping[str, Any] indexing.
+            )
+            for r in conn.execute(
+                select(mailbox_t.c.username, mailbox_t.c.maildir, mailbox_t.c.domain)
+            ).fetchall()
+        ]
+        domain_names: set[str] = {
+            str(r._mapping["domain"])  # type: ignore[index]  # WHY: SQLAlchemy RowMapping[str, Any] indexing.
+            for r in conn.execute(select(domain_t.c.domain)).fetchall()
+        }
+        alias_rows: list[tuple[str, str]] = [
+            (
+                str(r._mapping["address"]),  # type: ignore[index]  # WHY: SQLAlchemy RowMapping[str, Any] indexing.
+                str(r._mapping["domain"]),  # type: ignore[index]  # WHY: SQLAlchemy RowMapping[str, Any] indexing.
+            )
+            for r in conn.execute(select(alias_t.c.address, alias_t.c.domain)).fetchall()
+        ]
+        quota_users: set[str] = {
+            str(r._mapping["username"])  # type: ignore[index]  # WHY: SQLAlchemy RowMapping[str, Any] indexing.
+            for r in conn.execute(select(quota2_t.c.username)).fetchall()
+        }
+
+    out.extend(_check_mailbox_domain_fk(mailbox_rows, domain_names))
+    out.extend(_check_alias_domain_fk(alias_rows, domain_names))
+    out.extend(_check_quota_pairing(mailbox_rows, quota_users))
+    out.extend(_check_mailbox_maildir_pairing(s, mailbox_rows))
+    out.extend(_check_orphan_maildirs(s, mailbox_rows))
+    return out
+
+
+def _check_mailbox_domain_fk(
+    mailbox_rows: list[_MailboxRow],
+    domain_names: set[str],
+) -> list[Finding]:
+    orphans = sorted({r.username for r in mailbox_rows if r.domain not in domain_names})
+    if orphans:
+        return [
+            _err(
+                "mailbox_domain_fk",
+                f"{len(orphans)} mailbox rows reference missing domain: {orphans[:5]}",
+            )
+        ]
+    return [_ok("mailbox_domain_fk", "all mailbox.domain values resolve")]
+
+
+def _check_alias_domain_fk(
+    alias_rows: list[tuple[str, str]],
+    domain_names: set[str],
+) -> list[Finding]:
+    orphans = sorted({addr for addr, dom in alias_rows if dom not in domain_names})
+    if orphans:
+        return [
+            _err(
+                "alias_domain_fk",
+                f"{len(orphans)} alias rows reference missing domain: {orphans[:5]}",
+            )
+        ]
+    return [_ok("alias_domain_fk", "all alias.domain values resolve")]
+
+
+def _check_quota_pairing(
+    mailbox_rows: list[_MailboxRow],
+    quota_users: set[str],
+) -> list[Finding]:
+    missing = sorted({r.username for r in mailbox_rows if r.username not in quota_users})
+    if missing:
+        return [
+            _err(
+                "quota2_pairing",
+                f"{len(missing)} mailboxes have no quota2 row: {missing[:5]}",
+            )
+        ]
+    return [_ok("quota2_pairing", "every mailbox has a quota2 row")]
+
+
+def _check_mailbox_maildir_pairing(
+    s: PostinoSettings,
+    mailbox_rows: list[_MailboxRow],
+) -> list[Finding]:
+    """For every mailbox row: maildir on disk + ownership + Maildir++ skeleton."""
+    base = s.virtual_mailbox_base
+    missing: list[str] = []
+    bad_owner: list[str] = []
+    bad_skeleton: list[str] = []
+    for r in mailbox_rows:
+        path = base / r.maildir
+        if not path.is_dir():
+            missing.append(r.username)
+            continue
+        if s.vmail_uid >= 0 and s.vmail_gid >= 0:
+            st = path.stat()
+            if st.st_uid != s.vmail_uid or st.st_gid != s.vmail_gid:
+                bad_owner.append(f"{r.username} (uid={st.st_uid},gid={st.st_gid})")
+        if any(not (path / sub).is_dir() for sub in _MAILDIRPP_SUBDIRS):
+            bad_skeleton.append(r.username)
+    out: list[Finding] = []
+    if missing:
+        out.append(
+            _err(
+                "maildir_present",
+                f"{len(missing)} mailbox rows have no maildir on disk: {missing[:5]}",
+            )
         )
-    return Finding(name="postfix_sql_cf", ok=True, message=f"{cf} present")
+    else:
+        out.append(_ok("maildir_present", "every mailbox row has a maildir"))
+    if bad_owner:
+        out.append(
+            _err(
+                "maildir_ownership",
+                f"{len(bad_owner)} maildirs not owned by "
+                f"{s.vmail_uid}:{s.vmail_gid}: {bad_owner[:5]}",
+            )
+        )
+    elif s.vmail_uid >= 0 and s.vmail_gid >= 0:
+        out.append(_ok("maildir_ownership", "all maildirs owned by vmail"))
+    if bad_skeleton:
+        out.append(
+            _err(
+                "maildirpp_skeleton",
+                f"{len(bad_skeleton)} maildirs missing cur/new/tmp: {bad_skeleton[:5]}",
+            )
+        )
+    else:
+        out.append(_ok("maildirpp_skeleton", "all maildirs have Maildir++ skeleton"))
+    return out
+
+
+def _check_orphan_maildirs(
+    s: PostinoSettings,
+    mailbox_rows: list[_MailboxRow],
+) -> list[Finding]:
+    """Maildirs on disk with no DB row.
+
+    Layout per `MailboxService.add`: ``<base>/<domain>/<local_part>/``.
+    Anything else under the mail_root is suspicious orphan state.
+    """
+    base = s.virtual_mailbox_base
+    if not base.is_dir():
+        return []
+    expected = {(base / r.maildir).resolve() for r in mailbox_rows}
+    orphans: list[str] = []
+    for domain_dir in base.iterdir():
+        if not domain_dir.is_dir():
+            continue
+        for local_dir in domain_dir.iterdir():
+            if not local_dir.is_dir():
+                continue
+            resolved = local_dir.resolve()
+            if resolved not in expected:
+                orphans.append(f"{domain_dir.name}/{local_dir.name}")
+    if orphans:
+        return [
+            _err(
+                "orphan_maildirs",
+                f"{len(orphans)} maildirs on disk without DB row: {orphans[:5]}",
+            )
+        ]
+    return [_ok("orphan_maildirs", "no orphan maildirs on disk")]

@@ -1,72 +1,467 @@
+"""Integration tests for `postino check` (the consistency validator).
+
+Exercises every finding produced by ``run_consistency_check`` end-to-end
+against a real DB schema. Each test creates a deliberately-broken
+fixture and asserts the corresponding finding fires with severity
+``error``.
+"""
+
+from __future__ import annotations
+
+import os
 from pathlib import Path
 
 import pytest
 from sqlalchemy import MetaData
 from sqlalchemy.engine import Engine
 
-from postino_core.check.consistency import CheckResult, run_consistency_check
+from postino_core.check.consistency import (
+    CheckResult,
+    Finding,
+    run_consistency_check,
+)
 from postino_core.config import PostinoSettings
 from postino_core.enums import IdentityBackend, PasswordScheme
 
 pytestmark = pytest.mark.integration
 
 
-def _settings(tmp_path: Path, hook: Path) -> PostinoSettings:
-    sql_dir = tmp_path / "postfix"
-    sql_dir.mkdir()
-    (sql_dir / "sql-virtual_mailbox_maps.cf").write_text(
-        "hosts = localhost\nuser = postfix\npassword = sekret\ndbname = postfix\n"
+# ---------- helpers ----------
+
+
+def _engine_url_parts(db: Engine) -> tuple[str, str, str, str]:
+    url = db.url
+    return (
+        url.host or "",
+        url.username or "",
+        url.password or "",
+        url.database or "",
     )
+
+
+def _write_postfix_cf(sql_dir: Path, db: Engine, *, files: tuple[str, ...] | None = None) -> None:
+    host, user, pwd, dbname = _engine_url_parts(db)
+    sql_dir.mkdir(exist_ok=True)
+    for filename in files or (
+        "sql-virtual_mailbox_maps.cf",
+        "sql-virtual_alias_maps.cf",
+        "sql-virtual_domain_maps.cf",
+    ):
+        (sql_dir / filename).write_text(
+            f"hosts = {host}\nuser = {user}\npassword = {pwd}\ndbname = {dbname}\n"
+        )
+
+
+def _settings(
+    tmp_path: Path,
+    hook: Path,
+    *,
+    sql_dir: Path | None = None,
+    mail_root: Path | None = None,
+    vmail_uid: int = -1,
+    vmail_gid: int = -1,
+) -> PostinoSettings:
     return PostinoSettings(
         identity_backend=IdentityBackend.LOCAL,
-        postfix_sql_dir=sql_dir,
-        virtual_mailbox_base=tmp_path / "mail",
+        postfix_sql_dir=sql_dir if sql_dir is not None else tmp_path / "postfix",
+        virtual_mailbox_base=mail_root if mail_root is not None else tmp_path / "mail",
         postcreation_hook=hook,
-        vmail_uid=1006,
-        vmail_gid=1006,
+        vmail_uid=vmail_uid,
+        vmail_gid=vmail_gid,
         default_password_scheme=PasswordScheme.BCRYPT,
         default_quota_bytes=1024**3,
     )
 
 
-def test_check_passes_with_executable_hook(
+def _by_name(result: CheckResult, name: str) -> Finding:
+    for f in result.findings:
+        if f.name == name:
+            return f
+    raise AssertionError(f"finding {name!r} not present; got {[f.name for f in result.findings]}")
+
+
+def _seed_domain(db: Engine, name: str) -> None:
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.begin() as conn:
+        conn.execute(
+            md.tables["domain"]
+            .insert()
+            .values(
+                domain=name,
+                description="",
+                aliases=0,
+                mailboxes=10,
+                maxquota=0,
+                quota=0,
+                transport="virtual",
+                backupmx=0,
+                active=1,
+            )
+        )
+
+
+def _seed_mailbox(db: Engine, *, username: str, maildir: str, domain: str) -> None:
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.begin() as conn:
+        conn.execute(
+            md.tables["mailbox"]
+            .insert()
+            .values(
+                username=username,
+                password="x",
+                name="",
+                maildir=maildir,
+                quota=0,
+                local_part=username.split("@")[0],
+                domain=domain,
+                active=1,
+            )
+        )
+
+
+def _seed_quota2(db: Engine, *, username: str) -> None:
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.begin() as conn:
+        conn.execute(md.tables["quota2"].insert().values(username=username, bytes=0, messages=0))
+
+
+def _seed_alias(db: Engine, *, address: str, goto: str, domain: str) -> None:
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.begin() as conn:
+        conn.execute(
+            md.tables["alias"]
+            .insert()
+            .values(
+                address=address,
+                goto=goto,
+                domain=domain,
+                active=1,
+            )
+        )
+
+
+def _make_maildir(mail_root: Path, relative: str) -> Path:
+    p = mail_root / relative
+    p.mkdir(parents=True, exist_ok=True)
+    for sub in ("cur", "new", "tmp"):
+        (p / sub).mkdir(exist_ok=True)
+    return p
+
+
+# ---------- shallow checks ----------
+
+
+def test_passes_with_clean_state(
     db: Engine,
     tmp_path: Path,
     fake_postcreation_hook: Path,
 ) -> None:
-    s = _settings(tmp_path, fake_postcreation_hook)
-    s.virtual_mailbox_base.mkdir()
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
     md = MetaData()
     md.reflect(bind=db)
     result = run_consistency_check(settings=s, engine=db, metadata=md)
-    assert isinstance(result, CheckResult)
-    assert result.ok is True
+    assert result.ok is True, [f.model_dump() for f in result.findings if not f.ok]
+    assert all(f.severity == "info" for f in result.findings)
 
 
-def test_check_fails_when_hook_not_executable(
+def test_fails_when_hook_missing(
     db: Engine,
     tmp_path: Path,
 ) -> None:
-    hook = tmp_path / "hook.sh"
-    hook.write_text("#!/bin/sh\nexit 0\n")
-    # NOT chmodded
-    s = _settings(tmp_path, hook)
-    s.virtual_mailbox_base.mkdir()
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    s = _settings(
+        tmp_path,
+        tmp_path / "missing.sh",
+        sql_dir=sql_dir,
+        mail_root=mail_root,
+    )
     md = MetaData()
     md.reflect(bind=db)
     result = run_consistency_check(settings=s, engine=db, metadata=md)
     assert result.ok is False
-    assert any("hook" in finding.message.lower() for finding in result.findings)
+    f = _by_name(result, "postcreation_hook")
+    assert f.severity == "error"
+    assert "missing" in f.message
 
 
-def test_check_fails_when_mailbox_base_missing(
+def test_fails_when_hook_world_writable(
     db: Engine,
     tmp_path: Path,
     fake_postcreation_hook: Path,
 ) -> None:
-    s = _settings(tmp_path, fake_postcreation_hook)
+    """Group/world-writable hook is a security finding (severity=error)."""
+    fake_postcreation_hook.chmod(0o757)
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
     md = MetaData()
     md.reflect(bind=db)
     result = run_consistency_check(settings=s, engine=db, metadata=md)
-    assert result.ok is False
-    assert any("virtual_mailbox_base" in f.message for f in result.findings)
+    f = _by_name(result, "postcreation_hook")
+    assert f.severity == "error"
+    assert "writable" in f.message
+
+
+def test_fails_when_postfix_cf_missing(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """Drift detector fails per-file when one of the three .cf files is absent."""
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db, files=("sql-virtual_mailbox_maps.cf",))
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md)
+    assert _by_name(result, "postfix_sql_cf:sql-virtual_mailbox_maps.cf").severity == "info"
+    assert _by_name(result, "postfix_sql_cf:sql-virtual_alias_maps.cf").severity == "error"
+    assert _by_name(result, "postfix_sql_cf:sql-virtual_domain_maps.cf").severity == "error"
+
+
+def test_fails_when_postfix_cf_credentials_drift(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """Drift: file says different password than the engine actually uses."""
+    sql_dir = tmp_path / "postfix"
+    sql_dir.mkdir()
+    host, user, _, dbname = _engine_url_parts(db)
+    body = f"hosts = {host}\nuser = {user}\npassword = WRONG\ndbname = {dbname}\n"
+    for filename in (
+        "sql-virtual_mailbox_maps.cf",
+        "sql-virtual_alias_maps.cf",
+        "sql-virtual_domain_maps.cf",
+    ):
+        (sql_dir / filename).write_text(body)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md)
+    f = _by_name(result, "postfix_sql_cf:sql-virtual_mailbox_maps.cf")
+    assert f.severity == "error"
+    assert "password" in f.message
+
+
+# ---------- deep checks ----------
+
+
+def test_deep_detects_missing_maildir(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    _seed_domain(db, "example.com")
+    _seed_mailbox(
+        db,
+        username="ghost@example.com",
+        maildir="example.com/ghost/",
+        domain="example.com",
+    )
+    _seed_quota2(db, username="ghost@example.com")
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md, deep=True)
+    f = _by_name(result, "maildir_present")
+    assert f.severity == "error"
+    assert "ghost@example.com" in f.message
+
+
+def test_deep_detects_orphan_maildir(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    _make_maildir(mail_root, "example.com/orphan")
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md, deep=True)
+    f = _by_name(result, "orphan_maildirs")
+    assert f.severity == "error"
+    assert "orphan" in f.message.lower()
+
+
+def test_deep_detects_quota_pairing_gap(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    _seed_domain(db, "example.com")
+    _seed_mailbox(
+        db, username="alice@example.com", maildir="example.com/alice/", domain="example.com"
+    )
+    _make_maildir(mail_root, "example.com/alice")
+    # NOTE: deliberately skipping _seed_quota2 — quota row missing.
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md, deep=True)
+    f = _by_name(result, "quota2_pairing")
+    assert f.severity == "error"
+    assert "alice@example.com" in f.message
+
+
+def test_deep_detects_alias_domain_fk_drift(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    # Insert alias whose domain has no row in the domain table.
+    _seed_alias(db, address="info@gone.example", goto="x@x.com", domain="gone.example")
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md, deep=True)
+    f = _by_name(result, "alias_domain_fk")
+    assert f.severity == "error"
+
+
+def test_deep_passes_with_aligned_state(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    _seed_domain(db, "example.com")
+    _seed_mailbox(db, username="bob@example.com", maildir="example.com/bob/", domain="example.com")
+    _seed_quota2(db, username="bob@example.com")
+    _make_maildir(mail_root, "example.com/bob")
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md, deep=True)
+    assert result.ok is True, [f.model_dump() for f in result.findings if not f.ok]
+
+
+def test_deep_detects_maildirpp_skeleton_missing(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    _seed_domain(db, "example.com")
+    _seed_mailbox(
+        db, username="bare@example.com", maildir="example.com/bare/", domain="example.com"
+    )
+    _seed_quota2(db, username="bare@example.com")
+    # Maildir present but no cur/new/tmp inside.
+    (mail_root / "example.com" / "bare").mkdir(parents=True)
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md, deep=True)
+    f = _by_name(result, "maildirpp_skeleton")
+    assert f.severity == "error"
+
+
+def test_deep_skips_ownership_when_uid_minus_one(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """vmail_uid=-1 (test mode) means 'cannot chown' — skip ownership reporting."""
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    _seed_domain(db, "example.com")
+    _seed_mailbox(db, username="x@example.com", maildir="example.com/x/", domain="example.com")
+    _seed_quota2(db, username="x@example.com")
+    _make_maildir(mail_root, "example.com/x")
+    s = _settings(
+        tmp_path,
+        fake_postcreation_hook,
+        sql_dir=sql_dir,
+        mail_root=mail_root,
+        vmail_uid=-1,
+        vmail_gid=-1,
+    )
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md, deep=True)
+    assert all(f.name != "maildir_ownership" for f in result.findings)
+
+
+def test_finding_serialises_to_json_via_model_dump(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """`Finding` is now Pydantic; CheckResult.model_dump(mode='json') round-trips."""
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md)
+    payload = result.model_dump(mode="json")
+    assert payload["findings"][0]["severity"] in {"info", "warn", "error"}
+
+
+def test_check_uses_environment_db_url_for_engine_drift(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """Sanity: engine.url comes from the live test DB, so cf parsed from
+    POSTINO_TEST_DB_URL aligns by construction. Guards against regressions
+    in `_check_postfix_sql_cfs`."""
+    assert os.environ.get("POSTINO_TEST_DB_URL"), "test requires POSTINO_TEST_DB_URL"
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md)
+    for filename in (
+        "sql-virtual_mailbox_maps.cf",
+        "sql-virtual_alias_maps.cf",
+        "sql-virtual_domain_maps.cf",
+    ):
+        assert _by_name(result, f"postfix_sql_cf:{filename}").severity == "info"

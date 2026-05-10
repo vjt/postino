@@ -189,9 +189,17 @@ postino quota show                    # all users
 ### Operations
 
 ```sh
-postino check     # consistency: DB reachable, schema present, hook executable, …
-postino status    # row counts (domains / mailboxes / aliases / quota2)
+postino check          # shallow: DB reachable, schema present, hook safe,
+                       #          postfix sql-virtual_*.cf credentials match engine.
+postino check --deep   # also reconcile mailbox rows ↔ maildirs on disk,
+                       # quota2 pairing, alias/mailbox domain FK substitutes,
+                       # maildir ownership and Maildir++ skeleton.
+postino status         # row counts (domains / mailboxes / aliases / quota2)
 ```
+
+`postino check` exits 0 when every finding is severity `info`, 4 (`ConfigError`)
+when at least one finding is severity `error`. JSON output (`--json`) returns the
+full `{findings:[…], ok:bool}` payload for scripting.
 
 ### Output formats
 
