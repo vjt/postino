@@ -8,8 +8,10 @@ from __future__ import annotations
 import os
 import sys
 from datetime import datetime
+from typing import NoReturn
 
 import typer
+from pydantic import ValidationError
 from rich.console import Console
 from rich.traceback import install as install_traceback
 
@@ -61,10 +63,32 @@ _EXIT_CODES: dict[type[MailctlError], int] = {
 
 
 def _settings_with_db_override() -> PostinoSettings:
-    """Test-only escape hatch: POSTINO_DB_URL_OVERRIDE forces the engine URL.
+    """Build PostinoSettings from TOML + env.
 
-    In production this env var is never set; settings load from TOML/env."""
-    s = PostinoSettings()  # type: ignore[call-arg]
+    Test-only escape hatch: POSTINO_DB_URL_OVERRIDE forces the engine URL by
+    rewriting the postfix sql-virtual_mailbox_maps.cf file in-place; never
+    set in production.
+
+    Raises ConfigError with a human-readable message on missing/invalid config.
+    """
+    try:
+        s = PostinoSettings()  # type: ignore[call-arg]
+    except ValidationError as e:
+        missing = [err["loc"][0] for err in e.errors() if err["type"] == "missing"]
+        if missing:
+            fields = ", ".join(str(m) for m in missing)
+            raise ConfigError(
+                f"missing required config: {fields}.\n"
+                "  Set POSTINO_* env vars (e.g. POSTINO_IDENTITY_BACKEND=local)\n"
+                "  or write /usr/local/etc/postino/postino.toml or "
+                "~/.config/postino/postino.toml.\n"
+                "  See `postino --help` and the README for the full schema."
+            ) from e
+        # Non-missing validation errors (bad enum, wrong type, etc.).
+        details = "; ".join(
+            f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors()
+        )
+        raise ConfigError(f"invalid config: {details}") from e
     override = os.environ.get("POSTINO_DB_URL_OVERRIDE")
     if override:
         sql_cf = s.postfix_sql_dir / "sql-virtual_mailbox_maps.cf"
@@ -82,12 +106,15 @@ def _entry(  # pyright: ignore[reportUnusedFunction]
     json: bool = typer.Option(False, "--json", help="Output JSON."),
 ) -> None:
     install_traceback(show_locals=False)
-    settings = _settings_with_db_override()
-    services = build_services(settings, clock=lambda: datetime.now(), echo=False)
+    try:
+        settings = _settings_with_db_override()
+        services = build_services(settings, clock=lambda: datetime.now(), echo=False)
+    except MailctlError as e:
+        exit_with_error(e)
     ctx.obj = {"services": services, "json": json}
 
 
-def exit_with_error(err: MailctlError) -> None:
+def exit_with_error(err: MailctlError) -> NoReturn:
     """Print err to stderr and sys.exit with the documented exit code."""
     console = Console(stderr=True)
     console.print(f"[red]error:[/red] {err}")
