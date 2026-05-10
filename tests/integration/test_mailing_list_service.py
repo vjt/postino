@@ -12,7 +12,7 @@ from sqlalchemy.engine import Engine
 
 from postino_core.adapters.mlmmj import MlmmjAdapter
 from postino_core.enums import DomainTransport
-from postino_core.errors import AlreadyExistsError, ConfigError
+from postino_core.errors import AlreadyExistsError, CapacityError, ConfigError, NotFoundError
 from postino_core.fs import FilesystemAdapter
 from postino_core.models import MailingListCreate
 from postino_core.services.domain import DomainService
@@ -230,3 +230,41 @@ def test_subscribe_writes_audit_row(db: Engine, frozen_clock: datetime, tmp_path
         ).fetchall()
     assert len(rows) == 1
     assert rows[0][1] == "team@lists.example.org bob@example.org"
+
+
+def test_delete_refuses_non_empty_without_force(
+    db: Engine, frozen_clock: datetime, tmp_path: Path
+) -> None:
+    spool = tmp_path / "spool"
+    spool.mkdir()
+    _seed_mlmmj_domain(db, frozen_clock, "lists.example.org")
+    svc = _service(db, frozen_clock, spool)
+    svc.add(MailingListCreate(address="team@lists.example.org", owners=["alice@example.org"]))
+    svc.subscribe(address="team@lists.example.org", email="bob@example.org")
+    with pytest.raises(CapacityError):
+        svc.delete("team@lists.example.org")
+    assert (spool / "team@lists.example.org").exists()
+
+
+def test_delete_with_force_removes_non_empty_list(
+    db: Engine, frozen_clock: datetime, tmp_path: Path
+) -> None:
+    spool = tmp_path / "spool"
+    spool.mkdir()
+    _seed_mlmmj_domain(db, frozen_clock, "lists.example.org")
+    svc = _service(db, frozen_clock, spool)
+    svc.add(MailingListCreate(address="team@lists.example.org", owners=["alice@example.org"]))
+    svc.subscribe(address="team@lists.example.org", email="bob@example.org")
+    svc.delete("team@lists.example.org", force=True)
+    assert not (spool / "team@lists.example.org").exists()
+
+
+def test_delete_raises_not_found_for_unknown_list(
+    db: Engine, frozen_clock: datetime, tmp_path: Path
+) -> None:
+    spool = tmp_path / "spool"
+    spool.mkdir()
+    _seed_mlmmj_domain(db, frozen_clock, "lists.example.org")
+    svc = _service(db, frozen_clock, spool)
+    with pytest.raises(NotFoundError):
+        svc.delete("missing@lists.example.org")

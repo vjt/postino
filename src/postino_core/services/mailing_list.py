@@ -26,7 +26,9 @@ from postino_core.audit import mk_action, write_audit
 from postino_core.db import translate_db_errors
 from postino_core.errors import (
     AlreadyExistsError,
+    CapacityError,
     ConfigError,
+    NotFoundError,
 )
 from postino_core.models import MailingList, MailingListCreate
 
@@ -125,6 +127,32 @@ class MailingListService:
     def get(self, address: EmailStr) -> MailingList | None:
         """Pure read; returns None if list does not exist."""
         return self._adapter.get(address=address)
+
+    def delete(self, address: EmailStr, *, force: bool = False) -> None:
+        """Delete a mailing list.
+
+        Refuses (CapacityError) if ``subscriber_count > 0`` and ``force`` is False.
+        Raises NotFoundError if the list spool dir does not exist.
+        """
+        _, _, domain = str(address).partition("@")
+        ml = self._adapter.get(address=address)
+        if ml is None:
+            raise NotFoundError(f"mailing list {address!r} does not exist")
+        if ml.subscriber_count > 0 and not force:
+            raise CapacityError(
+                f"mailing list {address!r} has {ml.subscriber_count} subscribers; "
+                f"pass --force to delete anyway"
+            )
+        self._adapter.delete(address=address)
+        with translate_db_errors(), self._engine.begin() as conn:
+            write_audit(
+                conn,
+                self._md,
+                clock=self._clock,
+                action=mk_action("mailing_list", "delete"),
+                domain=domain,
+                data=f"{address} force={force}",
+            )
 
     def _validate_domain_is_mlmmj(self, conn: Connection, domain: str) -> None:
         d = self._md.tables["domain"]
