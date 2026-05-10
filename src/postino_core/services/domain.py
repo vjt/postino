@@ -18,6 +18,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.exc import IntegrityError
 
+from postino_core.audit import mk_action, write_audit
 from postino_core.db import translate_db_errors
 from postino_core.enums import DomainTransport, MailboxStatus
 from postino_core.errors import AlreadyExistsError, CapacityError, DBError, NotFoundError
@@ -95,6 +96,14 @@ class DomainService:
                 )
             except IntegrityError as e:
                 raise AlreadyExistsError(f"domain {domain!r} already exists") from e
+            write_audit(
+                conn,
+                self._md,
+                clock=self._clock,
+                action=mk_action("domain", "create"),
+                domain=domain,
+                data=domain,
+            )
         got = self.get(domain)
         if got is None:
             raise DBError("domain vanished after insert")
@@ -165,6 +174,14 @@ class DomainService:
                 conn.execute(domain_admins.delete().where(domain_admins.c.domain == domain))
 
             conn.execute(d.delete().where(d.c.domain == domain))
+            write_audit(
+                conn,
+                self._md,
+                clock=self._clock,
+                action=mk_action("domain", "delete"),
+                domain=domain,
+                data=f"{domain} force={force}",
+            )
 
         # Post-commit: filesystem cleanup. Best-effort; a stranded
         # maildir tree is recoverable via `postino check`, while a

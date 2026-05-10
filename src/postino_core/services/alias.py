@@ -11,6 +11,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.exc import IntegrityError
 
+from postino_core.audit import mk_action, write_audit
 from postino_core.db import translate_db_errors
 from postino_core.enums import MailboxStatus
 from postino_core.errors import AlreadyExistsError, CapacityError, DBError, NotFoundError
@@ -56,6 +57,14 @@ class AliasService:
                 )
             except IntegrityError as e:
                 raise AlreadyExistsError(f"alias {address} already exists") from e
+            write_audit(
+                conn,
+                self._md,
+                clock=self._clock,
+                action=mk_action("alias", "create"),
+                domain=domain,
+                data=f"{address}->{goto}",
+            )
         got = self.get(address)
         if got is None:
             raise DBError("alias vanished after insert")
@@ -92,10 +101,19 @@ class AliasService:
         Raises: NotFoundError if the alias does not exist.
         """
         alias = self._md.tables["alias"]
+        _, _, domain = str(address).partition("@")
         with translate_db_errors(), self._engine.begin() as conn:
             result = conn.execute(alias.delete().where(alias.c.address == str(address)))
             if result.rowcount == 0:
                 raise NotFoundError(f"alias {address} does not exist")
+            write_audit(
+                conn,
+                self._md,
+                clock=self._clock,
+                action=mk_action("alias", "delete"),
+                domain=domain,
+                data=str(address),
+            )
 
     def list(self, *, domain: str | None = None) -> list[Alias]:
         """List aliases, optionally scoped to a domain.

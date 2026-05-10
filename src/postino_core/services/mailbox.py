@@ -26,6 +26,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.exc import IntegrityError
 
+from postino_core.audit import mk_action, write_audit
 from postino_core.db import translate_db_errors
 from postino_core.enums import MailboxStatus, PasswordScheme
 from postino_core.errors import (
@@ -86,6 +87,14 @@ class MailboxService:
                     name=create.name,
                     password=create.password,
                     scheme=create.scheme,
+                )
+                write_audit(
+                    conn,
+                    self._md,
+                    clock=self._clock,
+                    action=mk_action("mailbox", "create"),
+                    domain=domain,
+                    data=str(create.username),
                 )
         except Exception:
             if not maildir_existed:
@@ -229,6 +238,14 @@ class MailboxService:
             quota2 = self._md.tables["quota2"]
             conn.execute(quota2.delete().where(quota2.c.username == str(username)))
             conn.execute(mailbox.delete().where(mailbox.c.username == str(username)))
+            write_audit(
+                conn,
+                self._md,
+                clock=self._clock,
+                action=mk_action("mailbox", "delete"),
+                domain=existing.domain,
+                data=str(username),
+            )
         if orphan_aliases:
             _logger.warning(
                 "deleted %s; %d alias(es) still target it: %s",
@@ -283,13 +300,23 @@ class MailboxService:
         scheme: PasswordScheme,
     ) -> None:
         """Change password via the active IdentityProvider."""
+        _, _, domain = str(username).partition("@")
         with translate_db_errors(), self._engine.begin() as conn:
             self._identity.set_password(conn, str(username), password, scheme)
+            write_audit(
+                conn,
+                self._md,
+                clock=self._clock,
+                action=mk_action("mailbox", "set_password"),
+                domain=domain,
+                data=str(username),
+            )
 
     def set_name(self, username: EmailStr, name: str) -> None:
         """Update the mailbox display name."""
         mailbox = self._md.tables["mailbox"]
         now = self._clock()
+        _, _, domain = str(username).partition("@")
         with translate_db_errors(), self._engine.begin() as conn:
             result = conn.execute(
                 mailbox.update()
@@ -298,11 +325,20 @@ class MailboxService:
             )
             if result.rowcount == 0:
                 raise NotFoundError(f"mailbox {username} does not exist")
+            write_audit(
+                conn,
+                self._md,
+                clock=self._clock,
+                action=mk_action("mailbox", "set_name"),
+                domain=domain,
+                data=str(username),
+            )
 
     def set_status(self, username: EmailStr, status: MailboxStatus) -> None:
         """Enable / disable the mailbox."""
         mailbox = self._md.tables["mailbox"]
         now = self._clock()
+        _, _, domain = str(username).partition("@")
         with translate_db_errors(), self._engine.begin() as conn:
             result = conn.execute(
                 mailbox.update()
@@ -311,6 +347,14 @@ class MailboxService:
             )
             if result.rowcount == 0:
                 raise NotFoundError(f"mailbox {username} does not exist")
+            write_audit(
+                conn,
+                self._md,
+                clock=self._clock,
+                action=mk_action("mailbox", "set_status"),
+                domain=domain,
+                data=f"{username}={status.name}",
+            )
 
     def set_quota(self, username: EmailStr, quota_bytes: int) -> None:
         """Set the per-mailbox quota cap."""
@@ -320,6 +364,7 @@ class MailboxService:
             raise ConfigError("quota_bytes cannot be negative")
         mailbox = self._md.tables["mailbox"]
         now = self._clock()
+        _, _, domain = str(username).partition("@")
         with translate_db_errors(), self._engine.begin() as conn:
             result = conn.execute(
                 mailbox.update()
@@ -328,3 +373,11 @@ class MailboxService:
             )
             if result.rowcount == 0:
                 raise NotFoundError(f"mailbox {username} does not exist")
+            write_audit(
+                conn,
+                self._md,
+                clock=self._clock,
+                action=mk_action("mailbox", "set_quota"),
+                domain=domain,
+                data=f"{username}={quota_bytes}",
+            )
