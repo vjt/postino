@@ -39,7 +39,7 @@ def test_quota_show_missing_returns_none(db: Engine) -> None:
 
 
 def test_quota_show_all(db: Engine) -> None:
-    _seed_quota(db, "a@x.test", 100, 1)
-    _seed_quota(db, "b@x.test", 200, 2)
+    _seed_quota(db, "a@x.example.org", 100, 1)
+    _seed_quota(db, "b@x.example.org", 200, 2)
     out = {u.username: u.bytes_used for u in _service(db).list()}
-    assert out == {"a@x.test": 100, "b@x.test": 200}
+    assert out == {"a@x.example.org": 100, "b@x.example.org": 200}

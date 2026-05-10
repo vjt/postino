@@ -49,9 +49,9 @@ def test_alias_add_get(db: Engine, frozen_clock: datetime) -> None:
 def test_alias_add_duplicate_raises(db: Engine, frozen_clock: datetime) -> None:
     _seed_domain(db, "example.com")
     svc = _service(db, frozen_clock)
-    svc.add(address="foo@example.com", goto="a@x.test")
+    svc.add(address="foo@example.com", goto="a@x.example.org")
     with pytest.raises(AlreadyExistsError):
-        svc.add(address="foo@example.com", goto="b@x.test")
+        svc.add(address="foo@example.com", goto="b@x.example.org")
 
 
 def test_alias_delete(db: Engine, frozen_clock: datetime) -> None:
@@ -70,10 +70,10 @@ def test_alias_delete_missing_raises(db: Engine, frozen_clock: datetime) -> None
 
 def test_alias_list_by_domain(db: Engine, frozen_clock: datetime) -> None:
     _seed_domain(db, "example.com")
-    _seed_domain(db, "other.test")
+    _seed_domain(db, "other.example.org")
     svc = _service(db, frozen_clock)
-    svc.add(address="a@example.com", goto="x@x.test")
-    svc.add(address="b@example.com", goto="x@x.test")
-    svc.add(address="c@other.test", goto="x@x.test")
+    svc.add(address="a@example.com", goto="x@x.example.org")
+    svc.add(address="b@example.com", goto="x@x.example.org")
+    svc.add(address="c@other.example.org", goto="x@x.example.org")
     addresses = {a.address for a in svc.list(domain="example.com")}
     assert addresses == {"a@example.com", "b@example.com"}

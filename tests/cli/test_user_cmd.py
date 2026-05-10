@@ -113,7 +113,7 @@ def test_user_add_unknown_domain_exit_1(
         [
             "user",
             "add",
-            "x@noexist.test",
+            "x@noexist.example.org",
             "--password",
             "p",
             "--name",

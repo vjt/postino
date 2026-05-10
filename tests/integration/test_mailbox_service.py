@@ -130,7 +130,7 @@ def test_mailbox_add_unknown_domain_raises(
     with pytest.raises(NotFoundError):
         svc.add(
             MailboxCreate(
-                username="foo@noexist.test",
+                username="foo@noexist.example.org",
                 password=SecretStr("h"),
                 name="",
                 quota_bytes=0,
@@ -145,7 +145,7 @@ def test_mailbox_add_capacity_exceeded(
     fake_postcreation_hook: Path,
     frozen_clock: datetime,
 ) -> None:
-    _seed_domain(db, "tiny.test", max_mailboxes=1)
+    _seed_domain(db, "tiny.example.org", max_mailboxes=1)
     svc = _build_service(
         db,
         FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1),
@@ -154,7 +154,7 @@ def test_mailbox_add_capacity_exceeded(
     )
     svc.add(
         MailboxCreate(
-            username="a@tiny.test",
+            username="a@tiny.example.org",
             password=SecretStr("p"),
             name="",
             quota_bytes=0,
@@ -164,7 +164,7 @@ def test_mailbox_add_capacity_exceeded(
     with pytest.raises(CapacityError):
         svc.add(
             MailboxCreate(
-                username="b@tiny.test",
+                username="b@tiny.example.org",
                 password=SecretStr("p"),
                 name="",
                 quota_bytes=0,

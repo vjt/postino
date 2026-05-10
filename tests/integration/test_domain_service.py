@@ -38,7 +38,7 @@ def test_domain_add_get(db: Engine, frozen_clock: datetime) -> None:
 def test_domain_add_duplicate(db: Engine, frozen_clock: datetime) -> None:
     svc = _service(db, frozen_clock)
     svc.add(
-        domain="x.test",
+        domain="x.example.org",
         description="",
         max_aliases=0,
         max_mailboxes=0,
@@ -49,7 +49,7 @@ def test_domain_add_duplicate(db: Engine, frozen_clock: datetime) -> None:
     )
     with pytest.raises(AlreadyExistsError):
         svc.add(
-            domain="x.test",
+            domain="x.example.org",
             description="",
             max_aliases=0,
             max_mailboxes=0,
@@ -63,7 +63,7 @@ def test_domain_add_duplicate(db: Engine, frozen_clock: datetime) -> None:
 def test_domain_delete(db: Engine, frozen_clock: datetime) -> None:
     svc = _service(db, frozen_clock)
     svc.add(
-        domain="x.test",
+        domain="x.example.org",
         description="",
         max_aliases=0,
         max_mailboxes=0,
@@ -72,19 +72,19 @@ def test_domain_delete(db: Engine, frozen_clock: datetime) -> None:
         transport=DomainTransport.VIRTUAL,
         backupmx=False,
     )
-    svc.delete("x.test")
-    assert svc.get("x.test") is None
+    svc.delete("x.example.org")
+    assert svc.get("x.example.org") is None
 
 
 def test_domain_delete_missing(db: Engine, frozen_clock: datetime) -> None:
     svc = _service(db, frozen_clock)
     with pytest.raises(NotFoundError):
-        svc.delete("ghost.test")
+        svc.delete("ghost.example.org")
 
 
 def test_domain_list(db: Engine, frozen_clock: datetime) -> None:
     svc = _service(db, frozen_clock)
-    for d in ("a.test", "b.test"):
+    for d in ("a.example.org", "b.example.org"):
         svc.add(
             domain=d,
             description="",
@@ -96,4 +96,4 @@ def test_domain_list(db: Engine, frozen_clock: datetime) -> None:
             backupmx=False,
         )
     out = {d.domain for d in svc.list()}
-    assert out == {"a.test", "b.test"}
+    assert out == {"a.example.org", "b.example.org"}

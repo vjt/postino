@@ -30,7 +30,7 @@ def test_domain_add_list_del(
         [
             "domain",
             "add",
-            "x.test",
+            "x.example.org",
             "--description",
             "test",
             "--max-mailboxes",
@@ -46,7 +46,7 @@ def test_domain_add_list_del(
 
     r = runner.invoke(app, ["--json", "domain", "list"], env=env)
     assert r.exit_code == 0
-    assert "x.test" in r.output
+    assert "x.example.org" in r.output
 
-    r = runner.invoke(app, ["domain", "del", "x.test", "--yes"], env=env)
+    r = runner.invoke(app, ["domain", "del", "x.example.org", "--yes"], env=env)
     assert r.exit_code == 0
