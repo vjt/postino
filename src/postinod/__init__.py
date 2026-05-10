@@ -10,4 +10,4 @@ Spec: docs/superpowers/specs/2026-05-10-postinod-design.md
 
 from __future__ import annotations
 
-__version__ = "0.2.0.dev0"
+__version__ = "0.2.0"

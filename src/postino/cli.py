@@ -88,10 +88,25 @@ def _load_settings() -> PostinoSettings:
         raise ConfigError(f"invalid config: {details}") from e
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        from importlib.metadata import version
+
+        typer.echo(f"il-postino {version('il-postino')}")
+        raise typer.Exit()
+
+
 @app.callback()
 def _entry(  # pyright: ignore[reportUnusedFunction]
     ctx: typer.Context,
     json: bool = typer.Option(False, "--json", help="Output JSON."),
+    _version: bool = typer.Option(
+        False,
+        "--version",
+        help="Show version and exit.",
+        callback=_version_callback,
+        is_eager=True,
+    ),
 ) -> None:
     install_traceback(show_locals=False)
     try:

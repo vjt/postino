@@ -1,6 +1,6 @@
 # postino
 
-![postino — il postino delivers your mail config](docs/assets/cover.jpg)
+![postino — il postino delivers your mail config](https://cdn.jsdelivr.net/gh/vjt/postino@v0.2.0/docs/assets/cover.jpg)
 
 [![PyPI](https://img.shields.io/pypi/v/il-postino.svg)](https://pypi.org/project/il-postino/)
 [![Python](https://img.shields.io/pypi/pyversions/il-postino.svg)](https://pypi.org/project/il-postino/)

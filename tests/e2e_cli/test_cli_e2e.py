@@ -313,14 +313,12 @@ def test_postino_reconcile_exits_4(e2e_env: dict[str, str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# version flag (Task 20, not yet implemented — pre-add as xfail)
+# version flag
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(reason="Task 20: --version flag not yet implemented", strict=True)
 def test_postino_version(e2e_env: dict[str, str]) -> None:
-    """postino --version should print the version string and exit 0."""
+    """postino --version prints the il-postino package version and exits 0."""
     code, out, err = _run(["--version"], e2e_env)
     assert code == 0, f"stderr: {err}"
-    # Should contain something like "postino 0.2.0"
-    assert "postino" in out.lower() or "version" in out.lower()
+    assert "il-postino" in out.lower()
