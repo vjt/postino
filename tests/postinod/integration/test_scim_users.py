@@ -2,91 +2,14 @@
 
 from __future__ import annotations
 
-import base64
-import collections.abc
-from datetime import UTC, datetime, timedelta
-from pathlib import Path
-
-import jwt
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
 from sqlalchemy import select
 
-from .conftest import PreparedTestDB, StubJwks
+from .conftest import PreparedTestDB
 
 pytestmark = pytest.mark.integration
-
-ISSUER = "https://idp.test"
-AUDIENCE = "postinod"
-KID = "test-kid"
-
-
-@pytest.fixture(scope="module")
-def keypair() -> RSAPrivateKey:
-    return rsa.generate_private_key(public_exponent=65537, key_size=2048)
-
-
-@pytest.fixture
-def auth_header(keypair: RSAPrivateKey) -> dict[str, str]:
-    pem = keypair.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    )
-    token: str = jwt.encode(
-        {
-            "iss": ISSUER,
-            "aud": AUDIENCE,
-            "sub": "scim-client",
-            "exp": datetime.now(UTC) + timedelta(hours=1),
-        },
-        pem,  # type: ignore[arg-type]  # WHY: cryptography returns bytes from private_bytes; pyjwt accepts bytes | str but is typed as str
-        algorithm="RS256",
-        headers={"kid": KID},
-    )
-    return {"Authorization": f"Bearer {token}"}
-
-
-@pytest.fixture
-async def client(
-    prepared_test_db: PreparedTestDB,
-    keypair: RSAPrivateKey,
-    app_paths: tuple[Path, Path],
-) -> collections.abc.AsyncGenerator[AsyncTestClient[Litestar], None]:
-    from postinod.app import build_app_for_test
-
-    def _b64(i: int) -> str:
-        b = i.to_bytes((i.bit_length() + 7) // 8, "big")
-        return base64.urlsafe_b64encode(b).decode().rstrip("=")
-
-    pub_numbers = keypair.public_key().public_numbers()
-    jwk: dict[str, object] = {
-        "kty": "RSA",
-        "kid": KID,
-        "use": "sig",
-        "alg": "RS256",
-        "n": _b64(pub_numbers.n),
-        "e": _b64(pub_numbers.e),
-    }
-
-    mail_root, postcreation_hook = app_paths
-    jwks = StubJwks([jwk])
-    app = build_app_for_test(
-        db_engine=prepared_test_db.engine,
-        metadata=prepared_test_db.metadata,
-        hmac_secret=b"unused",
-        mail_root=mail_root,
-        postcreation_hook=postcreation_hook,
-        scim_issuer=ISSUER,
-        scim_audience=AUDIENCE,
-        jwks=jwks,
-    )
-    async with AsyncTestClient(app=app) as c:
-        yield c
 
 
 async def test_post_creates_user(

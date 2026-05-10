@@ -6,9 +6,10 @@ provider selection) lands in task 15. This file currently exposes:
 * `build_app(*, ready_callback)` — minimal app with health endpoints,
   used by Task 3's tests and Task 4's guard tests.
 * `build_app_for_test(...)` — test-only factory for the integration
-  suite (Tasks 9, 12). Takes pre-built dependencies (Engine, MetaData,
-  HMAC secret, optional SCIM JWKS stub) and wires the Zitadel router,
-  SCIM Users router, and health router. Production wiring lands in Task 15.
+  suite (Tasks 9, 12, 13). Takes pre-built dependencies (Engine,
+  MetaData, HMAC secret, optional SCIM JWKS stub) and wires the
+  Zitadel router, SCIM Users router, SCIM Aliases router, and health
+  router. Production wiring lands in Task 15.
 """
 
 from __future__ import annotations
@@ -24,11 +25,13 @@ from sqlalchemy.engine import Engine
 from postino_core.fs import FilesystemAdapter
 from postino_core.hooks import HookRunner
 from postino_core.providers import NoAuthProvider
+from postino_core.services.alias import AliasService
 from postino_core.services.mailbox import MailboxService
 from postinod.auth.hmac_guard import HmacVerifier
 from postinod.auth.jwks import JwksCache
 from postinod.auth.jwt_guard import JwksLike, JwtVerifier
 from postinod.health import build_health_router
+from postinod.scim.aliases import build_aliases_router
 from postinod.scim.users import build_users_router
 from postinod.zitadel.events import build_zitadel_router
 
@@ -86,6 +89,7 @@ def build_app_for_test(
         clock=_utc_now,
         metadata=metadata,
     )
+    alias_service = AliasService(engine=db_engine, metadata=metadata, clock=_utc_now)
     verifier = HmacVerifier(secret=hmac_secret)
 
     if jwks is None:
@@ -117,6 +121,13 @@ def build_app_for_test(
                 metadata=metadata,
                 clock=_utc_now,
                 default_quota_bytes=default_quota_bytes,
+            ),
+            build_aliases_router(
+                alias_service=alias_service,
+                jwt_verifier=jwt_verifier,
+                engine=db_engine,
+                metadata=metadata,
+                clock=_utc_now,
             ),
         ],
         debug=False,
