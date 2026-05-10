@@ -49,5 +49,7 @@ def verify_password(password: SecretStr, stored: str) -> bool:
         scheme = PasswordScheme(scheme_name)
     except ValueError as e:
         raise ConfigError(f"unknown password scheme: {scheme_name!r}") from e
-    verifier = _VERIFIERS[scheme]
+    verifier = _VERIFIERS.get(scheme)
+    if verifier is None:
+        raise ConfigError(f"no verifier for scheme {scheme}")
     return cast(bool, verifier.verify(password.get_secret_value(), hashed))

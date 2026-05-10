@@ -30,7 +30,7 @@
 
 [test_no_cast."src/postino_core/password.py"]
 35 = "WHY: passlib's hash()/verify() return Any; PR-A5 introduces a typed PasswordHasher Protocol replacing the cast."
-53 = "WHY: same — passlib returns Any, fixed in PR-A5 by Protocol wrapper."
+55 = "WHY: same — passlib returns Any, fixed in PR-A5 by Protocol wrapper."
 
 [test_type_ignore_justified]
 # Most pre-existing ignores are SQLAlchemy `RowMapping` access returning Any

@@ -41,3 +41,16 @@ def test_verify_unknown_scheme_raises() -> None:
 def test_verify_no_scheme_prefix_raises() -> None:
     with pytest.raises(ConfigError):
         verify_password(SecretStr("x"), "no-prefix-here")
+
+
+def test_verify_known_scheme_without_registered_verifier_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Defence-in-depth: if PasswordScheme adds a value but `_VERIFIERS`
+    is not extended, callers get ConfigError, not KeyError. Mirrors
+    `hash_password`'s symmetric guard."""
+    from postino_core import password
+
+    monkeypatch.setitem(password._VERIFIERS, PasswordScheme.BCRYPT, None)  # pyright: ignore[reportPrivateUsage]  # WHY: defence-in-depth test for the dispatch-table fallback path; module-private by design.
+    with pytest.raises(ConfigError):
+        verify_password(SecretStr("x"), "{BLF-CRYPT}garbage")
