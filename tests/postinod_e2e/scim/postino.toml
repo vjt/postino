@@ -1,0 +1,16 @@
+identity_backend = "noauth"
+postfix_sql_dir = "/etc/postfix"
+virtual_mailbox_base = "/var/vmail"
+postcreation_hook = "/etc/postino/post-creation.sh"
+postcreation_hook_timeout = 5.0
+vmail_uid = 125
+vmail_gid = 125
+default_password_scheme = "BLF-CRYPT"
+default_quota_bytes = 1073741824
+
+[postinod]
+listen = "0.0.0.0:8443"
+zitadel_issuer = "http://jwks-stub"
+scim_issuer = "http://jwks-stub"
+scim_audience = "postinod"
+scim_jwks_refresh_seconds = 60

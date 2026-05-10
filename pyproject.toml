@@ -100,12 +100,13 @@ venv = ".venv"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-x -q"
+addopts = "-x -q -m 'not e2e'"
 asyncio_mode = "auto"
 markers = [
     "integration: tests that require POSTINO_TEST_DB_URL",
     "cli: end-to-end CLI tests",
     "architecture: static rule checks under tests/architecture",
+    "e2e: end-to-end tests that require Docker",
 ]
 
 [tool.importlinter]

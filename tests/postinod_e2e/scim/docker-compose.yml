@@ -1,0 +1,37 @@
+services:
+  mariadb:
+    image: mariadb:11
+    environment:
+      MARIADB_ROOT_PASSWORD: rootpw
+      MARIADB_DATABASE: postfix
+      MARIADB_USER: postfix
+      MARIADB_PASSWORD: postfixpw
+    healthcheck:
+      test: ["CMD", "mariadb", "-uroot", "-prootpw", "postfix", "-e", "SELECT 1 FROM domain LIMIT 1;"]
+      interval: 3s
+      retries: 40
+      start_period: 10s
+    volumes:
+      - ./schema/postfixadmin-mariadb.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+
+  jwks-stub:
+    image: nginx:alpine
+    volumes:
+      - ./jwks/:/usr/share/nginx/html/.well-known/:ro
+
+  postinod:
+    build:
+      context: ../../..
+      dockerfile: docker/postinod/Dockerfile
+    depends_on:
+      mariadb: { condition: service_healthy }
+    environment:
+      POSTINOD_ZITADEL_HMAC_SECRET: e2e-secret
+      POSTINO_CONFIG: /etc/postino/postino.toml
+    volumes:
+      - ./postino.toml:/etc/postino/postino.toml:ro
+      - ./post-creation.sh:/etc/postino/post-creation.sh:ro
+      - ./postfix-stub/:/etc/postfix/:ro
+    ports:
+      - "18443:8443"
