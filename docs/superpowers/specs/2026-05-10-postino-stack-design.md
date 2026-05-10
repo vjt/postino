@@ -1,10 +1,10 @@
 # postino-stack — infra design spec
 
-**Status:** draft, brainstormed 2026-05-10
+**Status:** draft, brainstormed 2026-05-10 (amended same-day)
 **Topic:** parallel classic mail stack on athena, evaluated alongside the existing stalwart deployment
-**Scope:** infrastructure bring-up only — containers, networks, volumes, certbot relocation, base configs. **No migration, no decommission, no postinod install in this spec.**
+**Scope:** infrastructure bring-up only — containers, networks, volumes, certbot relocation, base configs. **No migration, no decommission. The postino-agent container is built and installed at the latest currently-available `il-postino` PyPI version; postinod *behaviour* (Zitadel/SCIM listening) arrives via subsequent version bumps.**
 
-Sister spec: [`2026-05-10-postinod-design.md`](2026-05-10-postinod-design.md) — the IdP-driven provisioning daemon that will eventually run inside this stack. postinod install is out of scope here.
+Sister spec: [`2026-05-10-postinod-design.md`](2026-05-10-postinod-design.md) — the IdP-driven provisioning daemon. The container chassis is provisioned here; the daemon's full feature set lands as later `il-postino` versions are published, picked up by bumping the pinned version + rebuild.
 
 ---
 
@@ -55,7 +55,9 @@ stalwart is **not** decommissioned. Legacy mail flow is **not** modified. No mai
   │   web (nginx + s6 + php-fpm + public-inbox-httpd) :8443      │
   │     ├── /webmail   → snappymail (PHP-FPM, internal socket)  │
   │     ├── /archives  → public-inbox-httpd (internal port)     │
-  │     └── /admin     → reserved for future postinod (404 now) │
+  │     └── /admin     → postino-agent /healthz today,          │
+  │                       Zitadel/SCIM endpoints when postinod  │
+  │                       version ships                         │
   │                                                              │
   │   mta (postfix + mlmmj, s6-supervised)  :2525 :4651 :5587   │
   │   dovecot                               :1143 :9931 :14190  │
@@ -63,6 +65,7 @@ stalwart is **not** decommissioned. Legacy mail flow is **not** modified. No mai
   │   redis                                 (internal 6379)     │
   │   mariadb                               (internal 3306)     │
   │   clamav                                (profile=clamav)    │
+  │   postino-agent                         (internal HTTP 8080) │
   │                                                              │
   │  state: /srv/postino/data/                                  │
   │    maildirs/  mysql/  sieves/  lists/  archives/  redis/   │
@@ -98,13 +101,15 @@ stalwart is **not** decommissioned. Legacy mail flow is **not** modified. No mai
 | `postino-redis` | `redis:7-alpine` | redis with AOF persistence | ~30 MB | (internal only) |
 | `postino-web` | `debian:bookworm-slim` + s6-overlay (custom Dockerfile) | nginx, php-fpm, snappymail, public-inbox-httpd, public-inbox tools | ~150 MB | 8443 |
 | `postino-clamav` | `clamav/clamav:stable` | clamd, freshclam | ~800 MB | (internal only) — **profile `clamav`, off by default** |
+| `postino-agent` | `python:3.13-slim` (custom Dockerfile) | `pip install il-postino==<pinned>` (latest at build time) | ~80 MB | (internal only) |
 | `certbot` | `certbot/certbot:latest` | certbot | ~30 MB | port 80 host-net (only during issuance/renewal) |
 
-**Total estimated steady-state RAM (clamav off): ~820 MB.** With stalwart at 1.6 GB and grafana stack ~400 MB, the box has ~5 GB headroom. clamav can be flipped on for full-fidelity tests with comfortable margin.
+**Total estimated steady-state RAM (clamav off): ~900 MB.** With stalwart at 1.6 GB and grafana stack ~400 MB, the box has ~5 GB headroom. clamav can be flipped on for full-fidelity tests with comfortable margin.
 
 ### 4.2 Image-build policy
 
-- `postino-agent` (postinod) is **out of scope for this spec** — see [`2026-05-10-postinod-design.md`](2026-05-10-postinod-design.md). When that spec lands, the agreed install policy is: install from PyPI (`pip install il-postino==<pinned>`). No source bind-mount, no editable install. Pre-release iteration via local-built wheel + `twine upload`. One install path, one source of truth. Recorded here only so the future Dockerfile is unambiguous; nothing in this spec installs the agent.
+- `postino-agent` — Dockerfile at `/srv/postino/docker/agent/Dockerfile`. `FROM python:3.13-slim`, single `pip install il-postino==${POSTINO_VERSION}` step where `POSTINO_VERSION` is a build-arg defaulting to whatever is current on PyPI at first build (today: `0.1.1`). No source bind-mount, no editable install — the wheel is the only artifact. Pre-release iteration in the postinod session: `python -m build` locally → `twine upload` → `docker compose build --build-arg POSTINO_VERSION=<new>` here → `docker compose up -d postino-agent` to roll. One install path, one source of truth.
+- **Container CMD policy.** Today `il-postino` ships only the CLI (no daemon entry-point). The container's `CMD` is a small entrypoint script: if the installed wheel exposes a `postinod` console script, run `postinod serve`; otherwise sleep, log "postinod not yet available in version X.Y.Z", and stay healthy on a trivial `/healthz` HTTP endpoint that returns the installed version. Bumping to a postinod-bearing version automatically activates the daemon path on next container restart.
 - `mta` and `web` — Dockerfiles checked into `/srv/postino/docker/{mta,web}/Dockerfile`. Built on athena via `docker compose build`. No registry push for now; rebuild from source as needed.
 
 ### 4.3 Full-text search
@@ -125,11 +130,11 @@ rspamd is the **only** classifier — SpamAssassin is dropped from the legacy ca
 - ARC signing (outbound)
 - Greylisting (redis backend, off by default during eval to avoid noise)
 - Ratelimit module (redis backend)
-- RBL: Spamhaus ZEN, SURBL multi
+- RBL: **Spamhaus DQS** (Data Query Service, registered) — uses authenticated zones `${SPAMHAUS_DQS_KEY}.zen.dq.spamhaus.net`, `${SPAMHAUS_DQS_KEY}.dbl.dq.spamhaus.net`, `${SPAMHAUS_DQS_KEY}.zrd.dq.spamhaus.net`. The DQS key is sensitive and lives only in `/srv/postino/.env` (mode 600), referenced by rspamd config via env-var template substitution at container startup. Plus SURBL multi as secondary.
 - Neural module (off by default; opt-in once corpus exists)
 - ClamAV antivirus (only when `COMPOSE_PROFILES=clamav` set)
 
-Strengthening over legacy is principally the addition of ARC signing and modern DKIM-via-rspamd (replacing opendkim), plus the choice of redis-backed bayes/fuzzy with persistence.
+Strengthening over legacy is principally: (a) ARC signing, (b) modern DKIM-via-rspamd replacing opendkim, (c) redis-backed bayes/fuzzy with persistence, (d) Spamhaus DQS instead of public free-rate-limited zones.
 
 ### 4.5 Mailing lists
 
@@ -160,9 +165,11 @@ internal-only:
   postino-rspamd:11334
   postino-redis:6379
   postino-clamav:3310
+  postino-agent:8080  (HTTP — /healthz today; Zitadel/SCIM in future versions)
   postino-mta milter port to rspamd
   postino-web → snappymail php-fpm socket
   postino-web → public-inbox-httpd port
+  postino-web → postino-agent (reverse-proxied at /admin/)
 
 inter-container traffic: plaintext on the bridge.
 ```
@@ -238,6 +245,8 @@ Source-of-truth on dev box (`/srv/olografix/scripts/deploy-cutover.sh`) is updat
   docker/
     mta/Dockerfile                              postfix + mlmmj + s6
     web/Dockerfile                              nginx + php-fpm + snappymail + public-inbox + s6
+    agent/Dockerfile                            python:3.13-slim + pip install il-postino==${POSTINO_VERSION}
+    agent/entrypoint.sh                         postinod-or-sleep dispatcher
   config/
     postfix/{main.cf,master.cf,mysql-virtual_*.cf,transport,...}
     dovecot/{dovecot.conf,conf.d/*.conf,dovecot-sql.conf.ext}
@@ -282,9 +291,10 @@ The deliverable is "stack is up, healthy, and minimally exercisable." Acceptance
 7. **web/snappymail** — `curl -k https://localhost:8443/webmail/` returns 200; loginable as `smoke@stack.local` (interactive check, scripted via simple HTTP POST).
 8. **web/public-inbox** — `curl -k https://localhost:8443/archives/` returns 200, lists `smoketest`.
 9. **certbot** — container running, `certbot certificates` lists either zero certs (pre-issuance) or the eventual `athena.olografix.org` entry.
-10. **stalwart unaffected** — port 25/443/465/993/4190 still answer, `docker exec stalwart-mail stalwart-cli server status` OK.
+10. **postino-agent** — container running, `curl -k https://localhost:8443/admin/healthz` returns 200 with JSON body `{"version": "<installed il-postino version>", "postinod": false}` (or `true` once a postinod-bearing version is installed).
+11. **stalwart unaffected** — port 25/443/465/993/4190 still answer, `docker exec stalwart-mail stalwart-cli server status` OK.
 
-Pass = all 10 green. Failure of any single check fails the spec acceptance.
+Pass = all 11 green. Failure of any single check fails the spec acceptance.
 
 ## 10. Risks and mitigations
 
@@ -303,7 +313,7 @@ Pass = all 10 green. Failure of any single check fails the spec acceptance.
 
 These are intentionally not addressed by this spec, in order to keep the bring-up surgical:
 
-- **postinod install** — separate spec, separate session.
+- **postinod *behaviour*** — the Zitadel/SCIM listening, audit emission, NoAuthProvider routing, etc. arrive in later `il-postino` versions and are owned by the postinod design spec. *The container that will host them is in scope here* and is brought up at the latest currently-available version (CLI-only today).
 - **User/alias/domain provisioning** — neither manual seed nor migration from legacy. Stack stays empty post-bring-up except for the smoke-test fixture (which is torn down).
 - **Shadow-BCC tee from legacy postfix to athena:2525** — happens later, when the eval phase formally starts.
 - **Sieve port from stalwart** — later.
@@ -326,6 +336,7 @@ Rough sequencing for a follow-up implementation plan:
 6. Bring up postino-mta + postino-dovecot, smoke-test #2 + #3.
 7. Bring up postino-web (nginx + snappymail + public-inbox), smoke-test #7 + #8.
 8. Bring up mlmmj test list, smoke-test #6.
-9. Run full smoke-test #1-#10. Spec accepted on green.
+9. Build and bring up postino-agent at currently-available `il-postino` version, smoke-test #10.
+10. Run full smoke-test #1-#11. Spec accepted on green.
 
 ---
