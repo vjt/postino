@@ -38,6 +38,14 @@ def integration_engine() -> Iterator[Engine]:
     engine = create_engine(url, future=True)
     schema_sql = FIXTURE_SQL.read_text()
     with engine.begin() as conn:
+        # Drop any tables left over from a prior session before replaying.
+        existing = MetaData()
+        existing.reflect(bind=conn)
+        if existing.tables:
+            conn.execute(text("SET FOREIGN_KEY_CHECKS=0"))
+            for tbl in reversed(existing.sorted_tables):
+                conn.execute(text(f"DROP TABLE IF EXISTS {tbl.name}"))
+            conn.execute(text("SET FOREIGN_KEY_CHECKS=1"))
         for stmt in schema_sql.split(";"):
             stmt = stmt.strip()
             if not stmt:
