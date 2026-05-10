@@ -8,10 +8,31 @@ Keep it concise. Move anything verbose to `docs/`.
 `postino` (PyPI: `il-postino`) — typed Python CLI to admin a Postfix +
 Dovecot mail stack on the PostfixAdmin SQL schema.
 
-- Two src packages: `postino_core` (library) + `postino` (Typer CLI)
+- Three src packages: `postino_core` (library) + `postino` (Typer CLI) +
+  `postinod` (litestar daemon)
 - Pydantic v2 strict, SQLAlchemy 2.0 reflection, Rich, passlib (bcrypt + md5_crypt + sha512_crypt)
 - Constructor injection throughout; every service unit-testable in isolation
-- Pluggable identity provider (`LocalProvider` shipped, `ZitadelProvider` planned for V2)
+- Identity providers: `LocalProvider` (CLI path; password lives in
+  PA `mailbox.password`) and `NoAuthProvider` (postinod path;
+  identity owned by an external IdP via Dovecot passdb chain).
+  No outbound IdP integration planned — see "Zitadel surface" below.
+
+## Zitadel surface
+
+Zitadel is **inbound-only**:
+
+- **Zitadel → `/zitadel/events`** — Zitadel Actions (HTTP Targets)
+  POST event payloads signed with a shared HMAC secret. This is the
+  only Zitadel-driven path. Zitadel does **not** speak SCIM.
+- **`/scim/v2/*`** — generic SCIM 2.0 endpoints, JWT-bearer-gated.
+  Audience: scim-cli, custom scripts, audit/inventory tooling. **Not**
+  Zitadel. Lists/single GET/POST/PATCH/DELETE for Users + Aliases;
+  read-only Domains.
+
+postino does NOT push identity into Zitadel. There is no
+`ZitadelProvider`, no outbound SCIM client, no Zitadel API
+consumer in postino_core or postinod. The provider Protocol
+exists for the Local-vs-NoAuth split only.
 
 Spec: `docs/superpowers/specs/2026-05-09-postino-design.md`
 README: top-level `README.md` (full usage + install + ops)
