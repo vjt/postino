@@ -11,6 +11,7 @@ from datetime import datetime
 from sqlalchemy import MetaData
 from sqlalchemy.engine import Engine
 
+from postino_core.adapters.mlmmj import MlmmjAdapter
 from postino_core.config import PostinoSettings
 from postino_core.db import make_engine, reflect_schema
 from postino_core.enums import IdentityBackend
@@ -21,6 +22,7 @@ from postino_core.providers import IdentityProvider, LocalProvider, NoAuthProvid
 from postino_core.services.alias import AliasService
 from postino_core.services.domain import DomainService
 from postino_core.services.mailbox import MailboxService
+from postino_core.services.mailing_list import MailingListService
 from postino_core.services.quota import QuotaService
 from postino_core.services.status import StatusService
 
@@ -37,6 +39,7 @@ class ServicesBundle:
         domain: DomainService,
         quota: QuotaService,
         status: StatusService,
+        mailing_list: MailingListService | None,
         settings: PostinoSettings,
     ) -> None:
         self.engine = engine
@@ -47,6 +50,7 @@ class ServicesBundle:
         self.domain = domain
         self.quota = quota
         self.status = status
+        self.mailing_list = mailing_list
         self.settings = settings
 
 
@@ -72,6 +76,19 @@ def build_services(
         script_path=settings.postcreation_hook,
         timeout=settings.postcreation_hook_timeout,
     )
+    mailing_list: MailingListService | None = None
+    if settings.mlmmj_spool_dir is not None:
+        adapter = MlmmjAdapter(
+            spool_root=settings.mlmmj_spool_dir,
+            mlmmj_uid=settings.mlmmj_uid,
+            mlmmj_gid=settings.mlmmj_gid,
+        )
+        mailing_list = MailingListService(
+            engine=engine,
+            metadata=metadata,
+            adapter=adapter,
+            clock=clock,
+        )
     return ServicesBundle(
         engine=engine,
         metadata=metadata,
@@ -94,6 +111,7 @@ def build_services(
         ),
         quota=QuotaService(engine=engine, metadata=metadata),
         status=StatusService(engine=engine, metadata=metadata),
+        mailing_list=mailing_list,
         settings=settings,
     )
 

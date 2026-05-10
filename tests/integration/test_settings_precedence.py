@@ -11,6 +11,7 @@ without touching `/usr/local/etc` or `~/.config`.
 
 from __future__ import annotations
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -163,3 +164,64 @@ def test_mlmmj_settings_default_to_none(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert s.mlmmj_spool_dir is None
     assert s.mlmmj_uid == -1
     assert s.mlmmj_gid == -1
+
+
+@pytest.mark.integration
+def test_bundle_wires_mailing_list_when_spool_dir_set(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """build_services constructs MailingListService when mlmmj_spool_dir is set."""
+    spool = tmp_path / "spool"
+    spool.mkdir()
+    sql_dir = tmp_path / "postfix"
+    sql_dir.mkdir()
+    db_url = os.environ["POSTINO_TEST_DB_URL"]
+    from tests.cli.test_user_cmd import env_for_cli, make_postfix_cf
+
+    make_postfix_cf(db_url, sql_dir)
+    env = env_for_cli(db_url, tmp_path / "mail", tmp_path / "hook.sh", sql_dir)
+    env["POSTINO_MLMMJ_SPOOL_DIR"] = str(spool)
+    env["POSTINO_MLMMJ_UID"] = "-1"
+    env["POSTINO_MLMMJ_GID"] = "-1"
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    (tmp_path / "mail").mkdir(exist_ok=True)
+    (tmp_path / "hook.sh").write_text("#!/bin/sh\nexit 0\n")
+    (tmp_path / "hook.sh").chmod(0o755)
+
+    from datetime import UTC, datetime
+
+    from postino_core.config import PostinoSettings
+    from postino_core.services.bundle import build_services
+
+    s = PostinoSettings()  # type: ignore[call-arg]  # WHY: pydantic-settings env-driven
+    bundle = build_services(s, clock=lambda: datetime.now(UTC), echo=False)
+    assert bundle.mailing_list is not None
+
+
+@pytest.mark.integration
+def test_bundle_mailing_list_none_when_unset(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    sql_dir = tmp_path / "postfix"
+    sql_dir.mkdir()
+    db_url = os.environ["POSTINO_TEST_DB_URL"]
+    from tests.cli.test_user_cmd import env_for_cli, make_postfix_cf
+
+    make_postfix_cf(db_url, sql_dir)
+    env = env_for_cli(db_url, tmp_path / "mail", tmp_path / "hook.sh", sql_dir)
+    monkeypatch.delenv("POSTINO_MLMMJ_SPOOL_DIR", raising=False)
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    (tmp_path / "mail").mkdir(exist_ok=True)
+    (tmp_path / "hook.sh").write_text("#!/bin/sh\nexit 0\n")
+    (tmp_path / "hook.sh").chmod(0o755)
+
+    from datetime import UTC, datetime
+
+    from postino_core.config import PostinoSettings
+    from postino_core.services.bundle import build_services
+
+    s = PostinoSettings()  # type: ignore[call-arg]  # WHY: pydantic-settings env-driven
+    bundle = build_services(s, clock=lambda: datetime.now(UTC), echo=False)
+    assert bundle.mailing_list is None
