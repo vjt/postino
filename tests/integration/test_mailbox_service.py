@@ -15,6 +15,7 @@ from postino_core.errors import (
     AlreadyExistsError,
     CapacityError,
     FilesystemError,
+    HookError,
     NotFoundError,
 )
 from postino_core.fs import FilesystemAdapter
@@ -204,6 +205,135 @@ def test_mailbox_add_fs_failure_rolls_back_db(
             select(md.tables["mailbox"]).where(md.tables["mailbox"].c.username == "foo@example.com")
         ).fetchone()
     assert n is None  # rolled back
+
+
+def test_mailbox_add_hook_failure_row_deleted_even_if_maildir_cleanup_fails(
+    db: Engine,
+    tmp_mail_root: Path,
+    failing_postcreation_hook: Path,
+    frozen_clock: datetime,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """H2: compensation must not let a maildir-cleanup error mask the
+    original HookError or strand the DB row. Row delete runs first."""
+    _seed_domain(db, "example.com", max_mailboxes=10)
+    fs = FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1)
+    svc = _build_service(
+        db, fs, HookRunner(script_path=failing_postcreation_hook), lambda: frozen_clock
+    )
+    real_remove = fs.remove_maildir
+
+    def remove_then_fail(relative: Path) -> None:
+        real_remove(relative)
+        raise OSError("simulated rmtree EACCES")
+
+    monkeypatch.setattr(fs, "remove_maildir", remove_then_fail)
+    with pytest.raises(HookError):
+        svc.add(
+            MailboxCreate(
+                username="foo@example.com",
+                password=SecretStr("p"),
+                name="",
+                quota_bytes=0,
+                scheme=PasswordScheme.BCRYPT,
+            )
+        )
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.begin() as conn:
+        mrow = conn.execute(
+            select(md.tables["mailbox"]).where(md.tables["mailbox"].c.username == "foo@example.com")
+        ).fetchone()
+    assert mrow is None  # row delete must have run before maildir cleanup
+
+
+def test_mailbox_add_hook_failure_rolls_back_row_quota_and_maildir(
+    db: Engine,
+    tmp_mail_root: Path,
+    failing_postcreation_hook: Path,
+    frozen_clock: datetime,
+) -> None:
+    _seed_domain(db, "example.com", max_mailboxes=10)
+    fs = FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1)
+    svc = _build_service(
+        db, fs, HookRunner(script_path=failing_postcreation_hook), lambda: frozen_clock
+    )
+    with pytest.raises(HookError):
+        svc.add(
+            MailboxCreate(
+                username="foo@example.com",
+                password=SecretStr("p"),
+                name="",
+                quota_bytes=0,
+                scheme=PasswordScheme.BCRYPT,
+            )
+        )
+    md = MetaData()
+    md.reflect(bind=db)
+    mailbox = md.tables["mailbox"]
+    quota2 = md.tables["quota2"]
+    with db.begin() as conn:
+        mrow = conn.execute(
+            select(mailbox).where(mailbox.c.username == "foo@example.com")
+        ).fetchone()
+        qrow = conn.execute(select(quota2).where(quota2.c.username == "foo@example.com")).fetchone()
+    assert mrow is None
+    assert qrow is None
+    assert not (tmp_mail_root / "example.com" / "foo").exists()
+
+
+def test_mailbox_add_duplicate_keeps_first_mailbox_maildir(
+    db: Engine,
+    tmp_mail_root: Path,
+    fake_postcreation_hook: Path,
+    frozen_clock: datetime,
+) -> None:
+    _seed_domain(db, "example.com", max_mailboxes=10)
+    svc = _build_service(
+        db,
+        FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1),
+        HookRunner(script_path=fake_postcreation_hook),
+        lambda: frozen_clock,
+    )
+    create = MailboxCreate(
+        username="foo@example.com",
+        password=SecretStr("p"),
+        name="",
+        quota_bytes=0,
+        scheme=PasswordScheme.BCRYPT,
+    )
+    svc.add(create)
+    assert (tmp_mail_root / "example.com" / "foo").is_dir()
+    with pytest.raises(AlreadyExistsError):
+        svc.add(create)
+    # Pre-existing maildir from the first successful add must survive
+    # the duplicate's compensation path.
+    assert (tmp_mail_root / "example.com" / "foo").is_dir()
+
+
+def test_mailbox_add_unknown_domain_cleans_up_fresh_maildir(
+    db: Engine,
+    tmp_mail_root: Path,
+    fake_postcreation_hook: Path,
+    frozen_clock: datetime,
+) -> None:
+    svc = _build_service(
+        db,
+        FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1),
+        HookRunner(script_path=fake_postcreation_hook),
+        lambda: frozen_clock,
+    )
+    with pytest.raises(NotFoundError):
+        svc.add(
+            MailboxCreate(
+                username="foo@noexist.example.org",
+                password=SecretStr("p"),
+                name="",
+                quota_bytes=0,
+                scheme=PasswordScheme.BCRYPT,
+            )
+        )
+    assert not (tmp_mail_root / "noexist.example.org").exists()
 
 
 def test_delete_mailbox_removes_row_and_maildir(

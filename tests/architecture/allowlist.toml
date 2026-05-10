@@ -67,14 +67,14 @@
 12 = "WHY: passlib lacks a typed __init__; PR-A5 wraps via PasswordHasher Protocol."
 
 [test_type_ignore_justified."src/postino_core/services/alias.py"]
-66 = "WHY: SQLAlchemy RowMapping access yields Any; documented project-wide."
-90 = "WHY: SQLAlchemy RowMapping access yields Any."
-94 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-95 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-96 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-97 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-98 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-99 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+86 = "WHY: SQLAlchemy RowMapping access yields Any; documented project-wide."
+110 = "WHY: SQLAlchemy RowMapping access yields Any."
+114 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+115 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+116 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+117 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+118 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+119 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/domain.py"]
 74 = "WHY: SQLAlchemy RowMapping access yields Any."
@@ -90,12 +90,12 @@
 101 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/mailbox.py"]
-103 = "WHY: SQLAlchemy RowMapping access yields Any."
-175 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-178 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-179 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-180 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-217 = "WHY: SQLAlchemy RowMapping access yields Any."
+138 = "WHY: SQLAlchemy RowMapping access yields Any."
+210 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+213 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+214 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+215 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+252 = "WHY: SQLAlchemy RowMapping access yields Any."
 
 [test_type_ignore_justified."src/postino_core/services/quota.py"]
 23 = "WHY: SQLAlchemy Row._mapping attribute access not in stubs."

@@ -83,6 +83,20 @@ def test_settings_defaults_local_backend() -> None:
     assert s.identity_backend == IdentityBackend.LOCAL
 
 
+def test_settings_postcreation_hook_timeout_default() -> None:
+    s = PostinoSettings(
+        identity_backend=IdentityBackend.LOCAL,
+        postfix_sql_dir=Path("/tmp"),
+        virtual_mailbox_base=Path("/srv/mail"),
+        postcreation_hook=Path("/x"),
+        vmail_uid=1006,
+        vmail_gid=1006,
+        default_password_scheme=PasswordScheme.BCRYPT,
+        default_quota_bytes=1024**3,
+    )
+    assert s.postcreation_hook_timeout == 30.0
+
+
 def test_zitadel_backend_rejected_in_mvp() -> None:
     with pytest.raises(ConfigError):
         PostinoSettings(

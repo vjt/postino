@@ -64,7 +64,10 @@ def build_services(
         vmail_uid=settings.vmail_uid,
         vmail_gid=settings.vmail_gid,
     )
-    hooks = HookRunner(script_path=settings.postcreation_hook)
+    hooks = HookRunner(
+        script_path=settings.postcreation_hook,
+        timeout=settings.postcreation_hook_timeout,
+    )
     return ServicesBundle(
         engine=engine,
         metadata=metadata,

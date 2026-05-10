@@ -106,6 +106,7 @@ class PostinoSettings(BaseSettings):
     postfix_sql_dir: Path
     virtual_mailbox_base: Path
     postcreation_hook: Path
+    postcreation_hook_timeout: float = 30.0
     vmail_uid: int
     vmail_gid: int
     default_password_scheme: PasswordScheme

@@ -1,11 +1,20 @@
 """MailboxService — creates, reads, updates, deletes mailbox rows.
 
-The `add` method runs the full create flow inside a single transaction
-plus an outer try/except that cleans up the maildir if the post-DB
-filesystem or hook step fails."""
+The `add` method orders the steps so a process crash never leaves a
+committed DB row pointing at a missing maildir:
+
+1. Create the maildir on disk first.
+2. Open the DB transaction (capacity checks, mailbox row, quota row,
+   identity provider). On any failure here, the freshly-created
+   maildir is removed; a pre-existing maildir is left alone (its
+   owning row predates this call).
+3. Run the postcreation hook. On hook failure: delete the row first,
+   then attempt maildir cleanup. Each compensation step is wrapped so
+   a secondary failure cannot mask the original HookError."""
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -21,14 +30,14 @@ from postino_core.errors import (
     AlreadyExistsError,
     CapacityError,
     DBError,
-    FilesystemError,
-    HookError,
     NotFoundError,
 )
 from postino_core.fs import FilesystemAdapter
 from postino_core.hooks import HookRunner
 from postino_core.models import Mailbox, MailboxCreate
 from postino_core.providers.base import IdentityProvider
+
+_logger = logging.getLogger(__name__)
 
 # {NOAUTH} sentinel — see spec §5. Used as initial value for password
 # column (NOT NULL) before LocalProvider replaces it with a hashed value.
@@ -63,6 +72,11 @@ class MailboxService:
         local_part, _, domain = str(create.username).partition("@")
         relative_maildir = Path(domain) / local_part / ""
 
+        # Track whether the maildir already existed so a DB-tx failure
+        # does not delete a maildir owned by another (pre-existing) row.
+        maildir_existed = self._fs.maildir_exists(relative_maildir)
+        self._fs.create_maildir(relative_maildir)
+
         try:
             with self._engine.begin() as conn:
                 self._assert_domain_capacity(conn, domain)
@@ -75,21 +89,42 @@ class MailboxService:
                     password=create.password,
                     scheme=create.scheme,
                 )
-            self._fs.create_maildir(relative_maildir)
-            try:
-                self._hooks.run_postcreation(str(create.username))
-            except HookError:
-                self._fs.remove_maildir(relative_maildir)
-                self._delete_mailbox_row(str(create.username))
-                raise
-        except FilesystemError:
-            self._delete_mailbox_row(str(create.username))
+        except Exception:
+            if not maildir_existed:
+                self._safe_remove_maildir(relative_maildir)
+            raise
+
+        try:
+            self._hooks.run_postcreation(str(create.username))
+        except Exception:
+            self._safe_delete_mailbox_row(str(create.username))
+            self._safe_remove_maildir(relative_maildir)
             raise
 
         got = self.get(create.username)
         if got is None:
             raise DBError("mailbox vanished after insert")
         return got
+
+    def _safe_remove_maildir(self, relative: Path) -> None:
+        try:
+            self._fs.remove_maildir(relative)
+        except Exception as compensation_err:
+            _logger.error(
+                "compensation: remove_maildir(%s) failed: %s",
+                relative,
+                compensation_err,
+            )
+
+    def _safe_delete_mailbox_row(self, username: str) -> None:
+        try:
+            self._delete_mailbox_row(username)
+        except Exception as compensation_err:
+            _logger.error(
+                "compensation: delete mailbox row %s failed: %s",
+                username,
+                compensation_err,
+            )
 
     def get(self, username: EmailStr) -> Mailbox | None:
         """Return the mailbox or None if absent."""

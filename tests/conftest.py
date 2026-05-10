@@ -96,3 +96,12 @@ def fake_postcreation_hook(tmp_path: Path) -> Path:
     script.write_text(f'#!/bin/sh\necho "$@" >> {log}\nexit 0\n')
     script.chmod(0o755)
     return script
+
+
+@pytest.fixture
+def failing_postcreation_hook(tmp_path: Path) -> Path:
+    """An executable script that always exits non-zero (HookError trigger)."""
+    script = tmp_path / "failing-hook.sh"
+    script.write_text('#!/bin/sh\necho "hook said no" >&2\nexit 7\n')
+    script.chmod(0o755)
+    return script

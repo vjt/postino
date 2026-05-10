@@ -6,13 +6,13 @@ from collections.abc import Callable
 from datetime import datetime
 
 from pydantic import EmailStr
-from sqlalchemy import MetaData, select
-from sqlalchemy.engine import Engine
+from sqlalchemy import MetaData, func, select
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.exc import IntegrityError
 
 from postino_core.enums import MailboxStatus
-from postino_core.errors import AlreadyExistsError, DBError, NotFoundError
+from postino_core.errors import AlreadyExistsError, CapacityError, DBError, NotFoundError
 from postino_core.models import Alias
 
 
@@ -32,12 +32,16 @@ class AliasService:
         """Create a new alias.
 
         Returns: the parsed Alias row.
-        Raises: AlreadyExistsError, DBError.
+        Raises: NotFoundError if the domain is unknown.
+                CapacityError if domain.aliases cap would be exceeded.
+                AlreadyExistsError on uniqueness conflict.
+                DBError.
         """
         alias = self._md.tables["alias"]
         _, _, domain = str(address).partition("@")
         now = self._clock()
         with self._engine.begin() as conn:
+            self._assert_domain_capacity(conn, domain)
             try:
                 conn.execute(
                     alias.insert().values(
@@ -55,6 +59,22 @@ class AliasService:
         if got is None:
             raise DBError("alias vanished after insert")
         return got
+
+    def _assert_domain_capacity(self, conn: Connection, domain: str) -> None:
+        d = self._md.tables["domain"]
+        a = self._md.tables["alias"]
+        row = conn.execute(
+            select(d.c.aliases).where(d.c.domain == domain).with_for_update()
+        ).fetchone()
+        if row is None:
+            raise NotFoundError(f"domain {domain!r} does not exist")
+        cap = int(row[0])
+        if cap > 0:
+            count = conn.execute(
+                select(func.count()).select_from(a).where(a.c.domain == domain)
+            ).scalar_one()
+            if count >= cap:
+                raise CapacityError(f"domain {domain!r} reached max_aliases={cap}")
 
     def get(self, address: EmailStr) -> Alias | None:
         """Return the alias or None if absent."""
