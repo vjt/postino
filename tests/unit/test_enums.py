@@ -39,3 +39,8 @@ def test_identity_backend_members() -> None:
 def test_unknown_enum_raises() -> None:
     with pytest.raises(ValueError):
         MailboxStatus(99)
+
+
+def test_domain_transport_mlmmj_raw_value() -> None:
+    assert DomainTransport("mlmmj") is DomainTransport.MLMMJ
+    assert DomainTransport.MLMMJ.value == "mlmmj"
