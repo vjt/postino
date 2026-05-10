@@ -13,5 +13,6 @@ fi
 
 .venv/bin/ruff check .
 .venv/bin/ruff format --check .
+.venv/bin/lint-imports
 .venv/bin/pyright
 .venv/bin/pytest tests/ -x -q

@@ -13,7 +13,7 @@ from postino_core.config import PostinoSettings
 
 
 class Finding(BaseModel):
-    model_config = ConfigDict(frozen=True, strict=True)
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
     name: str
     ok: bool
     message: str
