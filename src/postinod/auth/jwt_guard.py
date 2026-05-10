@@ -24,7 +24,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from jwt.algorithms import RSAAlgorithm
 
 
-class _JwksLike(Protocol):
+class JwksLike(Protocol):
     """Minimal Protocol satisfied by JwksCache (and the test stub).
 
     Defined locally rather than importing JwksCache so this module can
@@ -36,7 +36,7 @@ class _JwksLike(Protocol):
 
 
 class JwtVerifier:
-    def __init__(self, *, issuer: str, audience: str, jwks: _JwksLike) -> None:
+    def __init__(self, *, issuer: str, audience: str, jwks: JwksLike) -> None:
         self._issuer = issuer
         self._audience = audience
         self._jwks = jwks
@@ -46,29 +46,31 @@ class JwtVerifier:
 
         Raises:
             jwt.InvalidTokenError (and subclasses ExpiredSignatureError,
-                InvalidIssuerError, InvalidAudienceError) on verification
-                failure.
+                InvalidIssuerError, InvalidAudienceError,
+                MissingRequiredClaimError) on verification failure.
+            jwt.InvalidKeyError if the JWKS entry is a private key rather
+                than a public key.
             KeyError if the token's kid is unknown to the JWKS cache
                 even after a forced refresh (caller maps to 401).
         """
-        try:
-            unverified_header = jwt.get_unverified_header(token)
-        except jwt.InvalidTokenError:
-            raise
+        unverified_header = jwt.get_unverified_header(token)
         kid = unverified_header.get("kid")
         if not kid:
             raise jwt.InvalidTokenError("token missing kid header")
         jwk = await self._jwks.get(kid)
         raw_key = RSAAlgorithm.from_jwk(jwk)
         # from_jwk returns AllowedRSAKeys = RSAPrivateKey | RSAPublicKey.
-        # A public-only JWK (no "d" field) always yields RSAPublicKey; assert
-        # to narrow the type for pyright rather than silencing with type: ignore.
-        assert isinstance(raw_key, RSAPublicKey), "JWKS entry must be a public key"
+        # A public-only JWK (no "d" field) always yields RSAPublicKey; reject
+        # private keys explicitly — assert strips under python -O and would
+        # propagate a private key to jwt.decode with a cryptic error.
+        if not isinstance(raw_key, RSAPublicKey):
+            raise jwt.InvalidKeyError("JWKS entry is a private key — public-only JWKs required")
         decoded: dict[str, object] = jwt.decode(
             token,
             key=raw_key,
             algorithms=["RS256"],
             audience=self._audience,
             issuer=self._issuer,
+            options={"require": ["exp"]},
         )  # type: ignore[assignment]  # WHY: pyjwt.decode returns dict[str, Any]; narrowed to dict[str, object]
         return decoded

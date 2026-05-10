@@ -71,40 +71,47 @@ class _StubJwksCache:
         return dict(self._jwk)
 
 
-async def test_valid_token_passes() -> None:
-    key, jwk = _make_keypair()
+@pytest.fixture(scope="module")
+def keypair() -> tuple[rsa.RSAPrivateKey, dict[str, str]]:
+    return _make_keypair()
+
+
+async def test_valid_token_passes(keypair: tuple[rsa.RSAPrivateKey, dict[str, str]]) -> None:
+    key, jwk = keypair
     token = _make_token(key)
     v = JwtVerifier(issuer=ISSUER, audience=AUDIENCE, jwks=_StubJwksCache(jwk))
     claims = await v.verify(token)
     assert claims["sub"] == "alice@example.org"
 
 
-async def test_expired_token_rejected() -> None:
-    key, jwk = _make_keypair()
+async def test_expired_token_rejected(keypair: tuple[rsa.RSAPrivateKey, dict[str, str]]) -> None:
+    key, jwk = keypair
     token = _make_token(key, exp_offset=-60)
     v = JwtVerifier(issuer=ISSUER, audience=AUDIENCE, jwks=_StubJwksCache(jwk))
     with pytest.raises(jwt.ExpiredSignatureError):
         await v.verify(token)
 
 
-async def test_wrong_issuer_rejected() -> None:
-    key, jwk = _make_keypair()
+async def test_wrong_issuer_rejected(keypair: tuple[rsa.RSAPrivateKey, dict[str, str]]) -> None:
+    key, jwk = keypair
     token = _make_token(key, iss="https://attacker.example.org")
     v = JwtVerifier(issuer=ISSUER, audience=AUDIENCE, jwks=_StubJwksCache(jwk))
     with pytest.raises(jwt.InvalidIssuerError):
         await v.verify(token)
 
 
-async def test_wrong_audience_rejected() -> None:
-    key, jwk = _make_keypair()
+async def test_wrong_audience_rejected(keypair: tuple[rsa.RSAPrivateKey, dict[str, str]]) -> None:
+    key, jwk = keypair
     token = _make_token(key, aud="other-service")
     v = JwtVerifier(issuer=ISSUER, audience=AUDIENCE, jwks=_StubJwksCache(jwk))
     with pytest.raises(jwt.InvalidAudienceError):
         await v.verify(token)
 
 
-async def test_unknown_kid_raises_key_error() -> None:
-    key, jwk = _make_keypair()
+async def test_unknown_kid_raises_key_error(
+    keypair: tuple[rsa.RSAPrivateKey, dict[str, str]],
+) -> None:
+    key, jwk = keypair
     pem = key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
@@ -121,8 +128,8 @@ async def test_unknown_kid_raises_key_error() -> None:
         await v.verify(token)
 
 
-async def test_missing_kid_rejected() -> None:
-    key, jwk = _make_keypair()
+async def test_missing_kid_rejected(keypair: tuple[rsa.RSAPrivateKey, dict[str, str]]) -> None:
+    key, jwk = keypair
     pem = key.private_bytes(
         encoding=serialization.Encoding.PEM,
         format=serialization.PrivateFormat.PKCS8,
@@ -138,8 +145,27 @@ async def test_missing_kid_rejected() -> None:
         await v.verify(token)
 
 
-async def test_malformed_token_rejected() -> None:
-    _, jwk = _make_keypair()
+async def test_malformed_token_rejected(keypair: tuple[rsa.RSAPrivateKey, dict[str, str]]) -> None:
+    _, jwk = keypair
     v = JwtVerifier(issuer=ISSUER, audience=AUDIENCE, jwks=_StubJwksCache(jwk))
     with pytest.raises(jwt.InvalidTokenError):
         await v.verify("not.a.valid.token")
+
+
+async def test_missing_exp_rejected(keypair: tuple[rsa.RSAPrivateKey, dict[str, str]]) -> None:
+    key, jwk = keypair
+    pem = key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+    # Sign a token that intentionally omits `exp`.
+    token = jwt.encode(
+        {"iss": ISSUER, "aud": AUDIENCE, "sub": "x"},
+        pem,
+        algorithm="RS256",
+        headers={"kid": KID},
+    )
+    v = JwtVerifier(issuer=ISSUER, audience=AUDIENCE, jwks=_StubJwksCache(jwk))
+    with pytest.raises(jwt.MissingRequiredClaimError):
+        await v.verify(token)
