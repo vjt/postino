@@ -35,3 +35,12 @@ class FilesystemError(MailctlError):
 
 class HookError(MailctlError):
     """The postfixadmin postcreation hook returned non-zero."""
+
+
+class DeadlockError(MailctlError):
+    """MySQL detected a deadlock (1213) or innodb_lock_wait_timeout (1205).
+
+    Surfaced separately from DBError so the CLI exits with a distinct
+    code; callers (postino + future postinod) can retry idempotent
+    mutations on this signal where a generic DBError must not be
+    retried."""

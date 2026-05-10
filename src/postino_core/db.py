@@ -6,10 +6,44 @@ can compose insert/update/select without redefining column lists."""
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from contextlib import contextmanager
+
 from sqlalchemy import URL, MetaData, create_engine
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 
 from postino_core.config import PostfixSqlCredentials
+from postino_core.errors import DeadlockError
+
+_MYSQL_DEADLOCK_CODES = frozenset({1213, 1205})
+
+
+def _is_mysql_deadlock(exc: OperationalError) -> bool:
+    """Identify MySQL deadlock (1213) and lock-wait-timeout (1205).
+
+    PyMySQL exposes the numeric error code as ``OperationalError.orig.args[0]``;
+    other DB-API drivers may shape the args list differently — guard
+    against an unexpected layout instead of raising IndexError."""
+    orig = exc.orig
+    if orig is None:
+        return False
+    args = getattr(orig, "args", ())
+    return bool(args) and args[0] in _MYSQL_DEADLOCK_CODES
+
+
+@contextmanager
+def translate_db_errors() -> Generator[None]:
+    """Catch SQLAlchemy OperationalError and surface MySQL deadlocks /
+    lock-wait timeouts as DeadlockError; let other OperationalError
+    flavours propagate unchanged so DBError-mapping at the CLI catches
+    them with their original message."""
+    try:
+        yield
+    except OperationalError as e:
+        if _is_mysql_deadlock(e):
+            raise DeadlockError(f"MySQL deadlock / lock-wait timeout: {e.orig}") from e
+        raise
 
 
 def make_engine(creds: PostfixSqlCredentials, *, echo: bool) -> Engine:

@@ -11,6 +11,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.exc import IntegrityError
 
+from postino_core.db import translate_db_errors
 from postino_core.enums import MailboxStatus
 from postino_core.errors import AlreadyExistsError, CapacityError, DBError, NotFoundError
 from postino_core.models import Alias
@@ -40,7 +41,7 @@ class AliasService:
         alias = self._md.tables["alias"]
         _, _, domain = str(address).partition("@")
         now = self._clock()
-        with self._engine.begin() as conn:
+        with translate_db_errors(), self._engine.begin() as conn:
             self._assert_domain_capacity(conn, domain)
             try:
                 conn.execute(
@@ -91,7 +92,7 @@ class AliasService:
         Raises: NotFoundError if the alias does not exist.
         """
         alias = self._md.tables["alias"]
-        with self._engine.begin() as conn:
+        with translate_db_errors(), self._engine.begin() as conn:
             result = conn.execute(alias.delete().where(alias.c.address == str(address)))
             if result.rowcount == 0:
                 raise NotFoundError(f"alias {address} does not exist")

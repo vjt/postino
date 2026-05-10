@@ -26,6 +26,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.exc import IntegrityError
 
+from postino_core.db import translate_db_errors
 from postino_core.enums import MailboxStatus, PasswordScheme
 from postino_core.errors import (
     AlreadyExistsError,
@@ -64,7 +65,7 @@ class MailboxService:
 
         Returns: the parsed Mailbox row.
         Raises: NotFoundError, AlreadyExistsError, CapacityError,
-                FilesystemError, HookError, DBError.
+                FilesystemError, HookError, DBError, DeadlockError.
         """
         local_part, _, domain = str(create.username).partition("@")
         relative_maildir = Path(domain) / local_part / ""
@@ -75,7 +76,7 @@ class MailboxService:
         self._fs.create_maildir(relative_maildir)
 
         try:
-            with self._engine.begin() as conn:
+            with translate_db_errors(), self._engine.begin() as conn:
                 self._assert_domain_capacity(conn, domain)
                 self._insert_mailbox_row(conn, create, local_part, domain, relative_maildir)
                 self._insert_quota_row(conn, str(create.username))
@@ -192,7 +193,7 @@ class MailboxService:
     def _delete_mailbox_row(self, username: str) -> None:
         mailbox = self._md.tables["mailbox"]
         quota2 = self._md.tables["quota2"]
-        with self._engine.begin() as conn:
+        with translate_db_errors(), self._engine.begin() as conn:
             conn.execute(quota2.delete().where(quota2.c.username == username))
             conn.execute(mailbox.delete().where(mailbox.c.username == username))
 
@@ -218,7 +219,7 @@ class MailboxService:
         if existing is None:
             raise NotFoundError(f"mailbox {username} does not exist")
         relative = existing.maildir
-        with self._engine.begin() as conn:
+        with translate_db_errors(), self._engine.begin() as conn:
             self._identity.delete_identity(conn, str(username))
             quota2 = self._md.tables["quota2"]
             conn.execute(quota2.delete().where(quota2.c.username == str(username)))
@@ -252,14 +253,14 @@ class MailboxService:
         scheme: PasswordScheme,
     ) -> None:
         """Change password via the active IdentityProvider."""
-        with self._engine.begin() as conn:
+        with translate_db_errors(), self._engine.begin() as conn:
             self._identity.set_password(conn, str(username), password, scheme)
 
     def set_name(self, username: EmailStr, name: str) -> None:
         """Update the mailbox display name."""
         mailbox = self._md.tables["mailbox"]
         now = self._clock()
-        with self._engine.begin() as conn:
+        with translate_db_errors(), self._engine.begin() as conn:
             result = conn.execute(
                 mailbox.update()
                 .where(mailbox.c.username == str(username))
@@ -272,7 +273,7 @@ class MailboxService:
         """Enable / disable the mailbox."""
         mailbox = self._md.tables["mailbox"]
         now = self._clock()
-        with self._engine.begin() as conn:
+        with translate_db_errors(), self._engine.begin() as conn:
             result = conn.execute(
                 mailbox.update()
                 .where(mailbox.c.username == str(username))
@@ -289,7 +290,7 @@ class MailboxService:
             raise ConfigError("quota_bytes cannot be negative")
         mailbox = self._md.tables["mailbox"]
         now = self._clock()
-        with self._engine.begin() as conn:
+        with translate_db_errors(), self._engine.begin() as conn:
             result = conn.execute(
                 mailbox.update()
                 .where(mailbox.c.username == str(username))

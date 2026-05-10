@@ -18,6 +18,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.exc import IntegrityError
 
+from postino_core.db import translate_db_errors
 from postino_core.enums import DomainTransport, MailboxStatus
 from postino_core.errors import AlreadyExistsError, CapacityError, DBError, NotFoundError
 from postino_core.fs import FilesystemAdapter
@@ -75,7 +76,7 @@ class DomainService:
     ) -> Domain:
         d = self._md.tables["domain"]
         now = self._clock()
-        with self._engine.begin() as conn:
+        with translate_db_errors(), self._engine.begin() as conn:
             try:
                 conn.execute(
                     d.insert().values(
@@ -126,7 +127,7 @@ class DomainService:
         domain_admins = self._md.tables["domain_admins"]
         quota2 = self._md.tables["quota2"]
 
-        with self._engine.begin() as conn:
+        with translate_db_errors(), self._engine.begin() as conn:
             row = conn.execute(
                 select(d.c.domain).where(d.c.domain == domain).with_for_update()
             ).fetchone()

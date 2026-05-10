@@ -27,6 +27,7 @@ from postino_core.errors import (
     CapacityError,
     ConfigError,
     DBError,
+    DeadlockError,
     FilesystemError,
     HookError,
     MailctlError,
@@ -58,6 +59,7 @@ _EXIT_CODES: dict[type[MailctlError], int] = {
     DBError: 5,
     FilesystemError: 6,
     HookError: 7,
+    DeadlockError: 8,
 }
 
 
