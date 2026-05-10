@@ -17,7 +17,7 @@ planned for V2.
 ```sh
 pipx install il-postino
 postino domain add example.com --max-mailboxes 100 --default-quota 5G
-postino user add foo@example.com --password 'hunter2' --quota 5G
+postino user add foo@example.com --quota 5G   # prompts for password
 postino check
 ```
 
@@ -155,15 +155,16 @@ postino domain del example.com --yes
 
 ```sh
 postino user add foo@example.com \
-    --password 'hunter2' \
     --name "Foo Bar" \
     --quota 5G \
     --scheme BLF-CRYPT
+# Password is prompted twice (no echo). Never accepted on the command
+# line: argv leaks via `ps`, shell history, syslog, and CI logs.
 
 postino user list --domain example.com
 postino user list --all                # include disabled
 postino user show foo@example.com
-postino user passwd foo@example.com --password 'newpass'
+postino user passwd foo@example.com    # prompts for new password
 postino user enable foo@example.com
 postino user disable foo@example.com
 postino user quota foo@example.com --set 10G

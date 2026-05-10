@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import ClassVar
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, SecretStr, model_validator
 from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
@@ -30,18 +30,39 @@ _USER_TOML = Path.home() / ".config" / "postino" / "postino.toml"
 
 
 class PostfixSqlCredentials(BaseModel):
-    """Parsed credentials from sql-virtual_*.cf."""
+    """Parsed credentials from sql-virtual_*.cf.
+
+    The password is held as ``SecretStr`` so accidental ``repr`` /
+    ``str`` / log paths render ``**********`` instead of the cleartext.
+    Call ``sqlalchemy_url`` only when handing the URL to SQLAlchemy.
+    """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
 
     host: str
     user: str
-    password: str
+    password: SecretStr
     dbname: str
 
     def sqlalchemy_url(self) -> str:
-        """SQLAlchemy URL for these credentials (PyMySQL driver)."""
-        return f"mysql+pymysql://{self.user}:{self.password}@{self.host}/{self.dbname}"
+        """SQLAlchemy URL for these credentials (PyMySQL driver).
+
+        ``get_secret_value`` is called only at the return statement —
+        keep the cleartext on the stack for as short as possible.
+        """
+        return (
+            f"mysql+pymysql://{self.user}:{self.password.get_secret_value()}"
+            f"@{self.host}/{self.dbname}"
+        )
+
+    def __repr__(self) -> str:
+        # Belt-and-braces over Pydantic's SecretStr redaction: a custom
+        # repr defends against future BaseModel subclassing edge cases
+        # and makes the redaction explicit at this boundary.
+        return (
+            f"PostfixSqlCredentials(host={self.host!r}, user={self.user!r}, "
+            f"dbname={self.dbname!r}, password=***)"
+        )
 
 
 def parse_postfix_sql_cf(path: Path) -> PostfixSqlCredentials:
@@ -64,7 +85,7 @@ def parse_postfix_sql_cf(path: Path) -> PostfixSqlCredentials:
         return PostfixSqlCredentials(
             host=fields["hosts"],
             user=fields["user"],
-            password=fields["password"],
+            password=SecretStr(fields["password"]),
             dbname=fields["dbname"],
         )
     except KeyError as e:

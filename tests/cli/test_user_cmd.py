@@ -80,14 +80,13 @@ def test_user_add_then_list(
             "user",
             "add",
             "foo@example.com",
-            "--password",
-            "hunter2",
             "--name",
             "Foo",
             "--quota",
             "5G",
         ],
         env=env,
+        input="hunter2\nhunter2\n",
     )
     assert result.exit_code == 0, result.output
 
@@ -114,13 +113,37 @@ def test_user_add_unknown_domain_exit_1(
             "user",
             "add",
             "x@noexist.example.org",
-            "--password",
-            "p",
             "--name",
             "",
             "--quota",
             "0",
         ],
         env=env,
+        input="p\np\n",
     )
     assert result.exit_code == 1, result.output
+
+
+def test_user_add_rejects_password_on_argv(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """`--password` and `-p` must not exist on the CLI surface.
+
+    Passwords on argv leak via `ps`, shell history, syslog audit, and
+    CI logs. Force the prompt path."""
+    db_url = os.environ["POSTINO_TEST_DB_URL"]
+    sql_dir = tmp_path / "postfix"
+    make_postfix_cf(db_url, sql_dir)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    env = env_for_cli(db_url, mail_root, fake_postcreation_hook, sql_dir)
+
+    for argv in (
+        ["user", "add", "x@example.com", "--password", "p"],
+        ["user", "passwd", "x@example.com", "--password", "p"],
+    ):
+        result = runner.invoke(app, argv, env=env)
+        assert result.exit_code != 0, f"{argv} unexpectedly accepted: {result.output}"
+        assert "--password" not in result.output or "no such option" in result.output.lower()

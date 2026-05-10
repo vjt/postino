@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from pydantic import SecretStr
 
 from postino_core.config import (
     PostfixSqlCredentials,
@@ -18,7 +19,7 @@ def test_parse_postfix_cf() -> None:
     assert creds == PostfixSqlCredentials(
         host="localhost",
         user="postfix",
-        password="sekret",
+        password=SecretStr("sekret"),
         dbname="postfix",
     )
 
@@ -32,9 +33,40 @@ def test_parse_postfix_cf_missing_field(tmp_path: Path) -> None:
 
 def test_settings_dburl() -> None:
     creds = PostfixSqlCredentials(
-        host="localhost", user="postfix", password="sekret", dbname="postfix"
+        host="localhost",
+        user="postfix",
+        password=SecretStr("sekret"),
+        dbname="postfix",
     )
     assert creds.sqlalchemy_url() == "mysql+pymysql://postfix:sekret@localhost/postfix"
+
+
+def test_credentials_password_redacted_in_repr_and_str() -> None:
+    creds = PostfixSqlCredentials(
+        host="localhost",
+        user="postfix",
+        password=SecretStr("hunter2-leak-probe"),
+        dbname="postfix",
+    )
+    assert "hunter2-leak-probe" not in repr(creds)
+    assert "hunter2-leak-probe" not in str(creds)
+    # Other field values must still be inspectable for debugging.
+    assert "localhost" in repr(creds)
+    assert "postfix" in repr(creds)
+
+
+def test_credentials_password_redacted_in_pydantic_dump() -> None:
+    creds = PostfixSqlCredentials(
+        host="localhost",
+        user="postfix",
+        password=SecretStr("hunter2-leak-probe"),
+        dbname="postfix",
+    )
+    # model_dump (no mode kwarg) keeps SecretStr instances; repr-redact
+    # still applies. JSON-dump masks via SecretStr.__str__ default.
+    dumped = creds.model_dump()
+    assert isinstance(dumped["password"], SecretStr)
+    assert "hunter2-leak-probe" not in repr(dumped)
 
 
 def test_settings_defaults_local_backend() -> None:
