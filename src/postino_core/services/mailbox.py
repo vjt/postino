@@ -102,7 +102,12 @@ class MailboxService:
             raise
 
         try:
-            self._hooks.run_postcreation(str(create.username))
+            self._hooks.run_postcreation(
+                username=str(create.username),
+                domain=domain,
+                maildir=str(relative_maildir),
+                quota=create.quota_bytes,
+            )
         except Exception:
             self._safe_delete_mailbox_row(str(create.username))
             self._safe_remove_maildir(relative_maildir)

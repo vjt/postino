@@ -98,12 +98,14 @@
 278 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/mailbox.py"]
-145 = "WHY: SQLAlchemy RowMapping access yields Any."
-214 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-217 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-218 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+# Line numbers shifted +5 when run_postcreation gained the four-arg PA contract
+# (username, domain, maildir, quota); all entries are SQLAlchemy RowMapping Any.
+150 = "WHY: SQLAlchemy RowMapping access yields Any."
 219 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-294 = "WHY: SQLAlchemy RowMapping access yields Any."
+222 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+223 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+224 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+299 = "WHY: SQLAlchemy RowMapping access yields Any."
 
 [test_type_ignore_justified."src/postino_core/services/quota.py"]
 23 = "WHY: SQLAlchemy Row._mapping attribute access not in stubs."
