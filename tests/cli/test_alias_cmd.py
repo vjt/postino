@@ -29,6 +29,6 @@ def test_alias_add_list(
     r = runner.invoke(app, ["alias", "add", "foo@example.com", "bar@example.com"], env=env)
     assert r.exit_code == 0
 
-    r = runner.invoke(app, ["alias", "list", "--json"], env=env)
+    r = runner.invoke(app, ["--json", "alias", "list"], env=env)
     assert r.exit_code == 0
     assert "foo@example.com" in r.output

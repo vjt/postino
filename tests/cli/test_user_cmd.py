@@ -91,7 +91,7 @@ def test_user_add_then_list(
     )
     assert result.exit_code == 0, result.output
 
-    result = runner.invoke(app, ["user", "list", "--json"], env=env)
+    result = runner.invoke(app, ["--json", "user", "list"], env=env)
     assert result.exit_code == 0
     assert "foo@example.com" in result.output
 

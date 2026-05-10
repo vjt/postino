@@ -44,7 +44,7 @@ def test_domain_add_list_del(
     )
     assert r.exit_code == 0, r.output
 
-    r = runner.invoke(app, ["domain", "list", "--json"], env=env)
+    r = runner.invoke(app, ["--json", "domain", "list"], env=env)
     assert r.exit_code == 0
     assert "x.test" in r.output
 
