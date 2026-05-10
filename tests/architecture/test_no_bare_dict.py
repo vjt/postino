@@ -24,18 +24,28 @@ def _is_any_node(node: ast.AST) -> bool:
 
 
 def _annotation_violations(annotation: ast.AST | None) -> list[str]:
-    """Return human-readable violation messages for an annotation subtree."""
+    """Return human-readable violation messages for an annotation subtree.
+
+    A bare ``dict`` (no subscript) is always a violation. ``dict[X, Y]``
+    is a violation only when ``Y`` (or ``X``) is ``Any`` — concrete value
+    types like ``dict[str, int]`` are fine."""
     if annotation is None:
         return []
     findings: list[str] = []
+    # Track `Name("dict")` nodes that appear as the value of a Subscript
+    # (i.e. the `dict` in `dict[X, Y]`). Those are properly subscripted
+    # and must not double-trigger the bare-dict check.
+    typed_dict_names: set[int] = set()
     for node in ast.walk(annotation):
-        if _is_dict_name(node):
-            findings.append("bare `dict` annotation")
-        elif isinstance(node, ast.Subscript) and _is_dict_name(node.value):
+        if isinstance(node, ast.Subscript) and _is_dict_name(node.value):
+            typed_dict_names.add(id(node.value))
             slc = node.slice
             elements: list[ast.AST] = list(slc.elts) if isinstance(slc, ast.Tuple) else [slc]
             if any(_is_any_node(e) for e in elements):
                 findings.append("`dict[..., Any]` annotation")
+    for node in ast.walk(annotation):
+        if _is_dict_name(node) and id(node) not in typed_dict_names:
+            findings.append("bare `dict` annotation")
     return findings
 
 

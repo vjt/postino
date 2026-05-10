@@ -1,18 +1,29 @@
-"""DomainService — CRUD on the PA domain table."""
+"""DomainService — CRUD on the PA domain table.
+
+`delete` cascades dependents (mailboxes, aliases, alias_domain, domain
+admins) only when `force=True`; otherwise it refuses a non-empty domain.
+After the DB transaction commits, the per-domain maildir tree is removed
+on disk; that step is best-effort and does not strand the DB cleanup if
+it fails."""
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 
-from sqlalchemy import MetaData, select
-from sqlalchemy.engine import Engine
+from sqlalchemy import MetaData, func, select
+from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.exc import IntegrityError
 
 from postino_core.enums import DomainTransport, MailboxStatus
-from postino_core.errors import AlreadyExistsError, DBError, NotFoundError
+from postino_core.errors import AlreadyExistsError, CapacityError, DBError, NotFoundError
+from postino_core.fs import FilesystemAdapter
 from postino_core.models import Domain
+
+_logger = logging.getLogger(__name__)
 
 
 class DomainService:
@@ -22,10 +33,12 @@ class DomainService:
         engine: Engine,
         metadata: MetaData,
         clock: Callable[[], datetime],
+        fs: FilesystemAdapter,
     ) -> None:
         self._engine = engine
         self._md = metadata
         self._clock = clock
+        self._fs = fs
 
     def add(
         self,
@@ -73,12 +86,111 @@ class DomainService:
             return None
         return self._row_to_model(row._mapping)  # type: ignore[arg-type]
 
-    def delete(self, domain: str) -> None:
+    def delete(self, domain: str, *, force: bool = False) -> None:
+        """Delete a domain row.
+
+        With ``force=False`` (default), refuses to delete a domain that
+        still has mailboxes, aliases, alias_domain mappings, or domain
+        admins, raising ``CapacityError`` with a count breakdown.
+
+        With ``force=True``, cascade-deletes dependents in dependency
+        order (alias_domain → alias → quota2 → mailbox → domain_admins
+        → domain) inside one transaction, then removes the per-domain
+        maildir tree on disk best-effort.
+        """
         d = self._md.tables["domain"]
+        mailbox = self._md.tables["mailbox"]
+        alias = self._md.tables["alias"]
+        alias_domain = self._md.tables["alias_domain"]
+        domain_admins = self._md.tables["domain_admins"]
+        quota2 = self._md.tables["quota2"]
+
         with self._engine.begin() as conn:
-            result = conn.execute(d.delete().where(d.c.domain == domain))
-            if result.rowcount == 0:
+            row = conn.execute(
+                select(d.c.domain).where(d.c.domain == domain).with_for_update()
+            ).fetchone()
+            if row is None:
                 raise NotFoundError(f"domain {domain!r} does not exist")
+
+            counts = self._count_dependents(conn, domain)
+            if not force and any(counts.values()):
+                raise CapacityError(
+                    f"domain {domain!r} not empty: "
+                    f"{counts['mailbox']} mailboxes, {counts['alias']} aliases, "
+                    f"{counts['alias_domain']} alias_domain mappings, "
+                    f"{counts['domain_admins']} admins"
+                )
+
+            if force:
+                # Order matters: alias_domain (touches both sides) →
+                # alias → quota2 (FK on mailbox.username) → mailbox →
+                # domain_admins → domain.
+                conn.execute(
+                    alias_domain.delete().where(
+                        (alias_domain.c.alias_domain == domain)
+                        | (alias_domain.c.target_domain == domain)
+                    )
+                )
+                conn.execute(alias.delete().where(alias.c.domain == domain))
+                conn.execute(
+                    quota2.delete().where(
+                        quota2.c.username.in_(
+                            select(mailbox.c.username).where(mailbox.c.domain == domain)
+                        )
+                    )
+                )
+                conn.execute(mailbox.delete().where(mailbox.c.domain == domain))
+                conn.execute(domain_admins.delete().where(domain_admins.c.domain == domain))
+
+            conn.execute(d.delete().where(d.c.domain == domain))
+
+        # Post-commit: filesystem cleanup. Best-effort; a stranded
+        # maildir tree is recoverable via `postino check`, while a
+        # mid-failure here must not raise on top of a successful DB
+        # cascade.
+        try:
+            self._fs.remove_maildir(Path(domain))
+        except Exception as compensation_err:
+            _logger.error(
+                "post-commit: remove_maildir(%s) failed: %s",
+                domain,
+                compensation_err,
+            )
+
+    def _count_dependents(self, conn: Connection, domain: str) -> dict[str, int]:
+        mailbox = self._md.tables["mailbox"]
+        alias = self._md.tables["alias"]
+        alias_domain = self._md.tables["alias_domain"]
+        domain_admins = self._md.tables["domain_admins"]
+        return {
+            "mailbox": int(
+                conn.execute(
+                    select(func.count()).select_from(mailbox).where(mailbox.c.domain == domain)
+                ).scalar_one()
+            ),
+            "alias": int(
+                conn.execute(
+                    select(func.count()).select_from(alias).where(alias.c.domain == domain)
+                ).scalar_one()
+            ),
+            "alias_domain": int(
+                conn.execute(
+                    select(func.count())
+                    .select_from(alias_domain)
+                    .where(
+                        (alias_domain.c.alias_domain == domain)
+                        | (alias_domain.c.target_domain == domain)
+                    )
+                ).scalar_one()
+            ),
+            "domain_admins": int(
+                conn.execute(
+                    select(func.count())
+                    .select_from(domain_admins)
+                    .where(domain_admins.c.domain == domain)
+                ).scalar_one()
+            ),
+        }
 
     def list(self) -> list[Domain]:
         d = self._md.tables["domain"]

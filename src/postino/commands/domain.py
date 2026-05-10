@@ -59,13 +59,20 @@ def delete(
     ctx: typer.Context,
     domain: str,
     yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Cascade-delete mailboxes, aliases, and admins owned by this domain.",
+        ),
+    ] = False,
 ) -> None:
     from postino.cli import exit_with_error as _exit
 
     if not yes:
         typer.confirm(f"Delete domain {domain}?", abort=True)
     try:
-        _services(ctx).domain.delete(domain)
+        _services(ctx).domain.delete(domain, force=force)
     except MailctlError as e:
         _exit(e)
 

@@ -23,7 +23,7 @@
 58 = "WHY: Renderer.render's `list[BaseModel]` arg is invariant; concrete-model lists need a cast until Renderer.render is generified — fix in PR-A6 alongside the postino_core->postino move."
 
 [test_no_cast."src/postino/commands/domain.py"]
-76 = "WHY: same Renderer.render variance issue as alias.py:58 — fix in PR-A6."
+83 = "WHY: same Renderer.render variance issue as alias.py:58 — fix in PR-A6."
 
 [test_no_cast."src/postino/commands/quota.py"]
 34 = "WHY: same Renderer.render variance issue — fix in PR-A6."
@@ -77,17 +77,17 @@
 119 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/domain.py"]
-74 = "WHY: SQLAlchemy RowMapping access yields Any."
 87 = "WHY: SQLAlchemy RowMapping access yields Any."
-93 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-94 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-95 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-96 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-97 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-98 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-99 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-100 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-101 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+199 = "WHY: SQLAlchemy RowMapping access yields Any."
+205 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+206 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+207 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+208 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+209 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+210 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+211 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+212 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+213 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/mailbox.py"]
 138 = "WHY: SQLAlchemy RowMapping access yields Any."

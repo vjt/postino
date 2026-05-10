@@ -81,7 +81,7 @@ def build_services(
             metadata=metadata,
         ),
         alias=AliasService(engine=engine, metadata=metadata, clock=clock),
-        domain=DomainService(engine=engine, metadata=metadata, clock=clock),
+        domain=DomainService(engine=engine, metadata=metadata, clock=clock, fs=fs),
         quota=QuotaService(engine=engine, metadata=metadata),
         settings=settings,
     )
