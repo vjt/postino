@@ -57,7 +57,12 @@ from postino_core.services.alias import AliasService
 from postinod.audit import write_postinod_audit
 from postinod.auth.jwt_guard import JwtVerifier
 from postinod.scim.errors import scim_error_from_exception
-from postinod.scim.models import ALIAS_SCHEMA, ScimAlias, ScimError
+from postinod.scim.models import ALIAS_SCHEMA, ScimAlias, ScimError, ScimListResponse
+from postinod.scim.query import (
+    InvalidFilterError,
+    ListQuery,
+    parse_list_query,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -178,6 +183,37 @@ def build_aliases_router(
 
     _audit: _AuditCallback = _audit_impl
 
+    @get("/scim/v2/Aliases", status_code=HTTP_200_OK)
+    async def list_aliases(
+        request: Request[None, None, State],
+        startIndex: int | None = None,
+        count: int | None = None,
+        filter: str | None = None,
+    ) -> Response[dict[str, object]]:
+        await _verify_bearer(request)
+
+        try:
+            q = parse_list_query(start_index=startIndex, count=count, filter_expr=filter)
+        except InvalidFilterError as e:
+            err = ScimError(status="400", scimType="invalidFilter", detail=str(e))
+            return _scim_response(err, 400)
+
+        all_rows = _resolve_aliases(alias_service, q)
+        page = all_rows[q.start_index - 1 : q.start_index - 1 + q.count]
+        envelope = ScimListResponse(
+            totalResults=len(all_rows),
+            itemsPerPage=len(page),
+            startIndex=q.start_index,
+            Resources=[
+                _alias_to_resource(a).model_dump(by_alias=True, exclude_none=True) for a in page
+            ],
+        )
+        return Response(
+            content=envelope.model_dump(by_alias=True, exclude_none=True),
+            status_code=HTTP_200_OK,
+            media_type=SCIM_CONTENT_TYPE,
+        )
+
     @post("/scim/v2/Aliases", status_code=HTTP_201_CREATED)
     async def create_alias(
         request: Request[None, None, State],
@@ -269,4 +305,27 @@ def build_aliases_router(
             payload={},
         )
 
-    return Router(path="/", route_handlers=[create_alias, get_alias, delete_alias])
+    return Router(
+        path="/",
+        route_handlers=[list_aliases, create_alias, get_alias, delete_alias],
+    )
+
+
+def _resolve_aliases(alias_service: AliasService, q: ListQuery) -> list[Alias]:
+    """Apply a parsed `ListQuery` to AliasService and return the matching aliases.
+
+    Filter axes:
+      * `address eq "<email>"` — single-row lookup via `get`.
+      * `domain eq "<fqdn>"` — `list(domain=fqdn)`.
+    Anything else returns the full set.
+    """
+    if q.filter_attr == "address" and q.filter_value is not None:
+        try:
+            email = _as_email(q.filter_value)
+        except ValidationError:
+            return []
+        a = alias_service.get(email)
+        return [a] if a is not None else []
+    if q.filter_attr == "domain" and q.filter_value is not None:
+        return alias_service.list(domain=q.filter_value)
+    return alias_service.list()

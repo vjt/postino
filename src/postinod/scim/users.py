@@ -56,8 +56,14 @@ from postinod.scim.models import (
     PatchOpRequest,
     ScimEmail,
     ScimError,
+    ScimListResponse,
     ScimName,
     ScimUser,
+)
+from postinod.scim.query import (
+    InvalidFilterError,
+    ListQuery,
+    parse_list_query,
 )
 
 _logger = logging.getLogger(__name__)
@@ -181,6 +187,37 @@ def build_users_router(
             )
 
     _audit: _AuditCallback = _audit_impl
+
+    @get("/scim/v2/Users", status_code=HTTP_200_OK)
+    async def list_users(
+        request: Request[None, None, State],
+        startIndex: int | None = None,
+        count: int | None = None,
+        filter: str | None = None,
+    ) -> Response[dict[str, object]]:
+        await _verify_bearer(request)
+
+        try:
+            q = parse_list_query(start_index=startIndex, count=count, filter_expr=filter)
+        except InvalidFilterError as e:
+            err = ScimError(status="400", scimType="invalidFilter", detail=str(e))
+            return _scim_response(err, 400)
+
+        all_rows = _resolve_users(mailbox_service, q)
+        page = all_rows[q.start_index - 1 : q.start_index - 1 + q.count]
+        envelope = ScimListResponse(
+            totalResults=len(all_rows),
+            itemsPerPage=len(page),
+            startIndex=q.start_index,
+            Resources=[
+                _user_from_mailbox(m).model_dump(by_alias=True, exclude_none=True) for m in page
+            ],
+        )
+        return Response(
+            content=envelope.model_dump(by_alias=True, exclude_none=True),
+            status_code=HTTP_200_OK,
+            media_type=SCIM_CONTENT_TYPE,
+        )
 
     @post("/scim/v2/Users", status_code=HTTP_201_CREATED)
     async def create_user(
@@ -368,4 +405,28 @@ def build_users_router(
             payload={"email": username_str},
         )
 
-    return Router(path="/", route_handlers=[create_user, get_user, patch_user, delete_user])
+    return Router(
+        path="/",
+        route_handlers=[list_users, create_user, get_user, patch_user, delete_user],
+    )
+
+
+def _resolve_users(mailbox_service: MailboxService, q: ListQuery) -> list[Mailbox]:
+    """Apply a parsed `ListQuery` to MailboxService and return the matching mailboxes.
+
+    Filter axes:
+      * `userName eq "<email>"` — single-row lookup via `get`.
+      * `domain eq "<fqdn>"` — `list(domain=fqdn, include_disabled=True)`.
+    Anything else returns the full set; `parse_list_query` already rejects
+    unsupported operators, so unknown attrs simply collapse to "no filter".
+    """
+    if q.filter_attr == "userName" and q.filter_value is not None:
+        try:
+            email = _as_email(q.filter_value)
+        except ValidationError:
+            return []
+        m = mailbox_service.get(email)
+        return [m] if m is not None else []
+    if q.filter_attr == "domain" and q.filter_value is not None:
+        return mailbox_service.list(domain=q.filter_value, include_disabled=True)
+    return mailbox_service.list(domain=None, include_disabled=True)

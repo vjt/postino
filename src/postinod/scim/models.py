@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 USER_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:User"
 ALIAS_SCHEMA = "urn:postino:params:scim:schemas:core:2.0:Alias"
+DOMAIN_SCHEMA = "urn:postino:params:scim:schemas:core:2.0:Domain"
 ERROR_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:Error"
 PATCHOP_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:PatchOp"
 LIST_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:ListResponse"
@@ -62,6 +63,34 @@ class ScimAlias(_StrictModel):
     def _must_contain_alias_schema(cls, v: list[str]) -> list[str]:
         if ALIAS_SCHEMA not in v:
             raise ValueError(f"schemas must include {ALIAS_SCHEMA!r}")
+        return v
+
+
+class ScimDomain(_StrictModel):
+    """A postino domain row, exposed as a SCIM extension resource.
+
+    Read-only over SCIM today: list + single GET. Mutating SCIM verbs are
+    intentionally not implemented — domain provisioning stays an operator
+    concern (CLI / postino.toml), not an IdP-driven flow.
+    """
+
+    schemas: list[str] = Field(default_factory=lambda: [DOMAIN_SCHEMA])
+    domain: str
+    description: str
+    transport: str
+    max_aliases: int = Field(alias="maxAliases")
+    max_mailboxes: int = Field(alias="maxMailboxes")
+    max_quota_bytes: int = Field(alias="maxQuotaBytes")
+    default_quota_bytes: int = Field(alias="defaultQuotaBytes")
+    backupmx: bool
+    active: bool
+    id: str | None = None
+
+    @field_validator("schemas")
+    @classmethod
+    def _must_contain_domain_schema(cls, v: list[str]) -> list[str]:
+        if DOMAIN_SCHEMA not in v:
+            raise ValueError(f"schemas must include {DOMAIN_SCHEMA!r}")
         return v
 
 

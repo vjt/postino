@@ -40,7 +40,7 @@ _SPC: dict[str, object] = {
 
 _RESOURCE_TYPES: dict[str, object] = {
     "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
-    "totalResults": 2,
+    "totalResults": 3,
     "Resources": [
         {
             "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
@@ -56,12 +56,19 @@ _RESOURCE_TYPES: dict[str, object] = {
             "endpoint": "/Aliases",
             "schema": "urn:postino:params:scim:schemas:core:2.0:Alias",
         },
+        {
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:ResourceType"],
+            "id": "Domain",
+            "name": "Domain",
+            "endpoint": "/Domains",
+            "schema": "urn:postino:params:scim:schemas:core:2.0:Domain",
+        },
     ],
 }
 
 _SCHEMAS: dict[str, object] = {
     "schemas": ["urn:ietf:params:scim:api:messages:2.0:ListResponse"],
-    "totalResults": 2,
+    "totalResults": 3,
     "Resources": [
         {
             "id": "urn:ietf:params:scim:schemas:core:2.0:User",
@@ -83,6 +90,21 @@ _SCHEMAS: dict[str, object] = {
             "attributes": [
                 {"name": "address", "type": "string", "required": True, "uniqueness": "server"},
                 {"name": "goto", "type": "string", "required": True},
+            ],
+        },
+        {
+            "id": "urn:postino:params:scim:schemas:core:2.0:Domain",
+            "name": "Domain",
+            "attributes": [
+                {"name": "domain", "type": "string", "required": True, "uniqueness": "server"},
+                {"name": "description", "type": "string"},
+                {"name": "transport", "type": "string"},
+                {"name": "maxAliases", "type": "integer"},
+                {"name": "maxMailboxes", "type": "integer"},
+                {"name": "maxQuotaBytes", "type": "integer"},
+                {"name": "defaultQuotaBytes", "type": "integer"},
+                {"name": "backupmx", "type": "boolean"},
+                {"name": "active", "type": "boolean"},
             ],
         },
     ],

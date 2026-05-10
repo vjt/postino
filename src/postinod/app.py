@@ -30,6 +30,7 @@ from postino_core.hooks import HookRunner
 from postino_core.providers import NoAuthProvider
 from postino_core.services.alias import AliasService
 from postino_core.services.bundle import build_services
+from postino_core.services.domain import DomainService
 from postino_core.services.mailbox import MailboxService
 from postinod.auth.hmac_guard import HmacVerifier
 from postinod.auth.jwks import JwksCache
@@ -38,6 +39,7 @@ from postinod.config import load_postinod_settings
 from postinod.health import build_health_router
 from postinod.scim.aliases import build_aliases_router
 from postinod.scim.discovery import build_discovery_router
+from postinod.scim.domains import build_domains_router
 from postinod.scim.users import build_users_router
 from postinod.zitadel.events import build_zitadel_router
 
@@ -118,6 +120,10 @@ def build_app(*, toml_path: Path) -> Litestar:
                 metadata=bundle.metadata,
                 clock=_utc_now,
             ),
+            build_domains_router(
+                domain_service=bundle.domain,
+                jwt_verifier=jwt_verifier,
+            ),
             build_discovery_router(jwt_verifier=jwt_verifier),
         ],
         debug=False,
@@ -164,6 +170,13 @@ def build_app_for_test(
         metadata=metadata,
     )
     alias_service = AliasService(engine=db_engine, metadata=metadata, clock=_utc_now)
+    domain_service = DomainService(
+        engine=db_engine,
+        metadata=metadata,
+        clock=_utc_now,
+        fs=fs,
+        lmtp_destination="localhost:24",
+    )
     verifier = HmacVerifier(secret=hmac_secret)
 
     if jwks is None:
@@ -202,6 +215,10 @@ def build_app_for_test(
                 engine=db_engine,
                 metadata=metadata,
                 clock=_utc_now,
+            ),
+            build_domains_router(
+                domain_service=domain_service,
+                jwt_verifier=jwt_verifier,
             ),
             build_discovery_router(jwt_verifier=jwt_verifier),
         ],
