@@ -12,9 +12,21 @@ Dovecot mail stack on the PostfixAdmin SQL schema.
   `postinod` (litestar daemon)
 - Pydantic v2 strict, SQLAlchemy 2.0 reflection, Rich, passlib (bcrypt + md5_crypt + sha512_crypt)
 - Constructor injection throughout; every service unit-testable in isolation
-- Identity providers: `LocalProvider` (CLI path; password lives in
-  PA `mailbox.password`) and `NoAuthProvider` (postinod path;
-  identity owned by an external IdP via Dovecot passdb chain).
+- Identity providers: three backends (per-deploy via `identity_backend`):
+  - `local` — every row carries a bcrypt hash; `LocalProvider`. CLI
+    provisions and rotates; SCIM POST with password is supported, PATCH
+    release-to-noauth is refused (no IdP to defer to).
+  - `noauth` — every row carries `{NOAUTH}`; `NoAuthProvider`. CLI cannot
+    provision or rotate; identity is owned by an external IdP via
+    Dovecot's passdb chain.
+  - `hybrid` — `HybridProvider`. Per-row credential ownership: rows with
+    a hash auth via passdb-sql, rows with `{NOAUTH}` defer to the chained
+    non-SQL passdb. SCIM POST and PATCH support both setting and
+    releasing the credential; CLI `user passwd --claim` and `user
+    release` do the same locally. Domain freedom: any subset of rows
+    (typically a domain) can be IdP-managed while the rest stay
+    SQL-managed; the operator partitions by deciding which users get
+    `{NOAUTH}`.
   No outbound IdP integration planned — see "Zitadel surface" below.
 
 ## Zitadel surface

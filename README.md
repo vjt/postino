@@ -139,6 +139,66 @@ export POSTINO_VIRTUAL_MAILBOX_BASE=/srv/mail
 `postfix_sql_dir/sql-virtual_mailbox_maps.cf` to extract `host / user /
 password / dbname`. Single source of truth.
 
+## Identity backends
+
+postino supports three identity-backend modes. Set in `postino.toml`:
+
+```toml
+[core]
+identity_backend = "local"   # or "noauth" or "hybrid"
+```
+
+### local — SQL-only auth
+
+Every mailbox has a bcrypt hash in `mailbox.password`. Dovecot resolves
+all users via `passdb-sql`. Use this when you have no IdP.
+
+### noauth — IdP-only auth
+
+Every mailbox carries the `{NOAUTH}` sentinel. Dovecot's `passdb-sql`
+sees the sentinel as a non-resolvable scheme and falls through to a
+chained non-SQL passdb (LDAP, OIDC bridge, passwd-file, ...). Use this
+when an external IdP owns every user.
+
+Required Dovecot config snippet:
+
+```
+# /usr/local/etc/dovecot/conf.d/auth-sql.conf.ext
+passdb {
+  driver = sql
+  args = /usr/local/etc/dovecot/sql-virtual_mailbox.cf
+  result_failure = continue   # critical: defer on {NOAUTH}
+}
+
+# /usr/local/etc/dovecot/conf.d/auth-ldap.conf.ext (or similar)
+passdb {
+  driver = ldap
+  args = /usr/local/etc/dovecot/dovecot-ldap.conf.ext
+}
+```
+
+### hybrid — per-row credential ownership
+
+Same Dovecot config as `noauth` (the `result_failure = continue` on
+passdb-sql + a chained non-SQL passdb is mandatory).
+
+Operations:
+- SCIM POST `/Users` with `"password": "..."` provisions an SQL-authed
+  mailbox; omit `password` to provision an IdP-managed (sentinel) one.
+- SCIM PATCH `/Users/{id}` with `{op:"replace", path:"password",
+  value:"..."}` rotates / claims; `{op:"remove", path:"password"}` or
+  `{op:"replace", path:"password", value:null}` releases back to IdP.
+- CLI `postino user passwd <user> --claim` transitions an IdP-managed
+  mailbox into SQL auth.
+- CLI `postino user release <user>` transitions an SQL-authed mailbox
+  back to IdP-managed.
+
+Domain freedom: there is no per-domain identity setting. Partition by
+sending Zitadel/SCIM events only for the users you want IdP-managed;
+the rest live in SQL auth. `postino check` flags mailboxes whose
+identity state appears inconsistent with the deployment (e.g. a row
+with `{NOAUTH}` under `identity_backend=local`).
+
 ## Usage
 
 ### Domain CRUD
