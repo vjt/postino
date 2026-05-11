@@ -222,6 +222,8 @@ postino check --json
 | 5    | `DBError` — DB connectivity / schema drift       |
 | 6    | `FilesystemError` — maildir mkdir / chown / rm   |
 | 7    | `HookError` — postcreation script returned non-zero |
+| 8    | `DeadlockError` — MySQL deadlock / lock-wait timeout |
+| 9    | `MlmmjError` — mlmmj subprocess failed            |
 | 99   | unexpected — bug; full traceback                 |
 
 ## Architecture

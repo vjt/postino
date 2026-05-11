@@ -80,7 +80,7 @@
 
 [test_type_ignore_justified."src/postino/commands/user.py"]
 34 = "WHY: typer Context.obj is dict[str, Any]; PR-A6 typed CliState."
-192 = "WHY: Renderer.render is invariant on list[BaseModel]; PR-A6 generifies it."
+207 = "WHY: Renderer.render is invariant on list[BaseModel]; PR-A6 generifies it."
 
 [test_type_ignore_justified."src/postino_core/password.py"]
 12 = "WHY: passlib lacks a typed __init__; PR-A5 wraps via PasswordHasher Protocol."

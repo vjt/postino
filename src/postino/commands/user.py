@@ -164,13 +164,25 @@ def passwd(
 @app.command("enable")
 def enable(ctx: typer.Context, username: str) -> None:
     """Set status=ACTIVE."""
-    _services(ctx).mailbox.set_status(username, MailboxStatus.ACTIVE)
+    from postino.cli import exit_with_error as _exit
+    from postino_core.errors import MailctlError
+
+    try:
+        _services(ctx).mailbox.set_status(username, MailboxStatus.ACTIVE)
+    except MailctlError as e:
+        _exit(e)
 
 
 @app.command("disable")
 def disable(ctx: typer.Context, username: str) -> None:
     """Set status=DISABLED."""
-    _services(ctx).mailbox.set_status(username, MailboxStatus.DISABLED)
+    from postino.cli import exit_with_error as _exit
+    from postino_core.errors import MailctlError
+
+    try:
+        _services(ctx).mailbox.set_status(username, MailboxStatus.DISABLED)
+    except MailctlError as e:
+        _exit(e)
 
 
 @app.command("quota")
@@ -180,13 +192,16 @@ def quota_cmd(
     set_value: Annotated[str, typer.Option("--set", help="New quota, e.g. 5G.")] = "",
 ) -> None:
     """Show or set quota cap."""
-    s = _services(ctx)
-    if set_value:
-        s.mailbox.set_quota(username, parse_quota(set_value))
-    m = s.mailbox.get(username)
-    if m is None:
-        from postino.cli import exit_with_error as _exit
-        from postino_core.errors import NotFoundError
+    from postino.cli import exit_with_error as _exit
+    from postino_core.errors import MailctlError, NotFoundError
 
-        _exit(NotFoundError(f"mailbox {username} does not exist"))
+    try:
+        s = _services(ctx)
+        if set_value:
+            s.mailbox.set_quota(username, parse_quota(set_value))
+        m = s.mailbox.get(username)
+        if m is None:
+            _exit(NotFoundError(f"mailbox {username} does not exist"))
+    except MailctlError as e:
+        _exit(e)
     _renderer(ctx).render(m)  # type: ignore[arg-type]
