@@ -66,13 +66,23 @@ def delete(
             help="Cascade-delete mailboxes, aliases, and admins owned by this domain.",
         ),
     ] = False,
+    keep_maildir: Annotated[
+        bool,
+        typer.Option(
+            "--keep-maildir",
+            help=(
+                "Skip removing the per-domain maildir tree on disk. "
+                "Useful when archiving the tree before final disposal."
+            ),
+        ),
+    ] = False,
 ) -> None:
     from postino.cli import exit_with_error as _exit
 
     if not yes:
         typer.confirm(f"Delete domain {domain}?", abort=True)
     try:
-        _services(ctx).domain.delete(domain, force=force)
+        _services(ctx).domain.delete(domain, force=force, keep_maildir=keep_maildir)
     except MailctlError as e:
         _exit(e)
 

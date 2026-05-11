@@ -235,6 +235,7 @@ def _check_deep(s: PostinoSettings, engine: Engine, md: MetaData) -> list[Findin
     out.extend(_check_quota_pairing(mailbox_rows, quota_users))
     out.extend(_check_mailbox_maildir_pairing(s, mailbox_rows))
     out.extend(_check_orphan_maildirs(s, mailbox_rows))
+    out.extend(_check_orphan_domain_maildirs(s, domain_names))
     return out
 
 
@@ -366,3 +367,34 @@ def _check_orphan_maildirs(
             )
         ]
     return [_ok("orphan_maildirs", "no orphan maildirs on disk")]
+
+
+def _check_orphan_domain_maildirs(
+    s: PostinoSettings,
+    domain_names: set[str],
+) -> list[Finding]:
+    """Per-domain maildir trees with no matching `domain` row.
+
+    Catches the privacy-axis bug (review A3.8): a `domain.delete --force`
+    that committed the DB cascade but failed FS removal would leave a
+    tenant's maildir tree on disk. If the same domain is re-added later
+    and a mailbox with the same local-part provisioned, it would adopt
+    the old maildir — leaking another tenant's mail.
+
+    The v0.4 DomainService.delete moves rmtree into the transaction so
+    this state should not occur going forward, but historical leftovers
+    surface here for the operator to disposition.
+    """
+    base = s.virtual_mailbox_base
+    if not base.is_dir():
+        return []
+    orphans = sorted(d.name for d in base.iterdir() if d.is_dir() and d.name not in domain_names)
+    if orphans:
+        return [
+            _err(
+                "orphan_domain_maildirs",
+                f"{len(orphans)} per-domain maildir tree(s) without "
+                f"a matching domain row: {orphans[:5]}",
+            )
+        ]
+    return [_ok("orphan_domain_maildirs", "no orphan per-domain maildirs on disk")]

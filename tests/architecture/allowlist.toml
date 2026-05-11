@@ -28,7 +28,7 @@
 58 = "WHY: Renderer.render's `list[BaseModel]` arg is invariant; concrete-model lists need a cast until Renderer.render is generified — fix in PR-A6 alongside the postino_core->postino move."
 
 [test_no_cast."src/postino/commands/domain.py"]
-83 = "WHY: same Renderer.render variance issue as alias.py:58 — fix in PR-A6."
+93 = "WHY: same Renderer.render variance issue as alias.py:58 — fix in PR-A6."
 
 [test_no_cast."src/postino/commands/quota.py"]
 34 = "WHY: same Renderer.render variance issue — fix in PR-A6."

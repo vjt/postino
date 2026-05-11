@@ -8,7 +8,6 @@ it fails."""
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -30,8 +29,6 @@ from postino_core.errors import (
 )
 from postino_core.fs import FilesystemAdapter
 from postino_core.models import Domain
-
-_logger = logging.getLogger(__name__)
 
 # PostfixAdmin's `domain` table reserves the literal `'ALL'` row as a permission
 # system marker (super-admin scope in `domain_admins`). It has no routable mail
@@ -138,7 +135,7 @@ class DomainService:
             return None
         return self._row_to_model(row._mapping)  # type: ignore[arg-type]  # WHY: SQLAlchemy RowMapping is typed Any; we access known columns
 
-    def delete(self, domain: str, *, force: bool = False) -> None:
+    def delete(self, domain: str, *, force: bool = False, keep_maildir: bool = False) -> None:
         """Delete a domain row.
 
         With ``force=False`` (default), refuses to delete a domain that
@@ -147,8 +144,18 @@ class DomainService:
 
         With ``force=True``, cascade-deletes dependents in dependency
         order (alias_domain → alias → quota2 → mailbox → domain_admins
-        → domain) inside one transaction, then removes the per-domain
-        maildir tree on disk best-effort.
+        → domain) AND removes the per-domain maildir tree on disk —
+        **inside the same transaction**, so a filesystem failure
+        (NFS hung, permission error) aborts the DB cascade. An
+        operator sees a single error instead of a half-deleted state
+        in which the DB no longer references the tenant but the
+        maildir survives on disk and may be re-adopted by a future
+        same-named mailbox.
+
+        ``keep_maildir`` skips the FS removal even on ``force=True`` —
+        useful when the caller plans to archive the maildir tree
+        before final disposal. Defaults to False; CLI exposes it via
+        ``postino domain del --keep-maildir``.
         """
         if domain == _PA_PERMISSION_PSEUDO_DOMAIN:
             raise NotFoundError(
@@ -204,21 +211,14 @@ class DomainService:
                 conn,
                 action=mk_action("domain", "delete"),
                 domain=domain,
-                data=f"{domain} force={force}",
+                data=f"{domain} force={force} keep_maildir={keep_maildir}",
             )
-
-        # Post-commit: filesystem cleanup. Best-effort; a stranded
-        # maildir tree is recoverable via `postino check`, while a
-        # mid-failure here must not raise on top of a successful DB
-        # cascade.
-        try:
-            self._fs.remove_maildir(Path(domain))
-        except Exception as compensation_err:
-            _logger.error(
-                "post-commit: remove_maildir(%s) failed: %s",
-                domain,
-                compensation_err,
-            )
+            # FS removal LAST inside the tx: if rmtree fails, the
+            # surrounding `engine.begin()` rolls every DB delete back
+            # so the tenant's domain row + maildir survive together
+            # rather than splitting.
+            if not keep_maildir:
+                self._fs.remove_maildir(Path(domain))
 
     def _count_dependents(self, conn: Connection, domain: str) -> dict[str, int]:
         mailbox = self._md.tables["mailbox"]

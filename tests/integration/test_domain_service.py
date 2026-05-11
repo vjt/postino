@@ -318,6 +318,96 @@ def test_domain_delete_force_on_empty_domain_succeeds(
     assert svc.get("empty.example.org") is None
 
 
+def test_domain_delete_keep_maildir_preserves_tree(
+    db: Engine, frozen_clock: datetime, tmp_path: Path
+) -> None:
+    """`keep_maildir=True` cascades the DB rows but leaves the maildir tree."""
+    fs = FilesystemAdapter(mail_root=tmp_path, vmail_uid=-1, vmail_gid=-1)
+    svc = _service(db, frozen_clock, fs=fs)
+    svc.add(
+        domain="archive.example.org",
+        description="",
+        max_aliases=0,
+        max_mailboxes=10,
+        max_quota_bytes=0,
+        default_quota_bytes=0,
+        transport=DomainTransport.VIRTUAL,
+        backupmx=False,
+    )
+    _seed_mailbox(db, "u@archive.example.org", "archive.example.org")
+    fs.create_maildir(Path("archive.example.org/u/"))
+
+    svc.delete("archive.example.org", force=True, keep_maildir=True)
+
+    assert svc.get("archive.example.org") is None
+    # The maildir tree survives — the operator plans to archive it.
+    assert (tmp_path / "archive.example.org" / "u").is_dir()
+
+
+def test_domain_delete_force_fs_failure_rolls_back_db(
+    db: Engine, frozen_clock: datetime, tmp_path: Path
+) -> None:
+    """An FS rmtree failure during force-delete must roll back the DB cascade.
+
+    The privacy-axis fix (review A3.8): pre-v0.4 the FS step ran AFTER the
+    DB tx committed and any failure was swallowed, leaving the tenant's
+    maildir tree on disk where a same-named re-provisioned mailbox could
+    adopt it. v0.4 moves rmtree into the same transaction so an FS error
+    aborts the DB cascade — operator sees one error and a consistent
+    DB+FS state instead of a half-deleted tenant.
+    """
+    import shutil
+
+    fs = FilesystemAdapter(mail_root=tmp_path, vmail_uid=-1, vmail_gid=-1)
+
+    # Patch fs.remove_maildir to raise after we've validated/cascaded.
+    original_remove = fs.remove_maildir
+
+    def boom(path: Path) -> None:
+        del path
+        raise OSError("simulated rmtree failure")
+
+    fs.remove_maildir = boom  # type: ignore[method-assign]  # WHY: test-only monkeypatch
+    try:
+        svc = _service(db, frozen_clock, fs=fs)
+        svc.add(
+            domain="boom.example.org",
+            description="",
+            max_aliases=0,
+            max_mailboxes=10,
+            max_quota_bytes=0,
+            default_quota_bytes=0,
+            transport=DomainTransport.VIRTUAL,
+            backupmx=False,
+        )
+        _seed_mailbox(db, "u@boom.example.org", "boom.example.org")
+        (tmp_path / "boom.example.org" / "u").mkdir(parents=True)
+
+        with pytest.raises(OSError, match="simulated rmtree failure"):
+            svc.delete("boom.example.org", force=True)
+
+        # DB cascade must have been rolled back — domain row and mailbox
+        # row both still present.
+        md = MetaData()
+        md.reflect(bind=db)
+        with db.begin() as conn:
+            d = conn.execute(
+                select(md.tables["domain"]).where(
+                    md.tables["domain"].c.domain == "boom.example.org"
+                )
+            ).fetchone()
+            m = conn.execute(
+                select(md.tables["mailbox"]).where(
+                    md.tables["mailbox"].c.username == "u@boom.example.org"
+                )
+            ).fetchone()
+        assert d is not None, "domain row vanished despite FS rollback"
+        assert m is not None, "mailbox row vanished despite FS rollback"
+    finally:
+        fs.remove_maildir = original_remove  # type: ignore[method-assign]  # WHY: restore patch
+        shutil.rmtree(tmp_path / "boom.example.org", ignore_errors=True)
+
+
 def test_domain_delete_alias_domain_pointing_at_domain_blocks(
     db: Engine, frozen_clock: datetime
 ) -> None:
