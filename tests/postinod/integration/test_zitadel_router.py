@@ -14,6 +14,7 @@ import collections.abc
 import hashlib
 import hmac
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -28,6 +29,17 @@ pytestmark = pytest.mark.integration
 
 def _sign(secret: bytes, body: bytes) -> str:
     return hmac.new(secret, body, hashlib.sha256).hexdigest()
+
+
+def _now_iso() -> str:
+    """Return the current UTC time as an ISO-8601 Z string.
+
+    Tests have to pass through the default 86400s replay window in
+    `build_app_for_test`; hard-coded timestamps eventually drift outside
+    the window and break CI on a delay (this fired 2026-05-11). All
+    happy-path events use this helper.
+    """
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @pytest.fixture
@@ -68,7 +80,7 @@ async def test_user_added_creates_mailbox(
             "aggregateID": "agg-1",
             "userID": "user-1",
             "event_type": "user.human.added",
-            "created_at": "2026-05-10T11:00:00Z",
+            "created_at": _now_iso(),
             "event_payload": {
                 "email": "alice@example.org",
                 "firstName": "Alice",
@@ -105,7 +117,7 @@ async def test_unknown_domain_returns_400(
             "aggregateID": "a",
             "userID": "u",
             "event_type": "user.human.added",
-            "created_at": "2026-05-10T11:00:00Z",
+            "created_at": _now_iso(),
             "event_payload": {
                 "email": "bob@nope.invalid",
                 "firstName": "B",
@@ -135,7 +147,7 @@ async def test_deactivate_then_check_status(
             "aggregateID": "a",
             "userID": "u",
             "event_type": "user.human.added",
-            "created_at": "2026-05-10T11:00:00Z",
+            "created_at": _now_iso(),
             "event_payload": {
                 "email": "carol@example.org",
                 "firstName": "Carol",
@@ -156,7 +168,7 @@ async def test_deactivate_then_check_status(
             "aggregateID": "a",
             "userID": "u",
             "event_type": "user.deactivated",
-            "created_at": "2026-05-10T11:01:00Z",
+            "created_at": _now_iso(),
             "event_payload": {"email": "carol@example.org"},
         }
     ).encode()
@@ -184,7 +196,7 @@ async def test_unknown_event_returns_200_no_op(
             "aggregateID": "a",
             "userID": "u",
             "event_type": "user.something.unknown",
-            "created_at": "2026-05-10T11:00:00Z",
+            "created_at": _now_iso(),
             "event_payload": {},
         }
     ).encode()
@@ -206,7 +218,7 @@ async def test_audit_row_written(
             "aggregateID": "a",
             "userID": "u-dave",
             "event_type": "user.human.added",
-            "created_at": "2026-05-10T11:00:00Z",
+            "created_at": _now_iso(),
             "event_payload": {
                 "email": "dave@example.org",
                 "firstName": "D",
@@ -240,7 +252,7 @@ async def test_zitadel_create_writes_atomic_dual_rows(
             "aggregateID": "a",
             "userID": "u-atomic",
             "event_type": "user.human.added",
-            "created_at": "2026-05-10T11:00:00Z",
+            "created_at": _now_iso(),
             "event_payload": {
                 "email": "atomic@example.org",
                 "firstName": "A",
@@ -337,7 +349,7 @@ async def test_invalid_hmac_rejected(
             "aggregateID": "a",
             "userID": "u",
             "event_type": "user.human.added",
-            "created_at": "2026-05-10T11:00:00Z",
+            "created_at": _now_iso(),
             "event_payload": {},
         }
     ).encode()
