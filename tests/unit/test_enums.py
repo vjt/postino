@@ -33,7 +33,8 @@ def test_domain_transport_members() -> None:
 def test_identity_backend_members() -> None:
     assert IdentityBackend.LOCAL.value == "local"
     assert IdentityBackend.NOAUTH.value == "noauth"
-    assert {b.value for b in IdentityBackend} == {"local", "noauth"}
+    assert IdentityBackend.HYBRID.value == "hybrid"
+    assert {b.value for b in IdentityBackend} == {"local", "noauth", "hybrid"}
 
 
 def test_unknown_enum_raises() -> None:
@@ -44,3 +45,8 @@ def test_unknown_enum_raises() -> None:
 def test_domain_transport_mlmmj_raw_value() -> None:
     assert DomainTransport("mlmmj") is DomainTransport.MLMMJ
     assert DomainTransport.MLMMJ.value == "mlmmj"
+
+
+def test_identity_backend_has_hybrid() -> None:
+    assert IdentityBackend("hybrid") is IdentityBackend.HYBRID
+    assert IdentityBackend.HYBRID.value == "hybrid"

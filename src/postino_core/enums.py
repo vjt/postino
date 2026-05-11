@@ -54,7 +54,12 @@ class IdentityBackend(StrEnum):
     NOAUTH — ``mailbox.password`` carries the ``{NOAUTH}`` sentinel; an
     external IdP authenticates via dovecot-side passdb (LDAP/OIDC), and
     this CLI refuses to provision or rotate passwords.
+    HYBRID — per-row policy: rows with `{NOAUTH}` defer to the IdP
+    passdb; rows with a hash auth against passdb-sql. The CLI and SCIM
+    can transition rows between the two states (claim_local /
+    release_to_noauth).
     """
 
     LOCAL = "local"
     NOAUTH = "noauth"
+    HYBRID = "hybrid"
