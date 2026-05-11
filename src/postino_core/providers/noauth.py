@@ -68,3 +68,18 @@ class NoAuthProvider:
 
     def supports_local_provisioning(self) -> bool:
         return False
+
+    def release_identity(
+        self,
+        conn: Connection,
+        username: str,
+    ) -> None:
+        # Sentinel is already the permanent value; nothing to do.
+        del conn, username
+        return None
+
+    def supports_release_to_noauth(self) -> bool:
+        # Not meaningful under noauth (sentinel is always-on); refuse to
+        # advertise the capability so the SCIM PATCH password handler
+        # returns 403 mutability instead of silently no-op'ing.
+        return False

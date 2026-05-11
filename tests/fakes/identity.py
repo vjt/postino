@@ -81,8 +81,15 @@ class FakeIdentityProvider:
     def delete_identity(self, conn: Connection, username: str) -> None:
         self.calls.append(FakeIdentityCall(op="delete", username=username))
 
+    def release_identity(self, conn: Connection, username: str) -> None:
+        self.calls.append(FakeIdentityCall(op="release", username=username))
+
     def supports_password_change(self) -> bool:
         return self.supports_password_change_value
 
     def supports_local_provisioning(self) -> bool:
         return self.supports_local_provisioning_value
+
+    def supports_release_to_noauth(self) -> bool:
+        # Fake allows all operations for maximum test coverage.
+        return True

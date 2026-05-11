@@ -62,6 +62,19 @@ class LocalProvider:
     def supports_local_provisioning(self) -> bool:
         return True
 
+    def release_identity(
+        self,
+        conn: Connection,
+        username: str,
+    ) -> None:
+        del conn, username
+        raise ConfigError(
+            "local backend does not release to {NOAUTH}; switch to identity_backend=hybrid"
+        )
+
+    def supports_release_to_noauth(self) -> bool:
+        return False
+
     def _set(
         self,
         conn: Connection,
