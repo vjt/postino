@@ -19,7 +19,7 @@ from postino_core.enums import IdentityBackend
 from postino_core.errors import ConfigError
 from postino_core.fs import FilesystemAdapter
 from postino_core.hooks import HookRunner
-from postino_core.providers import IdentityProvider, LocalProvider, NoAuthProvider
+from postino_core.providers import HybridProvider, IdentityProvider, LocalProvider, NoAuthProvider
 from postino_core.services.alias import AliasService
 from postino_core.services.domain import DomainService
 from postino_core.services.mailbox import MailboxService
@@ -158,4 +158,6 @@ def _provider_for(
         return LocalProvider(metadata=metadata, clock=clock)
     if backend is IdentityBackend.NOAUTH:
         return NoAuthProvider()
+    if backend is IdentityBackend.HYBRID:
+        return HybridProvider(metadata=metadata, clock=clock)
     raise ConfigError(f"no IdentityProvider implementation for backend {backend.value!r}")

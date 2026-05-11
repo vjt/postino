@@ -113,6 +113,20 @@ def test_noauth_backend_accepted() -> None:
     assert s.identity_backend is IdentityBackend.NOAUTH
 
 
+def test_hybrid_backend_accepted() -> None:
+    s = PostinoSettings(
+        identity_backend=IdentityBackend.HYBRID,
+        postfix_sql_dir=Path("/tmp"),
+        virtual_mailbox_base=Path("/srv/mail"),
+        postcreation_hook=Path("/x"),
+        vmail_uid=1006,
+        vmail_gid=1006,
+        default_password_scheme=PasswordScheme.BCRYPT,
+        default_quota_bytes=1024**3,
+    )
+    assert s.identity_backend is IdentityBackend.HYBRID
+
+
 def test_unknown_backend_string_rejected() -> None:
     """Unknown identity_backend string fails at the enum boundary, not the validator."""
     with pytest.raises(ValueError):
