@@ -166,6 +166,35 @@ def passwd(
         exit_with_error(e)
 
 
+@app.command("release")
+def release(ctx: typer.Context, username: str) -> None:
+    """Release a mailbox's credential to the IdP ({NOAUTH} sentinel).
+
+    Inverse of `user passwd --claim`. Idempotent: a row already on the
+    sentinel returns success with an informational message and no audit
+    row. Only meaningful under identity_backend=hybrid; LocalProvider
+    raises ConfigError.
+    """
+    try:
+        s = get_services(ctx)
+        if not s.identity.supports_release_to_noauth():
+            raise ConfigError(
+                "release to IdP not supported under current identity backend; "
+                "set identity_backend=hybrid in postino.toml"
+            )
+        # WHY: is_idp_managed raises NotFoundError itself when the row is
+        # absent (see postino_core/services/mailbox.py); a separate
+        # mailbox.get() pre-check would be a redundant SQL roundtrip
+        # (same lesson as the passwd-claim refactor in commit cbcc4e2).
+        if s.mailbox.is_idp_managed(username):
+            typer.echo(f"{username} already IdP-managed; no change.", err=True)
+            return
+        s.mailbox.release_identity(username)
+        typer.echo(f"{username} released to IdP-managed auth.", err=True)
+    except MailctlError as e:
+        exit_with_error(e)
+
+
 @app.command("enable")
 def enable(ctx: typer.Context, username: str) -> None:
     """Set status=ACTIVE."""
