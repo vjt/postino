@@ -411,7 +411,7 @@ def build_users_router(
                     extra = _extra(
                         username_str=username_str,
                         actor_sub=actor_sub,
-                        postinod_action=("user", "release_to_noauth"),
+                        postinod_action=("user", "release"),
                     )
                     try:
                         with audit_context(extra):
