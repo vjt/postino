@@ -17,6 +17,7 @@ Two modes:
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
@@ -24,6 +25,7 @@ from sqlalchemy import MetaData, select, text
 from sqlalchemy.engine import Engine
 
 from postino_core.config import PostinoSettings, parse_postfix_sql_cf
+from postino_core.enums import IdentityBackend
 from postino_core.errors import ConfigError
 
 Severity = Literal["info", "warn", "error"]
@@ -88,6 +90,10 @@ def _ok(name: str, message: str) -> Finding:
 
 def _err(name: str, message: str) -> Finding:
     return Finding(name=name, severity="error", message=message)
+
+
+def _warn(name: str, message: str) -> Finding:
+    return Finding(name=name, severity="warn", message=message)
 
 
 def _check_db_reachable(engine: Engine) -> Finding:
@@ -193,8 +199,99 @@ class _MailboxRow(BaseModel):
     domain: str
 
 
+_DOVECOT_CONF_DIRS = (
+    Path("/etc/dovecot/conf.d"),
+    Path("/usr/local/etc/dovecot/conf.d"),
+)
+
+
+def _check_dovecot_passdb_chain(s: PostinoSettings) -> list[Finding]:
+    """When identity_backend=noauth, confirm dovecot has a non-SQL passdb.
+
+    The NoAuth contract: postinod refuses to write mailbox.password, so
+    dovecot must authenticate via a sibling passdb (passwd-file, ldap,
+    pam, static, imap …). If the chain contains only `driver = sql`
+    blocks, the system has no way to authenticate users — a confirmed
+    misconfiguration that surfaces as `severity=error`. Severity is
+    downgraded to `warn` when the dovecot config is unreachable (host
+    runs dovecot from a non-standard prefix or postino lacks read
+    permission); operators must verify manually in that case.
+    """
+    if s.identity_backend != IdentityBackend.NOAUTH:
+        return []
+    auth_files: list[Path] = []
+    for d in _DOVECOT_CONF_DIRS:
+        if d.is_dir():
+            try:
+                auth_files.extend(sorted(d.glob("auth-*.conf.ext")))
+            except OSError as e:
+                return [_warn("dovecot_passdb_chain", f"cannot scan {d}: {e}")]
+    if not auth_files:
+        return [
+            _warn(
+                "dovecot_passdb_chain",
+                "cannot verify dovecot passdb chain: no auth-*.conf.ext "
+                f"found under {[str(p) for p in _DOVECOT_CONF_DIRS]}",
+            )
+        ]
+    drivers: list[str] = []
+    for path in auth_files:
+        try:
+            content = path.read_text()
+        except OSError as e:
+            return [_warn("dovecot_passdb_chain", f"cannot read {path}: {e}")]
+        drivers.extend(_extract_passdb_drivers(content))
+    if not drivers:
+        return [
+            _warn(
+                "dovecot_passdb_chain",
+                "dovecot config present but no `passdb { driver = ... }` blocks parsed",
+            )
+        ]
+    non_sql = sorted({d for d in drivers if d != "sql"})
+    if not non_sql:
+        return [
+            _err(
+                "dovecot_passdb_chain",
+                "identity_backend=noauth but every dovecot passdb uses driver=sql "
+                f"({sorted(set(drivers))}) — external IdP passdb missing",
+            )
+        ]
+    return [_ok("dovecot_passdb_chain", f"non-sql passdb present: {non_sql}")]
+
+
+def _extract_passdb_drivers(content: str) -> list[str]:
+    """Pull every `driver = X` line from inside `passdb { ... }` blocks.
+
+    Tracks brace depth so nested braces (rare but legal in dovecot) do
+    not confuse the scanner; ignores comments and blank lines.
+    """
+    drivers: list[str] = []
+    depth = 0
+    in_passdb = False
+    for raw in content.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if not in_passdb:
+            if line.startswith("passdb"):
+                in_passdb = True
+                depth = line.count("{")
+            continue
+        depth += line.count("{")
+        if line.startswith("driver"):
+            _, _, rhs = line.partition("=")
+            if rhs:
+                drivers.append(rhs.strip())
+        depth -= line.count("}")
+        if depth <= 0:
+            in_passdb = False
+    return drivers
+
+
 def _check_deep(s: PostinoSettings, engine: Engine, md: MetaData) -> list[Finding]:
     out: list[Finding] = []
+    out.extend(_check_dovecot_passdb_chain(s))
     mailbox_t = md.tables.get("mailbox")
     domain_t = md.tables.get("domain")
     alias_t = md.tables.get("alias")

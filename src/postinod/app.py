@@ -25,6 +25,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
 from postino_core.config import load_postino_settings
+from postino_core.errors import ConfigError
 from postino_core.fs import FilesystemAdapter
 from postino_core.hooks import HookRunner
 from postino_core.providers import NoAuthProvider
@@ -78,6 +79,7 @@ def build_app(*, toml_path: Path) -> Litestar:
         echo=False,
         audit_writer_factory=lambda md: PostinodAuditWriter(metadata=md, clock=_utc_now),
     )
+    _assert_noauth_identity(bundle.identity)
 
     hmac_verifier = HmacVerifier(secrets=hmac_secrets)
     jwks = JwksCache(
@@ -134,6 +136,21 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
+def _assert_noauth_identity(identity: object) -> None:
+    """Fail-fast guard: postinod refuses to wire any non-NoAuth provider.
+
+    The daemon's contract is that an external IdP owns credentials and
+    Dovecot's passdb chain verifies them. Booting with LocalProvider
+    would silently expose mailbox.password to SCIM/Zitadel writes —
+    making the IdP-owned-credentials promise unenforceable.
+    """
+    if not isinstance(identity, NoAuthProvider):
+        raise ConfigError(
+            "postinod requires identity_backend=noauth in postino.toml "
+            f"(got {type(identity).__name__})"
+        )
+
+
 def build_app_for_test(
     *,
     db_engine: Engine,
@@ -163,9 +180,11 @@ def build_app_for_test(
     fs = FilesystemAdapter(mail_root=mail_root, vmail_uid=-1, vmail_gid=-1)
     hooks = HookRunner(script_path=postcreation_hook)
     audit_writer = PostinodAuditWriter(metadata=metadata, clock=_utc_now)
+    identity = NoAuthProvider()
+    _assert_noauth_identity(identity)
     mailbox = MailboxService(
         engine=db_engine,
-        identity=NoAuthProvider(),
+        identity=identity,
         fs=fs,
         hooks=hooks,
         clock=_utc_now,
