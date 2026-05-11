@@ -1,0 +1,4 @@
+hosts = mariadb
+user = postfix
+password = postfixpw
+dbname = postfix

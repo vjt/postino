@@ -1,12 +1,29 @@
-FROM debian:12-slim
+FROM debian:13-slim
+# Pin mlmmj uid:gid to 1042:1042 so the agent container — which creates
+# spool dirs and chowns them — and this mta container agree on ownership
+# without a runtime chown step. The matching uid is wired via
+# POSTINO_MLMMJ_UID / POSTINO_MLMMJ_GID in the agent service.
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-       postfix mlmmj rsyslog \
-    && rm -rf /var/lib/apt/lists/*
-RUN useradd -r -d /var/spool/mlmmj -s /usr/sbin/nologin mlmmj 2>/dev/null || true \
-    && mkdir -p /var/spool/mlmmj /var/spool/lists_inbox \
-    && chown mlmmj:mlmmj /var/spool/mlmmj
-COPY postfix-stub/main.cf   /etc/postfix/main.cf
-COPY postfix-stub/master.cf /etc/postfix/master.cf
+       postfix mlmmj rsyslog adduser \
+    && rm -rf /var/lib/apt/lists/* \
+    && (getent group mlmmj > /dev/null || groupadd --system --gid 1042 mlmmj) \
+    && (getent passwd mlmmj > /dev/null \
+        || useradd --system --uid 1042 --gid 1042 \
+           --home /var/spool/mlmmj --no-create-home --shell /usr/sbin/nologin mlmmj)
+RUN postconf -e \
+       'myhostname=mta.test.local' \
+       'mydomain=test.local' \
+       'mydestination=' \
+       'virtual_mailbox_domains=lists.example.org' \
+       'virtual_transport=mlmmj' \
+       'relayhost=[catcher]:1025' \
+       'smtp_host_lookup=native' \
+       'disable_dns_lookups=yes' \
+       'recipient_delimiter=+' \
+       'local_recipient_maps=' \
+       'maillog_file=/dev/stdout' \
+    && postconf -M 'mlmmj/unix=mlmmj unix - n n - - pipe flags=DRhu user=mlmmj argv=/usr/bin/mlmmj-receive -L /var/spool/mlmmj/${recipient}'
+RUN mkdir -p /var/spool/lists_inbox
 EXPOSE 25
 CMD ["postfix", "start-fg"]

@@ -1,0 +1,18 @@
+FROM python:3.13-slim
+# Install mlmmj for the agent's CLI subscribe/unsub paths, and pin mlmmj
+# uid:gid to 1042:1042 so spool dirs we chown end up owned by the same uid
+# as the mta container's mlmmj user. mlmmj-sub setuid's to the listdir owner.
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       mlmmj \
+    && rm -rf /var/lib/apt/lists/* \
+    && (getent group mlmmj > /dev/null || groupadd --system --gid 1042 mlmmj) \
+    && (getent passwd mlmmj > /dev/null \
+        || useradd --system --uid 1042 --gid 1042 \
+           --home /var/spool/mlmmj --no-create-home --shell /usr/sbin/nologin mlmmj)
+WORKDIR /app
+COPY pyproject.toml README.md /app/
+COPY src/ /app/src/
+RUN pip install --no-cache-dir '.[daemon]'
+ENV POSTINO_CONFIG=/usr/local/etc/postino/postino.toml
+CMD ["sleep", "infinity"]

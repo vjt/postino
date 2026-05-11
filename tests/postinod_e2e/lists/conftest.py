@@ -5,13 +5,17 @@ yield exec helpers, tear down at session end."""
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
+
+CatcherMessage = dict[str, Any]
 
 _HERE = Path(__file__).parent
 
@@ -62,4 +66,27 @@ def docker_exec(stack: Path, service: str, *cmd: str) -> subprocess.CompletedPro
         capture_output=True,
         text=True,
         timeout=30,
+    )
+
+
+def catcher_messages(stack: Path) -> list[CatcherMessage]:
+    """Fetch the catcher (mailpit) message list. Returns the messages array."""
+    r = docker_exec(stack, "catcher", "wget", "-qO-", "http://localhost:8025/api/v1/messages")
+    if r.returncode != 0:
+        return []
+    payload = cast(dict[str, Any], json.loads(r.stdout))
+    messages = payload.get("messages", [])
+    assert isinstance(messages, list)
+    return cast(list[CatcherMessage], messages)
+
+
+def catcher_reset(stack: Path) -> None:
+    """Clear all messages from the catcher between tests."""
+    docker_exec(
+        stack,
+        "catcher",
+        "wget",
+        "-qO-",
+        "--method=DELETE",
+        "http://localhost:8025/api/v1/messages",
     )

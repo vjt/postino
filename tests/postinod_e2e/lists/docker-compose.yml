@@ -7,10 +7,21 @@ services:
       MARIADB_USER: postfix
       MARIADB_PASSWORD: postfixpw
     healthcheck:
-      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-prootpw"]
-      interval: 2s
-      timeout: 2s
-      retries: 30
+      test: ["CMD", "mariadb", "-uroot", "-prootpw", "postfix", "-e", "SELECT 1 FROM domain LIMIT 1;"]
+      interval: 3s
+      retries: 40
+      start_period: 10s
+    volumes:
+      - ./schema/postfixadmin-mariadb.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+
+  catcher:
+    # axllent/mailpit — SMTP sink with HTTP API for assertions.
+    # Postfix on mta relays all fan-out mail here.
+    image: axllent/mailpit:latest
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
 
   mta:
     build:
@@ -22,21 +33,28 @@ services:
     depends_on:
       mariadb:
         condition: service_healthy
+      catcher:
+        condition: service_started
 
   agent:
     build:
       context: ../../..
-      dockerfile: docker/postinod/Dockerfile
+      dockerfile: tests/postinod_e2e/lists/Dockerfile.agent
     user: "0:0"
     working_dir: /app
     volumes:
       - lists_spool:/var/spool/mlmmj
-      - ./postino.toml:/etc/postino/postino.toml:ro
+      - ./postino.toml:/usr/local/etc/postino/postino.toml:ro
+      - ./postfix-stub/sql-virtual_mailbox_maps.cf:/etc/postino/postfix/sql-virtual_mailbox_maps.cf:ro
+      - ./postfix-stub/sql-virtual_alias_maps.cf:/etc/postino/postfix/sql-virtual_alias_maps.cf:ro
+      - ./postfix-stub/sql-virtual_domain_maps.cf:/etc/postino/postfix/sql-virtual_domain_maps.cf:ro
     environment:
       POSTINO_CONFIG: /etc/postino/postino.toml
       POSTINO_MLMMJ_SPOOL_DIR: /var/spool/mlmmj
-      POSTINO_MLMMJ_UID: "-1"
-      POSTINO_MLMMJ_GID: "-1"
+      # Match mlmmj uid:gid baked into Dockerfile.mta so spool dirs created
+      # here are readable/writable by mlmmj-receive in the mta container.
+      POSTINO_MLMMJ_UID: "1042"
+      POSTINO_MLMMJ_GID: "1042"
     depends_on:
       mariadb:
         condition: service_healthy
