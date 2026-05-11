@@ -365,8 +365,9 @@ class MailboxService:
     def release_identity(self, username: EmailStr) -> None:
         """Release the mailbox credential to the IdP (``{NOAUTH}`` sentinel).
 
-        Idempotent: a row already on the sentinel returns without writing
-        and does not produce an audit row. Only meaningful under
+        Idempotent at the DB level: a row already on the sentinel returns
+        without password column changes; an audit row is still written to
+        record the operator intent. Only meaningful under
         identity_backend=hybrid; LocalProvider raises ConfigError, and
         NoAuthProvider returns silently (sentinel already in place)."""
         _, _, domain = str(username).partition("@")

@@ -174,13 +174,13 @@ def test_release_identity_idempotent_on_sentinel(
     fake_postcreation_hook: Path,
     frozen_clock: datetime,
 ) -> None:
-    """Hybrid backend: row already on sentinel is a silent no-op.
+    """Hybrid backend: row already on sentinel is a DB-level no-op.
 
     Per the HybridProvider contract: rows already on {NOAUTH} return
-    without writing. The MailboxService docstring promises the same
-    (no audit row in that case). Verify it doesn't blow up and the
-    row stays as-is (mailbox row inserted by add() carries the
-    sentinel until set_password runs)."""
+    without password column changes. MailboxService still writes the
+    audit row to record operator intent. Verify it doesn't blow up
+    and the password column stays on the sentinel (mailbox row
+    inserted by add() carries the sentinel until set_password runs)."""
     _seed_domain(db, "example.com", max_mailboxes=10)
     svc = _build_service(
         db,
