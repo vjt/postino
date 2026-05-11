@@ -19,8 +19,6 @@ Marked ``integration`` per pyproject.toml: requires ``POSTINO_TEST_DB_URL``.
 
 from __future__ import annotations
 
-import json
-
 import pytest
 from litestar import Litestar
 from litestar.testing import AsyncTestClient
@@ -28,13 +26,9 @@ from sqlalchemy import select
 
 from postino_core.providers.base import SENTINEL_NOAUTH
 
-from .conftest import PreparedTestDB
+from .conftest import PreparedTestDB, scim_headers
 
 pytestmark = pytest.mark.integration
-
-
-def _scim_headers(auth_header: dict[str, str]) -> dict[str, str]:
-    return {**auth_header, "Content-Type": "application/scim+json"}
 
 
 async def test_post_user_with_password_writes_bcrypt(
@@ -50,7 +44,7 @@ async def test_post_user_with_password_writes_bcrypt(
         "password": "hunter2",
         "active": True,
     }
-    r = await hybrid_client.post("/scim/v2/Users", json=body, headers=_scim_headers(auth_header))
+    r = await hybrid_client.post("/scim/v2/Users", json=body, headers=scim_headers(auth_header))
     assert r.status_code == 201, r.text
     # SCIM RFC 7643 §7 — password is write-only; must not leak in the response.
     assert "password" not in r.text
@@ -62,6 +56,14 @@ async def test_post_user_with_password_writes_bcrypt(
         ).fetchone()
     assert row is not None
     assert str(row.password).startswith("{BLF-CRYPT}")
+
+    log = prepared_test_db.metadata.tables["log"]
+    with prepared_test_db.engine.connect() as conn:
+        rows = (
+            conn.execute(select(log).where(log.c.action == "postinod.user.create")).mappings().all()
+        )
+    assert any('"surface":"scim"' in row["data"] for row in rows)
+    assert any('"email":"alice@example.org"' in row["data"] for row in rows)
 
 
 async def test_post_user_without_password_writes_sentinel(
@@ -76,7 +78,7 @@ async def test_post_user_without_password_writes_sentinel(
         "name": {"formatted": "Bob B"},
         "active": True,
     }
-    r = await hybrid_client.post("/scim/v2/Users", json=body, headers=_scim_headers(auth_header))
+    r = await hybrid_client.post("/scim/v2/Users", json=body, headers=scim_headers(auth_header))
     assert r.status_code == 201, r.text
 
     mailbox = prepared_test_db.metadata.tables["mailbox"]
@@ -102,7 +104,7 @@ async def test_patch_password_replace_with_string_writes_bcrypt(
     r = await hybrid_client.patch(
         f"/scim/v2/Users/{fresh_sentinel_user}",
         json=body,
-        headers=_scim_headers(auth_header),
+        headers=scim_headers(auth_header),
     )
     assert r.status_code == 200, r.text
 
@@ -113,6 +115,14 @@ async def test_patch_password_replace_with_string_writes_bcrypt(
         ).fetchone()
     assert row is not None
     assert str(row.password).startswith("{BLF-CRYPT}")
+
+    log = prepared_test_db.metadata.tables["log"]
+    with prepared_test_db.engine.connect() as conn:
+        rows = (
+            conn.execute(select(log).where(log.c.action == "postinod.user.passwd")).mappings().all()
+        )
+    assert any('"surface":"scim"' in row["data"] for row in rows)
+    assert any(f'"email":"{fresh_sentinel_user}"' in row["data"] for row in rows)
 
 
 async def test_patch_password_replace_null_releases(
@@ -129,7 +139,7 @@ async def test_patch_password_replace_null_releases(
     r = await hybrid_client.patch(
         f"/scim/v2/Users/{fresh_bcrypt_user}",
         json=body,
-        headers=_scim_headers(auth_header),
+        headers=scim_headers(auth_header),
     )
     assert r.status_code == 200, r.text
 
@@ -140,6 +150,16 @@ async def test_patch_password_replace_null_releases(
         ).fetchone()
     assert row is not None
     assert str(row.password) == SENTINEL_NOAUTH
+
+    log = prepared_test_db.metadata.tables["log"]
+    with prepared_test_db.engine.connect() as conn:
+        rows = (
+            conn.execute(select(log).where(log.c.action == "postinod.user.release"))
+            .mappings()
+            .all()
+        )
+    assert any('"surface":"scim"' in row["data"] for row in rows)
+    assert any(f'"email":"{fresh_bcrypt_user}"' in row["data"] for row in rows)
 
 
 async def test_patch_password_remove_releases(
@@ -156,7 +176,7 @@ async def test_patch_password_remove_releases(
     r = await hybrid_client.patch(
         f"/scim/v2/Users/{fresh_bcrypt_user}",
         json=body,
-        headers=_scim_headers(auth_header),
+        headers=scim_headers(auth_header),
     )
     assert r.status_code == 200, r.text
 
@@ -178,7 +198,13 @@ async def test_patch_password_on_noauth_backend_returns_403(
 
     ``fresh_sentinel_user`` is created via the hybrid client (POST without
     password seeds a ``{NOAUTH}`` sentinel row), then the patch goes
-    through the NOAUTH-backed ``client``. Both clients share the same DB.
+    through the NOAUTH-backed ``client``. Both ``hybrid_client`` and
+    ``client`` resolve to the same function-scoped ``prepared_test_db``
+    engine within a single test — the shared engine is what lets one
+    client seed a row that the other client then PATCHes. Module-scoping
+    any of the db fixtures (``db`` in tests/conftest.py or
+    ``prepared_test_db`` here) would silently break this test by giving
+    each client a different schema.
     """
     body = {
         "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
@@ -187,8 +213,7 @@ async def test_patch_password_on_noauth_backend_returns_403(
     r = await client.patch(
         f"/scim/v2/Users/{fresh_sentinel_user}",
         json=body,
-        headers=_scim_headers(auth_header),
+        headers=scim_headers(auth_header),
     )
     assert r.status_code == 403, r.text
-    err = json.loads(r.text)
-    assert err["scimType"] == "mutability"
+    assert r.json()["scimType"] == "mutability"

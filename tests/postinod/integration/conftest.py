@@ -15,6 +15,14 @@ table per test. This conftest layers on top:
   so build_app_for_test callers don't leak temp dirs.
 * Shared JWT fixtures (`keypair`, `auth_header`, `client`) used by both
   test_scim_users.py and test_scim_aliases.py.
+* `hybrid_client` — sibling of `client` wired with ``IdentityBackend.HYBRID``
+  for the password-lifecycle suite in `test_scim_password.py`.
+* `fresh_sentinel_user` / `fresh_bcrypt_user` — seed a SCIM user via the
+  hybrid client (sentinel or bcrypt row respectively) and return its
+  ``userName`` (which doubles as the SCIM ``id``). Both fixtures share the
+  same function-scoped `prepared_test_db` engine as `client`/`hybrid_client`,
+  so a test can seed via one client and PATCH via another within a single
+  test (cf. `test_patch_password_on_noauth_backend_returns_403`).
 """
 
 from __future__ import annotations
@@ -178,12 +186,19 @@ async def client(
         yield c
 
 
+def scim_headers(auth_header: dict[str, str]) -> dict[str, str]:
+    """SCIM-flavoured headers: auth + ``application/scim+json`` content type."""
+    return {**auth_header, "Content-Type": "application/scim+json"}
+
+
 @pytest.fixture
 async def fresh_sentinel_user(
     hybrid_client: AsyncTestClient[Litestar],
     auth_header: dict[str, str],
 ) -> str:
-    """POST a SCIM user without a password (IdP-owned row) and return its id."""
+    """POST a SCIM user without a password (IdP-owned row); return its ``userName``
+    (which is also the SCIM ``id``).
+    """
     username = "fresh-sentinel@example.org"
     body = {
         "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
@@ -191,7 +206,7 @@ async def fresh_sentinel_user(
         "name": {"formatted": "Fresh Sentinel"},
         "active": True,
     }
-    r = await hybrid_client.post("/scim/v2/Users", json=body, headers=auth_header)
+    r = await hybrid_client.post("/scim/v2/Users", json=body, headers=scim_headers(auth_header))
     assert r.status_code == 201, r.text
     return username
 
@@ -201,7 +216,9 @@ async def fresh_bcrypt_user(
     hybrid_client: AsyncTestClient[Litestar],
     auth_header: dict[str, str],
 ) -> str:
-    """POST a SCIM user with a password (SQL-auth row) and return its id."""
+    """POST a SCIM user with a password (SQL-auth row); return its ``userName``
+    (which is also the SCIM ``id``).
+    """
     username = "fresh-bcrypt@example.org"
     body = {
         "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
@@ -210,7 +227,7 @@ async def fresh_bcrypt_user(
         "password": "initial-pw",
         "active": True,
     }
-    r = await hybrid_client.post("/scim/v2/Users", json=body, headers=auth_header)
+    r = await hybrid_client.post("/scim/v2/Users", json=body, headers=scim_headers(auth_header))
     assert r.status_code == 201, r.text
     return username
 
