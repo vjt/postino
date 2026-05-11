@@ -17,9 +17,8 @@ def test_local_provider_release_raises(
 ) -> None:
     """LocalProvider.release_identity raises ConfigError."""
     p = LocalProvider(metadata=MetaData(), clock=lambda: datetime.now(UTC))
-    with db.begin() as conn:
-        with pytest.raises(ConfigError, match="local backend does not release"):
-            p.release_identity(conn, "u@example.com")
+    with db.begin() as conn, pytest.raises(ConfigError, match="local backend does not release"):
+        p.release_identity(conn, "u@example.com")
 
 
 def test_local_provider_release_capability_false() -> None:
