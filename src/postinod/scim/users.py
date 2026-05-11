@@ -33,7 +33,7 @@ from litestar.datastructures import State
 from litestar.exceptions import HTTPException
 from litestar.response import Response
 from litestar.status_codes import HTTP_200_OK, HTTP_201_CREATED
-from pydantic import EmailStr, TypeAdapter, ValidationError
+from pydantic import EmailStr, SecretStr, TypeAdapter, ValidationError
 
 from postino_core.enums import MailboxStatus, PasswordScheme
 from postino_core.errors import (
@@ -48,6 +48,7 @@ from postinod.audit import PostinodAuditExtra, audit_context
 from postinod.auth.jwt_guard import JwtVerifier
 from postinod.scim.errors import scim_error_from_exception
 from postinod.scim.models import (
+    PatchOp,
     PatchOpRequest,
     ScimEmail,
     ScimError,
@@ -141,6 +142,22 @@ def _make_mailbox_create(user: ScimUser, *, default_quota_bytes: int) -> Mailbox
         name=user.name.formatted,
         quota_bytes=default_quota_bytes,
     )
+
+
+def _patch_password_intent(op: PatchOp) -> tuple[str, str | None]:
+    """Map a PATCH op on path=password to ("set"|"release", value).
+
+    Accepts Okta-style ``op=remove`` and Azure-style ``op=replace,
+    value=null|""``; both collapse to release_identity. ``op=replace``
+    with a non-empty string is a set_password.
+    """
+    if op.op == "remove":
+        return ("release", None)
+    if op.op == "replace":
+        if op.value is None or op.value == "":
+            return ("release", None)
+        return ("set", str(op.value))
+    raise ValueError(f"unsupported op {op.op!r} on path=password")
 
 
 def build_users_router(
@@ -321,13 +338,16 @@ def build_users_router(
                     ),
                 )
                 return _scim_response(err, 400)
-            if not (op.op == "replace" and op.path in ("active", "name.formatted")):
-                err = ScimError(
-                    status="400",
-                    scimType="invalidPath",
-                    detail=f"unsupported PATCH path: {op.path!r}",
-                )
-                return _scim_response(err, 400)
+            if op.op == "replace" and op.path in ("active", "name.formatted"):
+                continue
+            if op.path == "password" and op.op in ("replace", "remove"):
+                continue
+            err = ScimError(
+                status="400",
+                scimType="invalidPath",
+                detail=f"unsupported PATCH path/op combination: op={op.op!r} path={op.path!r}",
+            )
+            return _scim_response(err, 400)
 
         # Second pass: apply each op (all validated above).
         for op in patch_req.operations:
@@ -356,6 +376,48 @@ def build_users_router(
                         mailbox_service.set_name(email, str(op.value))
                 except NotFoundError as e:
                     return _err(e)
+
+            elif op.path == "password":
+                intent, value = _patch_password_intent(op)
+                if intent == "set":
+                    if not mailbox_service.identity.supports_password_change():
+                        err = ScimError(
+                            status="403",
+                            scimType="mutability",
+                            detail="password not writable under this identity backend",
+                        )
+                        return _scim_response(err, 403)
+                    extra = _extra(
+                        username_str=username_str,
+                        actor_sub=actor_sub,
+                        postinod_action=("user", "passwd"),
+                    )
+                    assert value is not None
+                    try:
+                        with audit_context(extra):
+                            mailbox_service.set_password(
+                                email, SecretStr(value), PasswordScheme.BCRYPT
+                            )
+                    except (NotFoundError, ConfigError) as e:
+                        return _err(e)
+                else:  # release
+                    if not mailbox_service.identity.supports_release_to_noauth():
+                        err = ScimError(
+                            status="403",
+                            scimType="mutability",
+                            detail="password release not supported under this identity backend",
+                        )
+                        return _scim_response(err, 403)
+                    extra = _extra(
+                        username_str=username_str,
+                        actor_sub=actor_sub,
+                        postinod_action=("user", "release_to_noauth"),
+                    )
+                    try:
+                        with audit_context(extra):
+                            mailbox_service.release_identity(email)
+                    except (NotFoundError, ConfigError) as e:
+                        return _err(e)
 
         # Re-fetch to return current state.
         m = mailbox_service.get(email)

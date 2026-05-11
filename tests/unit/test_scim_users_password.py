@@ -37,3 +37,22 @@ def test_post_without_password_yields_none() -> None:
     mc = users._make_mailbox_create(parsed, default_quota_bytes=1024 * 1024)  # pyright: ignore[reportPrivateUsage]  # WHY: module-private helper exercised directly to assert wiring
     assert mc.password is None
     assert mc.scheme is None
+
+
+@pytest.mark.cli
+def test_patch_password_dispatch_table() -> None:
+    """Pure-function dispatcher: maps PatchOp → ("set"|"release", value)."""
+    from postinod.scim import users
+    from postinod.scim.models import PatchOp
+
+    set_op = PatchOp(op="replace", path="password", value="hunter2")
+    assert users._patch_password_intent(set_op) == ("set", "hunter2")  # pyright: ignore[reportPrivateUsage]  # WHY: module-private helper exercised directly to assert dialect normalisation
+
+    null_op = PatchOp(op="replace", path="password", value=None)
+    assert users._patch_password_intent(null_op) == ("release", None)  # pyright: ignore[reportPrivateUsage]  # WHY: module-private helper exercised directly to assert dialect normalisation
+
+    empty_op = PatchOp(op="replace", path="password", value="")
+    assert users._patch_password_intent(empty_op) == ("release", None)  # pyright: ignore[reportPrivateUsage]  # WHY: module-private helper exercised directly to assert dialect normalisation
+
+    remove_op = PatchOp(op="remove", path="password", value=None)
+    assert users._patch_password_intent(remove_op) == ("release", None)  # pyright: ignore[reportPrivateUsage]  # WHY: module-private helper exercised directly to assert dialect normalisation
