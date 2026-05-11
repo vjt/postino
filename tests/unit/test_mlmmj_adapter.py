@@ -23,70 +23,69 @@ def _adapter(tmp_path: Path) -> MlmmjAdapter:
     )
 
 
-def test_create_invokes_mlmmj_make_ml_with_correct_argv(tmp_path: Path) -> None:
+def test_create_writes_full_spool_layout(tmp_path: Path) -> None:
     a = _adapter(tmp_path)
-    with patch("postino_core.adapters.mlmmj.subprocess.run") as run:
-        run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
-        a.create(address="team@lists.example.org", primary_owner="alice@example.org")
-
-    args, kwargs = run.call_args
-    cmd = args[0]
-    assert cmd[0] == "mlmmj-make-ml"
-    assert "-L" in cmd
-    assert str(tmp_path / "team@lists.example.org") in cmd
-    assert "-a" in cmd
-    assert "team@lists.example.org" in cmd
-    assert "-h" in cmd
-    assert "lists.example.org" in cmd
-    assert "-o" in cmd
-    assert "alice@example.org" in cmd
-    assert "-s" in cmd  # silent; no interactive prompts
-    assert kwargs["timeout"] == 5.0
-    assert kwargs["capture_output"] is True
-    assert kwargs["text"] is True
+    a.create(address="team@lists.example.org", primary_owner="alice@example.org")
+    listdir = tmp_path / "team@lists.example.org"
+    for sub in (
+        "incoming",
+        "queue",
+        "queue/discarded",
+        "archive",
+        "text",
+        "subconf",
+        "unsubconf",
+        "bounce",
+        "control",
+        "moderation",
+        "subscribers.d",
+        "digesters.d",
+        "requeue",
+        "nomailsubs.d",
+    ):
+        assert (listdir / sub).is_dir(), f"missing subdir: {sub}"
+    assert (listdir / "index").exists()
+    assert (listdir / "control" / "owner").read_text() == "alice@example.org\n"
+    assert (listdir / "control" / "listaddress").read_text() == "team@lists.example.org\n"
 
 
 def test_create_raises_already_exists_on_existing_dir(tmp_path: Path) -> None:
     listdir = tmp_path / "team@lists.example.org"
     listdir.mkdir()
     a = _adapter(tmp_path)
-    with (
-        patch("postino_core.adapters.mlmmj.subprocess.run") as run,
-        pytest.raises(AlreadyExistsError),
-    ):
+    with pytest.raises(AlreadyExistsError):
         a.create(address="team@lists.example.org", primary_owner="alice@example.org")
-    run.assert_not_called()  # short-circuited before subprocess
 
 
-def test_create_raises_mlmmj_error_on_nonzero_exit(tmp_path: Path) -> None:
+def test_create_rolls_back_partial_state_on_oserror(tmp_path: Path) -> None:
     a = _adapter(tmp_path)
-    with patch("postino_core.adapters.mlmmj.subprocess.run") as run:
-        run.return_value = subprocess.CompletedProcess(
-            args=[], returncode=2, stdout="", stderr="bad args"
-        )
-        with pytest.raises(MlmmjError) as exc:
+    # Make spool_root non-writable to trigger OSError partway through layout.
+    with patch.object(Path, "mkdir") as mkdir:
+        mkdir.side_effect = [None, OSError("disk full")]
+        with pytest.raises(FilesystemError) as exc:
             a.create(address="team@lists.example.org", primary_owner="alice@example.org")
-    assert "bad args" in str(exc.value)
-    assert "exit 2" in str(exc.value)
+    assert "disk full" in str(exc.value)
+    assert not (tmp_path / "team@lists.example.org").exists()
 
 
-def test_create_raises_mlmmj_error_on_timeout(tmp_path: Path) -> None:
-    a = _adapter(tmp_path)
-    with patch("postino_core.adapters.mlmmj.subprocess.run") as run:
-        run.side_effect = subprocess.TimeoutExpired(cmd="mlmmj-make-ml", timeout=5.0)
-        with pytest.raises(MlmmjError) as exc:
-            a.create(address="team@lists.example.org", primary_owner="alice@example.org")
-    assert "timeout" in str(exc.value).lower()
-
-
-def test_create_drops_privileges_when_uid_gid_set(tmp_path: Path) -> None:
+def test_create_chowns_when_uid_gid_set(tmp_path: Path) -> None:
     a = MlmmjAdapter(spool_root=tmp_path, mlmmj_uid=1234, mlmmj_gid=5678, timeout=5.0)
-    with patch("postino_core.adapters.mlmmj.subprocess.run") as run:
-        run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+    with patch("postino_core.adapters.mlmmj.os.chown") as chown:
         a.create(address="team@lists.example.org", primary_owner="alice@example.org")
-    _, kwargs = run.call_args
-    assert "preexec_fn" in kwargs
-    assert callable(kwargs["preexec_fn"])
+    # Top-level dir + 14 subdirs + 1 index + 2 control files = 18 entries minimum.
+    # We assert all chown calls used the configured uid/gid pair.
+    assert chown.call_count >= 18
+    for call in chown.call_args_list:
+        _, uid, gid = call.args
+        assert uid == 1234
+        assert gid == 5678
+
+
+def test_create_no_chown_when_uid_gid_negative(tmp_path: Path) -> None:
+    a = _adapter(tmp_path)
+    with patch("postino_core.adapters.mlmmj.os.chown") as chown:
+        a.create(address="team@lists.example.org", primary_owner="alice@example.org")
+    chown.assert_not_called()
 
 
 def test_append_owner_creates_owner_file_if_absent(tmp_path: Path) -> None:
@@ -167,7 +166,9 @@ def test_subscribe_invokes_mlmmj_sub_with_correct_argv(tmp_path: Path) -> None:
         run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
         a.subscribe(address="team@lists.example.org", email="bob@example.org")
     cmd = run.call_args[0][0]
-    assert cmd[0] == "mlmmj-sub"
+    # cmd[0] is the absolute path returned by shutil.which when the binary is
+    # installed, else the bare basename. Compare via Path.name to be portable.
+    assert Path(cmd[0]).name == "mlmmj-sub"
     assert "-L" in cmd
     assert str(listdir) in cmd
     assert "-a" in cmd
@@ -203,7 +204,7 @@ def test_unsubscribe_invokes_mlmmj_unsub_with_correct_argv(tmp_path: Path) -> No
         run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
         a.unsubscribe(address="team@lists.example.org", email="bob@example.org")
     cmd = run.call_args[0][0]
-    assert cmd[0] == "mlmmj-unsub"
+    assert Path(cmd[0]).name == "mlmmj-unsub"
     assert "-L" in cmd
     assert str(listdir) in cmd
     assert "-a" in cmd
