@@ -213,18 +213,16 @@ _DOVECOT_CONF_DIRS = (
 
 
 def _check_dovecot_passdb_chain(s: PostinoSettings) -> list[Finding]:
-    """When identity_backend=noauth, confirm dovecot has a non-SQL passdb.
+    """When identity_backend ∈ {noauth, hybrid}, confirm dovecot has a non-SQL passdb.
 
-    The NoAuth contract: postinod refuses to write mailbox.password, so
-    dovecot must authenticate via a sibling passdb (passwd-file, ldap,
-    pam, static, imap …). If the chain contains only `driver = sql`
-    blocks, the system has no way to authenticate users — a confirmed
-    misconfiguration that surfaces as `severity=error`. Severity is
-    downgraded to `warn` when the dovecot config is unreachable (host
-    runs dovecot from a non-standard prefix or postino lacks read
-    permission); operators must verify manually in that case.
+    Under noauth every row carries the ``{NOAUTH}`` sentinel; under
+    hybrid some rows do. Either way dovecot must chain a non-SQL passdb
+    (passwd-file, ldap, pam, static, imap …) behind passdb-sql so the
+    sentinel rows resolve. A chain that is only `driver = sql` blocks
+    surfaces as `severity=error`; an unreadable config downgrades to
+    `warn` and asks the operator to verify manually.
     """
-    if s.identity_backend != IdentityBackend.NOAUTH:
+    if s.identity_backend not in (IdentityBackend.NOAUTH, IdentityBackend.HYBRID):
         return []
     auth_files: list[Path] = []
     for d in _DOVECOT_CONF_DIRS:
@@ -257,13 +255,11 @@ def _check_dovecot_passdb_chain(s: PostinoSettings) -> list[Finding]:
         ]
     non_sql = sorted({d for d in drivers if d != "sql"})
     if not non_sql:
-        return [
-            _err(
-                "dovecot_passdb_chain",
-                "identity_backend=noauth but every dovecot passdb uses driver=sql "
-                f"({sorted(set(drivers))}) — external IdP passdb missing",
-            )
-        ]
+        msg = (
+            f"identity_backend={s.identity_backend.value} but every dovecot passdb "
+            f"uses driver=sql ({sorted(set(drivers))}) — external IdP passdb missing"
+        )
+        return [_err("dovecot_passdb_chain", msg)]
     return [_ok("dovecot_passdb_chain", f"non-sql passdb present: {non_sql}")]
 
 
