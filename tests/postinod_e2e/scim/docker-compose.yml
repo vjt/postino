@@ -27,7 +27,8 @@ services:
     depends_on:
       mariadb: { condition: service_healthy }
     environment:
-      POSTINOD_ZITADEL_HMAC_SECRET: e2e-secret
+      # Task 1 entropy floor: secret must be ≥32 bytes (`openssl rand -hex 32`).
+      POSTINOD_ZITADEL_HMAC_SECRET: e2e-secret-padded-to-thirty-two-bytes
       POSTINO_CONFIG: /etc/postino/postino.toml
     volumes:
       - ./postino.toml:/etc/postino/postino.toml:ro
