@@ -24,7 +24,8 @@ from sqlalchemy import MetaData, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
 
-from postino_core.config import load_postino_settings
+from postino_core.config import PostinoSettings, load_postino_settings
+from postino_core.enums import IdentityBackend
 from postino_core.errors import ConfigError
 from postino_core.fs import FilesystemAdapter
 from postino_core.hooks import HookRunner
@@ -79,7 +80,7 @@ def build_app(*, toml_path: Path) -> Litestar:
         echo=False,
         audit_writer_factory=lambda md: PostinodAuditWriter(metadata=md, clock=_utc_now),
     )
-    _assert_noauth_identity(bundle.identity)
+    _enforce_identity_contract(postino_settings, bundle.identity)
 
     hmac_verifier = HmacVerifier(secrets=hmac_secrets)
     jwks = JwksCache(
@@ -136,27 +137,35 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _assert_noauth_identity(identity: IdentityProvider) -> None:
-    """Fail-fast guard: postinod refuses any backend that allows local
-    credential ownership.
+def _enforce_identity_contract(
+    settings: PostinoSettings,
+    identity: IdentityProvider,
+) -> None:
+    """Fail-fast: refuse boot when settings.identity_backend conflicts with the wired provider.
 
-    The daemon's contract is that an external IdP owns credentials and
-    Dovecot's passdb chain verifies them. Booting under a backend that
-    advertises ``supports_password_change()`` or
-    ``supports_local_provisioning()`` would silently expose
-    mailbox.password to SCIM/Zitadel writes — making the
-    IdP-owned-credentials promise unenforceable.
+    Today the only forbidden combination is::
 
-    Uses the Protocol's capability predicates rather than
-    ``isinstance(identity, NoAuthProvider)`` so any future backend that
-    satisfies the same "external IdP owns credentials" contract is
-    accepted without naming the concrete class here.
+        settings.identity_backend == NOAUTH and provider supports password writes
+
+    Under that posture the deployment promises Dovecot owns the credential
+    chain, but the provider is happy to mutate ``mailbox.password`` — which
+    would let SCIM/Zitadel writes silently break the IdP-only contract.
+    Other combinations (HYBRID + HybridProvider, LOCAL + LocalProvider, etc.)
+    are accepted; the architecture tests under tests/architecture/ catch
+    SCIM/Zitadel paths that try to write a password under a non-Hybrid
+    deployment.
+
+    Implementation note: uses Protocol capability predicates rather than
+    isinstance() so any future backend that advertises the same contract is
+    accepted without naming concrete classes here.
     """
-    if identity.supports_password_change() or identity.supports_local_provisioning():
+    if settings.identity_backend is IdentityBackend.NOAUTH and (
+        identity.supports_password_change() or identity.supports_local_provisioning()
+    ):
         raise ConfigError(
-            "postinod requires an identity backend that owns no local "
-            "credentials (e.g. identity_backend=noauth in postino.toml); "
-            f"got {type(identity).__name__}"
+            "identity_backend=noauth deployment received a credential-writing provider "
+            f"({type(identity).__name__}); refusing to boot — fix postino.toml or wire "
+            "the matching provider"
         )
 
 
@@ -190,7 +199,6 @@ def build_app_for_test(
     hooks = HookRunner(script_path=postcreation_hook)
     audit_writer = PostinodAuditWriter(metadata=metadata, clock=_utc_now)
     identity = NoAuthProvider()
-    _assert_noauth_identity(identity)
     mailbox = MailboxService(
         engine=db_engine,
         identity=identity,
