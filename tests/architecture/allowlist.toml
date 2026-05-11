@@ -91,16 +91,16 @@
 278 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/mailbox.py"]
-# Lines shifted again when the post-hook compensation grew dedicated
-# helper methods (_compensate_remove_maildir, _compensate_delete_mailbox_row,
-# _write_rollback_failed_audit); all entries below remain SQLAlchemy
-# RowMapping Any access in get / _row_to_model / list.
+# Lines shifted again when `is_idp_managed` was added between `get` and
+# `_assert_domain_capacity` (Task 15, hybrid CLI guard); all entries
+# below remain SQLAlchemy RowMapping Any access in
+# get / _row_to_model / list.
 209 = "WHY: SQLAlchemy RowMapping access yields Any."
-278 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-281 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-282 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-283 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-356 = "WHY: SQLAlchemy RowMapping access yields Any."
+301 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+304 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+305 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+306 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+379 = "WHY: SQLAlchemy RowMapping access yields Any."
 
 [test_type_ignore_justified."src/postino_core/services/quota.py"]
 23 = "WHY: SQLAlchemy Row._mapping attribute access not in stubs."

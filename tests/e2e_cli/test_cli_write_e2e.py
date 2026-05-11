@@ -206,7 +206,13 @@ def test_postino_user_del_nonexistent_exits_1(e2e_write_env: WriteEnv) -> None:
 
 
 def test_postino_user_passwd(e2e_write_env: WriteEnv) -> None:
-    """user passwd changes the password hash in the DB."""
+    """user passwd changes the password hash in the DB.
+
+    The fixture seeds the row with the ``{NOAUTH}`` sentinel for
+    economy (no real hash needed). Task 15's CLI guard requires
+    ``--claim`` to rotate a sentinel row into SQL auth — exercise that
+    path here. Mailboxes already holding a real hash exit-0 without
+    ``--claim`` (covered by tests/unit/test_cli_user_passwd_claim.py)."""
     from sqlalchemy import select
 
     mailbox = e2e_write_env.metadata.tables["mailbox"]
@@ -216,7 +222,7 @@ def test_postino_user_passwd(e2e_write_env: WriteEnv) -> None:
         ).scalar_one()
 
     code, out, err = _run(
-        ["user", "passwd", "existing@write.example.com"],
+        ["user", "passwd", "existing@write.example.com", "--claim"],
         e2e_write_env.env,
         input="newpassword\nnewpassword\n",
     )

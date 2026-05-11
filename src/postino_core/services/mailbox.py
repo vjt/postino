@@ -208,6 +208,29 @@ class MailboxService:
             return None
         return self._row_to_model(row._mapping)  # type: ignore[arg-type]
 
+    def is_idp_managed(self, username: EmailStr) -> bool:
+        """Return True if `username`'s row currently holds the {NOAUTH} sentinel.
+
+        Used by CLI guards (`user passwd --claim`, `user release`) to decide
+        whether a credential rotation crosses the IdP↔SQL boundary. The
+        underlying SQL column is not surfaced on the `Mailbox` domain model
+        by design — only the boolean predicate escapes this service.
+        """
+        # WHY: we read `mailbox.password` directly here rather than adding
+        # the column to the Mailbox pydantic model. Surfacing the raw hash
+        # (or the {NOAUTH} sentinel) on a domain model would force every
+        # caller — including JSON renderers — to handle redaction. Keeping
+        # the column behind this predicate confines credential-format
+        # awareness to the service layer.
+        mailbox = self._md.tables["mailbox"]
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                select(mailbox.c.password).where(mailbox.c.username == str(username))
+            ).fetchone()
+        if row is None:
+            raise NotFoundError(f"mailbox {username} does not exist")
+        return str(row[0]) == SENTINEL_NOAUTH
+
     def _assert_domain_capacity(self, conn: Connection, domain: str) -> None:
         d = self._md.tables["domain"]
         m = self._md.tables["mailbox"]

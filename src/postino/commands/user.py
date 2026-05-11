@@ -125,18 +125,43 @@ def passwd(
     ctx: typer.Context,
     username: str,
     scheme: Annotated[PasswordScheme, typer.Option("--scheme")] = PasswordScheme.BCRYPT,
+    claim: Annotated[
+        bool,
+        typer.Option(
+            "--claim",
+            help=(
+                "Claim an IdP-managed mailbox into SQL auth (required when "
+                "the current password is {NOAUTH})."
+            ),
+        ),
+    ] = False,
 ) -> None:
-    """Change password (local backend only; hidden in zitadel mode).
+    """Change password.
 
-    Prompts for the new password twice. As with `user add`, the
-    password is never accepted on the command line.
+    Prompts for the new password twice. As with `user add`, the password
+    is never accepted on the command line. Under identity_backend=hybrid,
+    rotating the password on a mailbox currently holding {NOAUTH}
+    requires --claim (the row transitions from IdP-auth to SQL-auth).
     """
     try:
         s = get_services(ctx)
         if not s.identity.supports_password_change():
             raise ConfigError("password change not supported by current identity backend")
+        current = s.mailbox.get(username)
+        if current is None:
+            raise NotFoundError(f"mailbox {username} does not exist")
+        is_sentinel = s.mailbox.is_idp_managed(username)
+        if is_sentinel and not claim:
+            typer.echo(
+                f"{username} is currently IdP-managed ({{NOAUTH}}); pass --claim to "
+                "transition it into SQL auth.",
+                err=True,
+            )
+            raise typer.Exit(code=2)
         password = _prompt_new_password("New password")
         s.mailbox.set_password(username, password, scheme)
+        if is_sentinel:
+            typer.echo(f"{username} claimed into SQL auth.", err=True)
     except MailctlError as e:
         exit_with_error(e)
 
