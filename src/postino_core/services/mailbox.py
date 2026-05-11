@@ -362,6 +362,23 @@ class MailboxService:
                 data=str(username),
             )
 
+    def release_identity(self, username: EmailStr) -> None:
+        """Release the mailbox credential to the IdP (``{NOAUTH}`` sentinel).
+
+        Idempotent: a row already on the sentinel returns without writing
+        and does not produce an audit row. Only meaningful under
+        identity_backend=hybrid; LocalProvider raises ConfigError, and
+        NoAuthProvider returns silently (sentinel already in place)."""
+        _, _, domain = str(username).partition("@")
+        with translate_db_errors(), self._engine.begin() as conn:
+            self._identity.release_identity(conn, str(username))
+            self._audit.write(
+                conn,
+                action=mk_action("mailbox", "release"),
+                domain=domain,
+                data=str(username),
+            )
+
     def set_name(self, username: EmailStr, name: str) -> None:
         """Update the mailbox display name."""
         mailbox = self._md.tables["mailbox"]
