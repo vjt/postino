@@ -36,15 +36,25 @@ def isolated_env(monkeypatch: pytest.MonkeyPatch) -> Iterator[pytest.MonkeyPatch
 
 
 def _make_settings_class(sys_toml: Path, user_toml: Path) -> type[PostinoSettings]:
-    class _Scoped(PostinoSettings):
-        model_config = SettingsConfigDict(
-            env_prefix="POSTINO_",
-            env_nested_delimiter="__",
-            extra="forbid",
-            toml_file=[str(sys_toml), str(user_toml)],
-        )
+    # pydantic-settings 2.x emits a UserWarning at class definition
+    # when `toml_file` is set but no stock TomlConfigSettingsSource is
+    # in `settings_customise_sources` — we use the custom
+    # _PostinoTomlSource (subtable-stripping), so the warning is
+    # cosmetic; ignore it for the test scope.
+    import warnings
 
-    return _Scoped
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Config key `toml_file` is set")
+
+        class _Scoped(PostinoSettings):
+            model_config = SettingsConfigDict(
+                env_prefix="POSTINO_",
+                env_nested_delimiter="__",
+                extra="forbid",
+                toml_file=[str(sys_toml), str(user_toml)],
+            )
+
+        return _Scoped
 
 
 _BASE_TOML = """
@@ -110,6 +120,64 @@ def test_extra_forbid_rejects_unknown_toml_key(
     sys_toml.write_text(_BASE_TOML + 'unknown_field = "rogue"\n')
     with pytest.raises(ValidationError):
         _make_settings_class(sys_toml, user_toml)()  # type: ignore[call-arg]  # WHY: pydantic-settings hydrates from toml; pyright sees BaseSettings's positional signature.
+
+
+def test_postinod_subtable_does_not_break_postino_settings(
+    tmp_path: Path, isolated_env: pytest.MonkeyPatch
+) -> None:
+    """A ``[postinod]`` subtable in postino.toml must NOT trip
+    ``extra="forbid"`` on PostinoSettings — the two settings classes
+    share one file. This is the contract the README's "single config
+    file, two tables" deployment pattern relies on."""
+    sys_toml, user_toml = _tomls(tmp_path)
+    sys_toml.write_text(
+        _BASE_TOML
+        + '\n[postinod]\nlisten = "127.0.0.1:8080"\nscim_issuer = "https://idp.test"\n'
+        + 'scim_audience = "postinod"\n'
+    )
+    settings = _make_settings_class(sys_toml, user_toml)()  # type: ignore[call-arg]  # WHY: pydantic-settings hydrates fields from toml/env; pyright still sees BaseSettings's positional signature.
+    assert settings.vmail_uid == 999
+
+
+def test_mlmmj_half_set_uid_gid_is_rejected(
+    tmp_path: Path, isolated_env: pytest.MonkeyPatch
+) -> None:
+    """Setting one of mlmmj_uid / mlmmj_gid to a real number while the
+    other stays at the -1 sentinel silently disables the chown — surfaces
+    as bounced mail with no spool error. Fail-fast at config load."""
+    from postino_core.errors import ConfigError
+
+    sys_toml, user_toml = _tomls(tmp_path)
+    sys_toml.write_text(
+        _BASE_TOML
+        + f'mlmmj_spool_dir = "{tmp_path / "spool"}"\n'
+        + "mlmmj_uid = 1042\n"  # gid stays at -1
+    )
+    with pytest.raises(ConfigError, match="mlmmj_uid and mlmmj_gid must agree"):
+        _make_settings_class(sys_toml, user_toml)()  # type: ignore[call-arg]  # WHY: pydantic-settings hydrates fields from toml; pyright sees BaseSettings's positional signature.
+
+
+def test_postino_config_env_var_takes_precedence_over_system_toml(
+    tmp_path: Path, isolated_env: pytest.MonkeyPatch
+) -> None:
+    """``$POSTINO_CONFIG`` must be honoured by the CLI's zero-arg
+    ``PostinoSettings()`` construction so CLI + daemon + docker stacks
+    converge on one config file. Locks the contract the README
+    documents."""
+    sys_toml = tmp_path / "system.toml"
+    sys_toml.write_text(_BASE_TOML)
+    env_toml = tmp_path / "via-env.toml"
+    env_toml.write_text(_BASE_TOML.replace("vmail_uid = 999", "vmail_uid = 4242"))
+
+    # Point POSTINO_CONFIG at the env-toml; class-default
+    # settings_customise_sources should pick it up ahead of the
+    # hardcoded system path. Patch the SYSTEM/USER constants to a
+    # non-existent dir so the test does not depend on the real machine.
+    isolated_env.setattr("postino_core.config._SYSTEM_TOML", tmp_path / "no-such-system.toml")
+    isolated_env.setattr("postino_core.config._USER_TOML", tmp_path / "no-such-user.toml")
+    isolated_env.setenv("POSTINO_CONFIG", str(env_toml))
+    settings = PostinoSettings()  # type: ignore[call-arg]  # WHY: pydantic-settings populates from sources, not init kwargs
+    assert settings.vmail_uid == 4242, "POSTINO_CONFIG TOML was ignored"
 
 
 def test_mlmmj_settings_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -181,8 +249,11 @@ def test_bundle_wires_mailing_list_when_spool_dir_set(
     make_postfix_cf(db_url, sql_dir)
     env = env_for_cli(db_url, tmp_path / "mail", tmp_path / "hook.sh", sql_dir)
     env["POSTINO_MLMMJ_SPOOL_DIR"] = str(spool)
-    env["POSTINO_MLMMJ_UID"] = "-1"
-    env["POSTINO_MLMMJ_GID"] = "-1"
+    # Real uid/gid required by the PostinoSettings validator once a spool
+    # dir is set; values don't matter here because the test only asserts
+    # the service is wired, not that we chown.
+    env["POSTINO_MLMMJ_UID"] = "1042"
+    env["POSTINO_MLMMJ_GID"] = "1042"
     for k, v in env.items():
         monkeypatch.setenv(k, v)
     (tmp_path / "mail").mkdir(exist_ok=True)

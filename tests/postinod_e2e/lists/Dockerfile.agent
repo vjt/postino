@@ -2,6 +2,12 @@ FROM python:3.13-slim
 # Install mlmmj for the agent's CLI subscribe/unsub paths, and pin mlmmj
 # uid:gid to 1042:1042 so spool dirs we chown end up owned by the same uid
 # as the mta container's mlmmj user. mlmmj-sub setuid's to the listdir owner.
+#
+# `[dev]` extras (pytest etc.) ship in the same image so this Dockerfile
+# can also back `scripts/test-mlmmj.sh` — devs without mlmmj on their host
+# run the mlmmj-dependent test suite inside this container without
+# polluting their workstation. The lists-e2e compose stack doesn't use
+# pytest at runtime but the size hit is negligible.
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
        mlmmj \
@@ -13,6 +19,6 @@ RUN apt-get update \
 WORKDIR /app
 COPY pyproject.toml README.md /app/
 COPY src/ /app/src/
-RUN pip install --no-cache-dir '.[daemon]'
+RUN pip install --no-cache-dir '.[dev,daemon]'
 ENV POSTINO_CONFIG=/usr/local/etc/postino/postino.toml
 CMD ["sleep", "infinity"]

@@ -3,14 +3,20 @@
 Postfix is the canonical source for SQL credentials. We parse its
 existing files instead of duplicating the password in postino's TOML.
 
-Settings load order (pydantic-settings):
-  1. Defaults defined here.
-  2. /usr/local/etc/postino/postino.toml
-  3. ~/.config/postino/postino.toml
-  4. POSTINO_* environment variables (highest precedence)."""
+Settings load order (pydantic-settings, highest precedence first):
+  1. ``POSTINO_*`` environment variables.
+  2. The TOML file pointed at by ``$POSTINO_CONFIG`` (if set).
+  3. ``~/.config/postino/postino.toml`` (per-user override).
+  4. ``/usr/local/etc/postino/postino.toml`` (system baseline).
+
+Subtable sections (e.g. ``[postinod]``) in any of the TOML files are
+silently dropped so the "single config file, two tables" deployment
+pattern works for both the CLI (this module's ``PostinoSettings``) and
+the daemon (``postinod.config.PostinodSettings``)."""
 
 from __future__ import annotations
 
+import os
 import tomllib
 from pathlib import Path
 from tomllib import TOMLDecodeError
@@ -22,7 +28,6 @@ from pydantic_settings import (
     BaseSettings,
     PydanticBaseSettingsSource,
     SettingsConfigDict,
-    TomlConfigSettingsSource,
 )
 
 from postino_core.enums import IdentityBackend, PasswordScheme
@@ -30,6 +35,24 @@ from postino_core.errors import ConfigError
 
 _SYSTEM_TOML = Path("/usr/local/etc/postino/postino.toml")
 _USER_TOML = Path.home() / ".config" / "postino" / "postino.toml"
+_POSTINO_CONFIG_ENV = "POSTINO_CONFIG"
+
+
+def _config_toml_paths() -> tuple[Path, ...]:
+    """Return TOML paths in precedence order (first wins).
+
+    Highest first: ``$POSTINO_CONFIG`` (if set) → user override
+    (``~/.config``) → system baseline (``/usr/local/etc``). Honouring
+    ``$POSTINO_CONFIG`` lets the CLI, the daemon, and docker-compose
+    stacks read the same file even when it lives outside the hardcoded
+    system/user paths.
+    """
+    paths: list[Path] = []
+    env_path = os.environ.get(_POSTINO_CONFIG_ENV)
+    if env_path:
+        paths.append(Path(env_path))
+    paths.extend((_USER_TOML, _SYSTEM_TOML))
+    return tuple(paths)
 
 
 class PostfixSqlCredentials(BaseModel):
@@ -102,7 +125,6 @@ class PostinoSettings(BaseSettings):
         env_prefix="POSTINO_",
         env_nested_delimiter="__",
         extra="forbid",
-        toml_file=[_SYSTEM_TOML, _USER_TOML],
     )
 
     identity_backend: IdentityBackend
@@ -138,11 +160,34 @@ class PostinoSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        # Precedence: env vars > user toml > system toml > init/secret defaults.
+        # Precedence: env vars > $POSTINO_CONFIG TOML > system TOML >
+        # user TOML > init/secret defaults. Each TOML source uses
+        # _PostinoTomlSource (subtable-stripping) so `[postinod]` in a
+        # shared config file does not trip extra="forbid".
+        #
+        # Subclasses that pin specific TOML paths via
+        # ``SettingsConfigDict(toml_file=[...])`` (notably the
+        # test-only ``_make_settings_class`` helper) get those paths
+        # honoured here instead of the production discovery defaults.
+        toml_files = settings_cls.model_config.get("toml_file")
+        if toml_files is None:
+            paths: tuple[Path, ...] = _config_toml_paths()
+        else:
+            # pydantic-settings' own TomlConfigSettingsSource reads a
+            # toml_file=[a, b] list in order with later paths overriding
+            # earlier ones; preserve that semantic by reversing into the
+            # source tuple (first wins).
+            if isinstance(toml_files, (str, Path)):
+                paths = (Path(toml_files),)
+            else:
+                paths = tuple(Path(p) for p in reversed(list(toml_files)))
+        toml_sources: tuple[PydanticBaseSettingsSource, ...] = tuple(
+            _PostinoTomlSource(settings_cls, p) for p in paths
+        )
         return (
             init_settings,
             env_settings,
-            TomlConfigSettingsSource(settings_cls),
+            *toml_sources,
             file_secret_settings,
         )
 
@@ -156,6 +201,29 @@ class PostinoSettings(BaseSettings):
             raise ConfigError(
                 f"identity_backend {self.identity_backend.value!r} not supported "
                 f"(supported: {[b.value for b in supported]})"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_mlmmj_uid_gid_when_spool_set(self) -> PostinoSettings:
+        # Two legal modes when ``mlmmj_spool_dir`` is set:
+        #   1. Both uid AND gid >= 0 — production: chown spool files to the
+        #      real mlmmj system user so mlmmj-receive in the mta container
+        #      can read them.
+        #   2. Both uid AND gid == -1 — dev/test sentinel: skip the chown
+        #      entirely (used when postino runs as the same user that owns
+        #      the spool, or when running under pytest with tmp_paths).
+        #
+        # Reject the half-set state where exactly one is -1 — that silently
+        # disables the chown and leaves spool files with mismatched
+        # ownership, surfacing as "mail bounces with no spool error".
+        if self.mlmmj_spool_dir is None:
+            return self
+        if (self.mlmmj_uid < 0) ^ (self.mlmmj_gid < 0):
+            raise ConfigError(
+                "mlmmj_uid and mlmmj_gid must agree: either both >=0 (production: "
+                f"chown to the real mlmmj user) or both -1 (dev/test: skip chown). "
+                f"Got uid={self.mlmmj_uid} gid={self.mlmmj_gid}."
             )
         return self
 

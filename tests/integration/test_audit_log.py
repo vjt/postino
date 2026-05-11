@@ -105,13 +105,19 @@ def test_mailbox_add_writes_audit_row(
     assert ("postino.mailbox.create", "example.com", "foo@example.com") in actions
 
 
-def test_mailbox_add_rollback_writes_no_audit(
+def test_mailbox_add_hook_failure_leaves_audit_row_committed(
     db: Engine,
     tmp_mail_root: Path,
     failing_postcreation_hook: Path,
     frozen_clock: datetime,
 ) -> None:
-    """Hook failure rolls back the tx — audit row must roll back too."""
+    """Documents the audit-vs-hook ordering: the hook fires AFTER the
+    DB tx commits, so the audit row is durable even when the hook
+    later fails. Compensation deletes the mailbox row but never
+    rewrites the audit log — audit is a ledger, not state. A future
+    contract change to wrap the hook inside the tx would flip this
+    expectation; the symmetric `_in_tx_failure_writes_no_audit` test
+    below pins the inside-tx case."""
     _seed_domain(db, "example.com")
     svc = _mailbox_service(
         db,
@@ -129,13 +135,74 @@ def test_mailbox_add_rollback_writes_no_audit(
                 scheme=PasswordScheme.BCRYPT,
             )
         )
-    # Hook fires AFTER the DB tx commits in the current ordering, so the
-    # audit row IS written first; the failure-cleanup path then deletes
-    # the mailbox row but does NOT rewrite the audit log (audit is a
-    # ledger, not state). Verify only that the create row is present —
-    # this documents the contract.
     actions = _audit_actions(db)
     assert any(a[0] == "postino.mailbox.create" for a in actions)
+
+
+def test_mailbox_add_in_tx_failure_writes_no_audit(
+    db: Engine,
+    tmp_mail_root: Path,
+    fake_postcreation_hook: Path,
+    frozen_clock: datetime,
+) -> None:
+    """Genuine rollback: a raise *inside* engine.begin() rolls every
+    write back — including the audit row written in the same tx.
+
+    Driven via an audit writer that raises on `write()`, which is the
+    only injection point inside the mutation transaction. Counterpart
+    to ``test_mailbox_add_hook_failure_leaves_audit_row_committed`` —
+    together they document the two halves of audit atomicity:
+    in-tx failure → no audit row; post-commit hook failure → audit row
+    survives compensation."""
+    from sqlalchemy.engine import Connection
+
+    from postino_core.audit import AuditWriter
+
+    class _BoomWriter:
+        def write(
+            self,
+            conn: Connection,
+            *,
+            action: str,
+            domain: str,
+            data: str,
+        ) -> None:
+            del conn, action, domain, data
+            raise RuntimeError("simulated in-tx audit failure")
+
+    boom: AuditWriter = _BoomWriter()
+    _seed_domain(db, "example.com")
+    md = MetaData()
+    md.reflect(bind=db)
+    svc = MailboxService(
+        engine=db,
+        identity=LocalProvider(metadata=md, clock=lambda: frozen_clock),
+        fs=FilesystemAdapter(mail_root=tmp_mail_root, vmail_uid=-1, vmail_gid=-1),
+        hooks=HookRunner(script_path=fake_postcreation_hook),
+        clock=lambda: frozen_clock,
+        metadata=md,
+        audit_writer=boom,
+    )
+    with pytest.raises(RuntimeError, match="simulated in-tx audit failure"):
+        svc.add(
+            MailboxCreate(
+                username="boom@example.com",
+                password=SecretStr("p"),
+                name="",
+                quota_bytes=0,
+                scheme=PasswordScheme.BCRYPT,
+            )
+        )
+    actions = _audit_actions(db)
+    assert all(a[2] != "boom@example.com" for a in actions), (
+        "audit row leaked despite in-tx rollback"
+    )
+    mailbox = md.tables["mailbox"]
+    with db.connect() as conn:
+        rows = conn.execute(
+            select(mailbox).where(mailbox.c.username == "boom@example.com")
+        ).fetchall()
+    assert rows == [], "mailbox row leaked despite in-tx rollback"
 
 
 def test_set_password_writes_audit(

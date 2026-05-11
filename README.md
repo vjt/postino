@@ -104,9 +104,14 @@ git pull
 
 postino reads, in order of increasing precedence:
 
-1. `/usr/local/etc/postino/postino.toml`
-2. `~/.config/postino/postino.toml`
-3. `POSTINO_*` environment variables
+1. `~/.config/postino/postino.toml`
+2. `/usr/local/etc/postino/postino.toml`
+3. The file pointed at by `$POSTINO_CONFIG`, if set
+4. `POSTINO_*` environment variables
+
+Subtable sections (e.g. `[postinod]`) inside any of the above TOML
+files are silently dropped, so the same file can carry both the CLI's
+top-level keys and the daemon's `[postinod]` block.
 
 Example `postino.toml`:
 
@@ -291,6 +296,24 @@ exercise the actual production schema, not a hand-maintained copy.
 
 The check script must stay green on every commit. Pyright is in `strict`
 mode, ruff has `E F W I B UP RUF SIM` selected.
+
+### mlmmj-dependent tests
+
+The mailing-list integration + e2e CLI suites need the mlmmj binaries
+(`mlmmj-sub`, `mlmmj-unsub`, `mlmmj-list`) on PATH. If you don't want
+to install mlmmj on your workstation, run them inside docker against
+the host's mariadb:
+
+```sh
+./scripts/test-mlmmj.sh           # builds the image (cached), runs pytest
+./scripts/test-mlmmj.sh -v -x     # extra args forwarded to pytest
+```
+
+The script reuses `tests/postinod_e2e/lists/Dockerfile.agent` (already
+exercised by CI) and uses `--network=host` to reach the local mariadb,
+so it needs no separate DB sidecar. macOS/Windows: edit
+`POSTINO_TEST_DB_URL` to use `host.docker.internal` instead of
+`localhost`.
 
 ### Releasing
 

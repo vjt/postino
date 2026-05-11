@@ -1,15 +1,40 @@
 """Filesystem adapter for maildir create/remove.
 
 vmail_uid/gid of -1 means "do not chown" (used in unit tests where the
-caller has no privileges to chown to the production vmail user)."""
+caller has no privileges to chown to the production vmail user).
+
+postino runs as root in production. This module therefore refuses to
+follow symlinks at any step:
+
+- containment uses ``Path.is_relative_to`` (not string-prefix, which
+  would let a sibling ``/var/mail2/foo`` masquerade as ``/var/mail/foo``);
+- ``_safe_join`` ``lstat``-s every component and refuses any pre-existing
+  symlink (defends create-path chmod/chown);
+- ``os.chown`` is invoked with ``follow_symlinks=False`` so a symlink
+  racing into the tree between ``lstat`` and the ownership write cannot
+  redirect it;
+- tree removal uses ``shutil.rmtree`` which on POSIX is implemented via
+  fd-based ``_rmtree_safe_fd`` (opens each subdir with ``O_NOFOLLOW`` —
+  symlinks under the tree are unlinked in place, never descended into).
+  We assert ``shutil.rmtree.avoids_symlink_attacks`` at import to fail
+  loudly on any platform where the safe variant is unavailable.
+
+Memory ``feedback_destructive_ops.md`` documents a prior real incident
+with destructive ops on chrooted paths."""
 
 from __future__ import annotations
 
 import os
 import shutil
+import stat
 from pathlib import Path
 
 from postino_core.errors import FilesystemError
+
+assert shutil.rmtree.avoids_symlink_attacks, (
+    "shutil.rmtree on this platform does not avoid symlink attacks; "
+    "postino refuses to run unsafely under root"
+)
 
 _MAILDIR_MODE = 0o700
 _MAILDIRPP_SUBDIRS = ("cur", "new", "tmp")
@@ -57,9 +82,15 @@ class FilesystemAdapter:
             raise FilesystemError(f"create_maildir {target} failed: {e}") from e
 
     def _lock_down(self, path: Path) -> None:
+        # _safe_join already lstat'd every component, so `path` is
+        # guaranteed not to be a symlink — no need (and no portable way
+        # on Linux) to pass ``follow_symlinks=False`` to chmod here.
         os.chmod(path, _MAILDIR_MODE)
         if self._uid >= 0 and self._gid >= 0:
-            os.chown(path, self._uid, self._gid)
+            # ``follow_symlinks=False`` is supported on Linux via lchown
+            # and defends against a symlink racing into the tree between
+            # the lstat in _safe_join and the chown here.
+            os.chown(path, self._uid, self._gid, follow_symlinks=False)
 
     def maildir_exists(self, relative: Path) -> bool:
         return self._safe_join(relative).exists()
@@ -84,9 +115,45 @@ class FilesystemAdapter:
             p = p.parent
 
     def _safe_join(self, relative: Path) -> Path:
-        joined = (self._mail_root / relative).resolve()
-        if not str(joined).startswith(str(self._mail_root)):
+        """Resolve ``relative`` inside ``mail_root`` without following
+        any symlink at any intermediate component.
+
+        Refuses:
+        - absolute ``relative`` paths.
+        - ``..`` segments in ``relative``.
+        - any pre-existing component that is a symlink.
+        - the result being equal to ``mail_root`` itself.
+
+        Returns the joined path. Containment is enforced via
+        ``Path.is_relative_to``; string-prefix matching would let a
+        sibling like ``/var/mail2/foo`` masquerade as ``/var/mail/foo``.
+        """
+        if relative.is_absolute():
             raise FilesystemError(
-                f"path traversal: {relative!r} escapes mail_root {self._mail_root}"
+                f"path traversal: {relative!r} is absolute; expected relative under mail_root"
             )
-        return joined
+        parts = relative.parts
+        if ".." in parts:
+            raise FilesystemError(f"path traversal: {relative!r} contains '..'; rejected")
+        # Walk components; lstat each that exists. Pre-existing symlinks
+        # at any depth would redirect operations outside the tree.
+        cursor = self._mail_root
+        for part in parts:
+            cursor = cursor / part
+            try:
+                st = cursor.lstat()
+            except FileNotFoundError:
+                # Not-yet-existing component is fine — mkdir(parents=True)
+                # will create it shortly.
+                continue
+            except OSError as e:
+                raise FilesystemError(f"lstat {cursor} failed: {e}") from e
+            if stat.S_ISLNK(st.st_mode):
+                raise FilesystemError(
+                    f"refusing to follow symlink at {cursor}; maildir tree must contain no symlinks"
+                )
+        if not cursor.is_relative_to(self._mail_root) or cursor == self._mail_root:
+            raise FilesystemError(
+                f"path traversal: {relative!r} escapes or equals mail_root {self._mail_root}"
+            )
+        return cursor

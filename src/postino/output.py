@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections.abc import Sequence
 
 from pydantic import BaseModel
 from rich.console import Console
@@ -20,22 +21,22 @@ class Renderer:
         self._json = json
         self._console = console if console is not None else Console()
 
-    def render(self, payload: BaseModel | list[BaseModel]) -> None:
+    def render(self, payload: BaseModel | Sequence[BaseModel]) -> None:
         if self._json:
             self._render_json(payload)
         else:
             self._render_human(payload)
 
-    def _render_json(self, payload: BaseModel | list[BaseModel]) -> None:
-        if isinstance(payload, list):
+    def _render_json(self, payload: BaseModel | Sequence[BaseModel]) -> None:
+        if isinstance(payload, BaseModel):
+            json.dump(payload.model_dump(mode="json"), sys.stdout)
+        else:
             data = [m.model_dump(mode="json") for m in payload]
             json.dump(data, sys.stdout)
-        else:
-            json.dump(payload.model_dump(mode="json"), sys.stdout)
         sys.stdout.write("\n")
 
-    def _render_human(self, payload: BaseModel | list[BaseModel]) -> None:
-        items = payload if isinstance(payload, list) else [payload]
+    def _render_human(self, payload: BaseModel | Sequence[BaseModel]) -> None:
+        items: Sequence[BaseModel] = (payload,) if isinstance(payload, BaseModel) else payload
         if not items:
             self._console.print("(no rows)")
             return

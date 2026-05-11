@@ -100,7 +100,7 @@ class MailboxService:
                 )
         except Exception:
             if not maildir_existed:
-                self._safe_remove_maildir(relative_maildir)
+                self._compensate_remove_maildir(relative_maildir)
             raise
 
         try:
@@ -111,8 +111,25 @@ class MailboxService:
                 quota=create.quota_bytes,
             )
         except Exception:
-            self._safe_delete_mailbox_row(str(create.username))
-            self._safe_remove_maildir(relative_maildir)
+            # The DB tx already committed (audit row + mailbox row + quota
+            # row + identity bootstrap). Compensation deletes the row and
+            # removes the maildir; collect any compensation failures and
+            # surface them via a side-channel audit row so the operator
+            # sees a durable record of the orphan resources rather than
+            # just a log line.
+            orphans: list[str] = []
+            row_err = self._compensate_delete_mailbox_row(str(create.username))
+            if row_err is not None:
+                orphans.append(f"mailbox row ({row_err})")
+            fs_err = self._compensate_remove_maildir(relative_maildir)
+            if fs_err is not None:
+                orphans.append(f"maildir {relative_maildir} ({fs_err})")
+            if orphans:
+                self._write_rollback_failed_audit(
+                    username=str(create.username),
+                    domain=domain,
+                    orphans=orphans,
+                )
             raise
 
         got = self.get(create.username)
@@ -120,7 +137,9 @@ class MailboxService:
             raise DBError("mailbox vanished after insert")
         return got
 
-    def _safe_remove_maildir(self, relative: Path) -> None:
+    def _compensate_remove_maildir(self, relative: Path) -> str | None:
+        """Best-effort remove_maildir. Returns the error message on
+        failure (compensation continues), None on success."""
         try:
             self._fs.remove_maildir(relative)
         except Exception as compensation_err:
@@ -129,8 +148,12 @@ class MailboxService:
                 relative,
                 compensation_err,
             )
+            return str(compensation_err)
+        return None
 
-    def _safe_delete_mailbox_row(self, username: str) -> None:
+    def _compensate_delete_mailbox_row(self, username: str) -> str | None:
+        """Best-effort delete_mailbox_row. Returns the error message on
+        failure (compensation continues), None on success."""
         try:
             self._delete_mailbox_row(username)
         except Exception as compensation_err:
@@ -138,6 +161,30 @@ class MailboxService:
                 "compensation: delete mailbox row %s failed: %s",
                 username,
                 compensation_err,
+            )
+            return str(compensation_err)
+        return None
+
+    def _write_rollback_failed_audit(
+        self, *, username: str, domain: str, orphans: list[str]
+    ) -> None:
+        """Side-channel audit row documenting orphan resources left
+        after a failed compensation. Fresh tx since the original is
+        already dead. Failure here is logged-and-swallowed (the caller
+        is already raising HookError; we must not mask it)."""
+        try:
+            with self._engine.begin() as conn:
+                self._audit.write(
+                    conn,
+                    action=mk_action("mailbox", "create_rollback_failed"),
+                    domain=domain,
+                    data=f"{username} orphans={'; '.join(orphans)}",
+                )
+        except Exception as side_err:
+            _logger.error(
+                "compensation: rollback_failed audit row for %s also failed: %s",
+                username,
+                side_err,
             )
 
     def get(self, username: EmailStr) -> Mailbox | None:

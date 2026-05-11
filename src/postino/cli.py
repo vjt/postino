@@ -6,13 +6,10 @@ code. Anything else propagates to Rich's traceback handler and exits 99."""
 from __future__ import annotations
 
 import getpass
-import sys
 from datetime import UTC, datetime
-from typing import NoReturn
 
 import typer
 from pydantic import ValidationError
-from rich.console import Console
 from rich.traceback import install as install_traceback
 
 from postino.commands import alias as alias_cmd
@@ -23,19 +20,9 @@ from postino.commands import quota as quota_cmd
 from postino.commands import reconcile as reconcile_cmd
 from postino.commands import status as status_cmd
 from postino.commands import user as user_cmd
+from postino.exit import CliState, exit_with_error
 from postino_core.config import PostinoSettings
-from postino_core.errors import (
-    AlreadyExistsError,
-    CapacityError,
-    ConfigError,
-    DBError,
-    DeadlockError,
-    FilesystemError,
-    HookError,
-    MailctlError,
-    MlmmjError,
-    NotFoundError,
-)
+from postino_core.errors import ConfigError, MailctlError
 from postino_core.services.bundle import build_services
 
 app = typer.Typer(
@@ -53,19 +40,6 @@ app.add_typer(quota_cmd.app, name="quota", help="Quota inspection.")
 app.command("check", help="Validate consistency between postino and the mail stack.")(check_cmd.run)
 app.command("status", help="Snapshot of mail stack health.")(status_cmd.run)
 app.command("reconcile", help="(V2) drift detection vs identity source.")(reconcile_cmd.run)
-
-
-_EXIT_CODES: dict[type[MailctlError], int] = {
-    NotFoundError: 1,
-    AlreadyExistsError: 2,
-    CapacityError: 3,
-    ConfigError: 4,
-    DBError: 5,
-    FilesystemError: 6,
-    HookError: 7,
-    DeadlockError: 8,
-    MlmmjError: 9,
-}
 
 
 def _load_settings() -> PostinoSettings:
@@ -134,21 +108,7 @@ def _entry(  # pyright: ignore[reportUnusedFunction]
             echo=False,
             actor=_cli_actor,
         )
+        state: CliState = {"services": services, "json": json}
+        ctx.obj = state
     except MailctlError as e:
         exit_with_error(e)
-    ctx.obj = {"services": services, "json": json}
-
-
-def exit_with_error(err: MailctlError) -> NoReturn:
-    """Print err to stderr and sys.exit with the documented exit code."""
-    console = Console(stderr=True)
-    console.print(f"[red]error:[/red] {err}")
-    code = next(
-        (c for cls, c in _EXIT_CODES.items() if isinstance(err, cls)),
-        99,
-    )
-    sys.exit(code)
-
-
-# Legacy alias kept for internal callers.
-_exit = exit_with_error

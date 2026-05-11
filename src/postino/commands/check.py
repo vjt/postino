@@ -17,12 +17,9 @@ import sys
 import typer
 from rich.console import Console
 
+from postino.exit import exit_with_error, get_services, is_json
 from postino_core.check.consistency import CheckResult, run_consistency_check
-from postino_core.services.bundle import ServicesBundle
-
-
-def _services(ctx: typer.Context) -> ServicesBundle:
-    return ctx.obj["services"]  # type: ignore[no-any-return]  # WHY: typer Context.obj is dict[str, Any]; PR-A6 typed CliState.
+from postino_core.errors import ConfigError
 
 
 def run(
@@ -33,23 +30,19 @@ def run(
         help="Reconcile mailbox rows against maildirs on disk and check FK substitutes.",
     ),
 ) -> None:
-    from postino.cli import exit_with_error as _exit
-    from postino_core.errors import ConfigError
-
-    s = _services(ctx)
-    json_mode = bool(ctx.obj["json"])
+    s = get_services(ctx)
     result = run_consistency_check(
         settings=s.settings,
         engine=s.engine,
         metadata=s.metadata,
         deep=deep,
     )
-    if json_mode:
+    if is_json(ctx):
         _render_json(result)
     else:
         _render_human(result)
     if not result.ok:
-        _exit(ConfigError("one or more checks failed"))
+        exit_with_error(ConfigError("one or more checks failed"))
 
 
 def _render_human(result: CheckResult) -> None:

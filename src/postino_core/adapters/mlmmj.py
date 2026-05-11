@@ -11,13 +11,23 @@ is a distro-specific shell wrapper — Debian's variant takes
 port patches in different flags. The actual on-disk layout (subdirs +
 ``control/owner`` + ``control/listaddress``) is the stable contract
 mlmmj 1.0+ commits to and is what ``mlmmj-receive`` / ``mlmmj-process``
-consume. We own the create path, not the layout."""
+consume. We own the create path, not the layout.
+
+Symlink safety: ``_listdir`` lstat-s every component and refuses any
+pre-existing symlink under the spool root. ``shutil.rmtree`` on POSIX
+is implemented via fd-based ``_rmtree_safe_fd`` (opens each subdir with
+``O_NOFOLLOW``) — symlinks are unlinked in place rather than descended
+into. ``os.chown`` uses ``follow_symlinks=False`` so a symlink racing
+into the freshly-created tree cannot redirect ownership outside it.
+The ``shutil.rmtree.avoids_symlink_attacks`` invariant is asserted in
+``postino_core.fs``."""
 
 from __future__ import annotations
 
 import fcntl
 import os
 import shutil
+import stat
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -69,7 +79,10 @@ class MlmmjAdapter:
         mlmmj_gid: int,
         timeout: float = _DEFAULT_TIMEOUT,
     ) -> None:
-        self._spool_root = spool_root
+        # Resolve once at construction so the path-traversal guard does
+        # not re-evaluate symlinks under the operator's feet if the
+        # spool mount changes mid-run.
+        self._spool_root = spool_root.resolve()
         self._uid = mlmmj_uid
         self._gid = mlmmj_gid
         self._timeout = timeout
@@ -79,7 +92,9 @@ class MlmmjAdapter:
         # (`mlmmj-sub: All mlmmj binaries have to be invoked with full path`).
         # Resolve via PATH once per call — cheap and avoids stashing stale paths.
         full = shutil.which(name)
-        return full if full is not None else name
+        if full is None:
+            raise MlmmjError(f"{name}: not found on PATH — install mlmmj or fix PATH")
+        return full
 
     # -- subprocess plumbing ------------------------------------------------
 
@@ -89,6 +104,10 @@ class MlmmjAdapter:
         uid, gid = self._uid, self._gid
 
         def _drop() -> None:
+            # Drop supplementary groups first; without this the child
+            # inherits root's groups (wheel, mail, ...) while running as
+            # mlmmj:mlmmj — partial privilege drop.
+            os.setgroups([])
             os.setgid(gid)
             os.setuid(uid)
 
@@ -112,10 +131,44 @@ class MlmmjAdapter:
         raise MlmmjError(f"{cmd[0]}: exit {result.returncode}: {stderr}")
 
     def _listdir(self, address: EmailStr) -> Path:
-        joined = (self._spool_root / str(address)).resolve()
-        if not str(joined).startswith(str(self._spool_root.resolve())):
+        """Compose ``<spool_root>/<address>`` with path-traversal and
+        symlink defenses.
+
+        Rejects:
+        - addresses containing a ``/`` (the local-part of an EmailStr can
+          legally contain quoted slashes; we refuse them because they
+          would split the path component).
+        - addresses containing ``..`` segments.
+        - results that escape ``spool_root`` (e.g. via prefix sibling
+          directories: ``/var/spool/mlmmj2/foo`` for a root of
+          ``/var/spool/mlmmj``).
+        - results that equal ``spool_root`` itself.
+        - any pre-existing component that is a symlink (symlinks under
+          the spool root would let an attacker redirect mlmmj writes).
+        """
+        addr_str = str(address)
+        if "/" in addr_str or addr_str in ("..", ".") or addr_str.startswith("."):
+            raise FilesystemError(f"path traversal: {address!r} contains invalid path characters")
+        joined = self._spool_root / addr_str
+        # Component-by-component lstat: refuse any symlink under the
+        # spool root rather than calling resolve() (which follows them).
+        cursor = self._spool_root
+        for part in (addr_str,):
+            cursor = cursor / part
+            try:
+                st = cursor.lstat()
+            except FileNotFoundError:
+                continue
+            except OSError as e:
+                raise FilesystemError(f"lstat {cursor} failed: {e}") from e
+            if stat.S_ISLNK(st.st_mode):
+                raise FilesystemError(
+                    f"refusing to follow symlink at {cursor}; "
+                    f"mlmmj spool tree must contain no symlinks"
+                )
+        if not joined.is_relative_to(self._spool_root) or joined == self._spool_root:
             raise FilesystemError(
-                f"path traversal: {address!r} escapes spool_root {self._spool_root}"
+                f"path traversal: {address!r} escapes or equals spool_root {self._spool_root}"
             )
         return joined
 
@@ -161,9 +214,22 @@ class MlmmjAdapter:
             (listdir / "control" / "listaddress").write_text(f"{address}\n", encoding="utf-8")
             self._copy_text_skel(listdir / "text")
             self._chown_tree(listdir)
-        except OSError as e:
-            shutil.rmtree(listdir, ignore_errors=True)
-            raise FilesystemError(f"mlmmj create {address} failed: {e}") from e
+        except Exception as e:
+            # Catch broader than OSError so KeyboardInterrupt / MlmmjError /
+            # any unexpected exception still rolls the partial tree back.
+            # Rollback errors are surfaced (no ``ignore_errors=True``): a
+            # silent rollback failure on a read-only mount or quota-exhausted
+            # FS would leak a half-built spool dir and block retries with
+            # AlreadyExistsError.
+            try:
+                shutil.rmtree(listdir)
+            except OSError as rollback_err:
+                raise FilesystemError(
+                    f"mlmmj create {address} failed: {e}; AND rollback failed: {rollback_err}"
+                ) from e
+            if isinstance(e, OSError):
+                raise FilesystemError(f"mlmmj create {address} failed: {e}") from e
+            raise
 
     def _copy_text_skel(self, dest: Path) -> None:
         """Copy ``text.skel/<lang>/*`` into ``dest`` if the skeleton exists.
@@ -179,13 +245,23 @@ class MlmmjAdapter:
                 return
 
     def _chown_tree(self, listdir: Path) -> None:
-        """Recursively chown to ``(uid, gid)`` when both are non-negative."""
+        """Recursively chown to ``(uid, gid)`` when both are non-negative.
+
+        Uses ``follow_symlinks=False`` (lchown) so a symlink racing into
+        the freshly-created tree cannot redirect ownership onto a file
+        outside the spool root.
+        """
         if self._uid < 0 or self._gid < 0:
             return
-        os.chown(listdir, self._uid, self._gid)
-        for dirpath, dirnames, filenames in os.walk(listdir):
+        os.chown(listdir, self._uid, self._gid, follow_symlinks=False)
+        for dirpath, dirnames, filenames in os.walk(listdir, followlinks=False):
             for name in dirnames + filenames:
-                os.chown(os.path.join(dirpath, name), self._uid, self._gid)
+                os.chown(
+                    os.path.join(dirpath, name),
+                    self._uid,
+                    self._gid,
+                    follow_symlinks=False,
+                )
 
     # -- delete -------------------------------------------------------------
 

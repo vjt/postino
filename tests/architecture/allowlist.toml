@@ -56,31 +56,14 @@
 97 = "WHY: **kwargs: Any forwarded verbatim to BaseModel.model_validate; pydantic minors evolve the kwarg set, generic Any avoids drift."
 100 = "WHY: obj is Any; isinstance(obj, dict) narrows to dict[Unknown, Unknown] in pyright strict — typed alias assignment needed for subsequent .get() calls."
 
-[test_type_ignore_justified."src/postino/commands/alias.py"]
-18 = "WHY: typer Context.obj is dict[str, Any]; PR-A6 introduces a typed CliState dataclass."
-
-[test_type_ignore_justified."src/postino/commands/check.py"]
-13 = "WHY: typer Context.obj is dict[str, Any]; PR-A6 typed CliState."
-
-[test_type_ignore_justified."src/postino/commands/domain.py"]
-20 = "WHY: typer Context.obj is dict[str, Any]; PR-A6 typed CliState."
-
 [test_type_ignore_justified."src/postino/commands/list.py"]
-24 = "WHY: typer Context.obj is dict[str, Any]; PR-A6 typed CliState."
-71 = "WHY: EmailStr accepts str at the CLI boundary; type narrowing would require an extra validated intermediate — fix in PR-A6 CLI cleanup."
-85 = "WHY: same EmailStr/str boundary as line 71."
-95 = "WHY: same EmailStr/str boundary — service.get() accepts EmailStr; raw CLI str fed directly."
-135 = "WHY: same EmailStr/str boundary — service.delete() accepts EmailStr; raw CLI str fed directly."
-
-[test_type_ignore_justified."src/postino/commands/quota.py"]
-18 = "WHY: typer Context.obj is dict[str, Any]; PR-A6 typed CliState."
-
-[test_type_ignore_justified."src/postino/commands/status.py"]
-14 = "WHY: typer Context.obj is dict[str, Any]; PR-A6 typed CliState."
-
-[test_type_ignore_justified."src/postino/commands/user.py"]
-34 = "WHY: typer Context.obj is dict[str, Any]; PR-A6 typed CliState."
-207 = "WHY: Renderer.render is invariant on list[BaseModel]; PR-A6 generifies it."
+# EmailStr-at-boundary ignores: the CLI accepts raw str from typer and
+# the service signatures are typed EmailStr. Narrowing would require an
+# extra TypeAdapter call at every entry point — deferred.
+59 = "WHY: EmailStr accepts str at the CLI boundary; type narrowing would require an extra validated intermediate."
+70 = "WHY: same EmailStr/str boundary as line 59."
+82 = "WHY: same EmailStr/str boundary — service.get() accepts EmailStr; raw CLI str fed directly."
+112 = "WHY: same EmailStr/str boundary — service.delete() accepts EmailStr; raw CLI str fed directly."
 
 [test_type_ignore_justified."src/postino_core/password.py"]
 12 = "WHY: passlib lacks a typed __init__; PR-A5 wraps via PasswordHasher Protocol."
@@ -108,15 +91,16 @@
 278 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/mailbox.py"]
-# Lines shifted when MailboxService.__init__ gained `audit_writer` and the
-# write_audit free-function calls collapsed to self._audit.write; entries
-# are all SQLAlchemy RowMapping Any in get / _row_to_model / list.
-152 = "WHY: SQLAlchemy RowMapping access yields Any."
-221 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-224 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-225 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-226 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-299 = "WHY: SQLAlchemy RowMapping access yields Any."
+# Lines shifted again when the post-hook compensation grew dedicated
+# helper methods (_compensate_remove_maildir, _compensate_delete_mailbox_row,
+# _write_rollback_failed_audit); all entries below remain SQLAlchemy
+# RowMapping Any access in get / _row_to_model / list.
+199 = "WHY: SQLAlchemy RowMapping access yields Any."
+268 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+271 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+272 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+273 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+346 = "WHY: SQLAlchemy RowMapping access yields Any."
 
 [test_type_ignore_justified."src/postino_core/services/quota.py"]
 23 = "WHY: SQLAlchemy Row._mapping attribute access not in stubs."
@@ -131,7 +115,7 @@
 [test_no_str_dispatch]
 [test_no_empty_str_sentinel]
 [test_no_empty_str_sentinel."src/postino/commands/quota.py"]
-26 = "WHY: typer Argument default; PR-A6 swaps for `username: str | None = None` plus typer.Argument(None) per CLI cleanup."
+15 = "WHY: typer Argument default; CLI cleanup will swap for `username: str | None = None` plus typer.Argument(None)."
 
 [test_pydantic_strict]
 [test_pydantic_strict."src/postinod/zitadel/models.py"]

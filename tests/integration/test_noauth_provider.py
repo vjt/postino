@@ -67,20 +67,24 @@ def test_create_identity_is_noop_keeps_sentinel(db: Engine) -> None:
     assert row == SENTINEL_NOAUTH
 
 
-def test_create_identity_ignores_password_argument(db: Engine) -> None:
-    """Even if the caller passes a password, NoAuthProvider must not write it."""
+def test_create_identity_rejects_password_argument(db: Engine) -> None:
+    """A caller passing a password under NoAuth is a configuration bug —
+    the secret would be silently discarded (the sentinel stays in
+    mailbox.password). Reject loudly so callers gate on
+    ``supports_local_provisioning()`` or hand ``None``."""
     md = MetaData()
     md.reflect(bind=db)
     with db.begin() as conn:
         _seed_mailbox(conn, md, "foo@example.com")
         prov = NoAuthProvider()
-        prov.create_identity(
-            conn,
-            "foo@example.com",
-            name="Foo",
-            password=SecretStr("would-be-leaked"),
-            scheme=PasswordScheme.BCRYPT,
-        )
+        with pytest.raises(ConfigError):
+            prov.create_identity(
+                conn,
+                "foo@example.com",
+                name="Foo",
+                password=SecretStr("would-be-leaked"),
+                scheme=PasswordScheme.BCRYPT,
+            )
         row = conn.execute(
             select(md.tables["mailbox"].c.password).where(
                 md.tables["mailbox"].c.username == "foo@example.com"

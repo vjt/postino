@@ -16,6 +16,8 @@ Two modes:
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import os
 from pathlib import Path
 from typing import Literal
@@ -168,7 +170,6 @@ def _check_postfix_sql_cfs(s: PostinoSettings, engine: Engine) -> list[Finding]:
         eu_user = url.username or ""
         eu_host = url.host or ""
         eu_db = url.database or ""
-        eu_pwd = url.password or ""
         diffs: list[str] = []
         if parsed.user != eu_user:
             diffs.append(f"user {parsed.user!r}≠engine {eu_user!r}")
@@ -176,7 +177,13 @@ def _check_postfix_sql_cfs(s: PostinoSettings, engine: Engine) -> list[Finding]:
             diffs.append(f"host {parsed.host!r}≠engine {eu_host!r}")
         if parsed.dbname != eu_db:
             diffs.append(f"dbname {parsed.dbname!r}≠engine {eu_db!r}")
-        if parsed.password.get_secret_value() != eu_pwd:
+        # Compare hashes rather than cleartexts so the SQL password
+        # never appears as a bare `str` on the stack (a `show_locals`
+        # traceback or a future logger refactor would otherwise expose
+        # it). hmac.compare_digest gives constant-time comparison too.
+        parsed_pwd_digest = hashlib.sha256(parsed.password.get_secret_value().encode()).digest()
+        eu_pwd_digest = hashlib.sha256((url.password or "").encode()).digest()
+        if not hmac.compare_digest(parsed_pwd_digest, eu_pwd_digest):
             diffs.append("password mismatch")
         if diffs:
             out.append(_err(name, f"{cf}: " + ", ".join(diffs)))
@@ -333,6 +340,99 @@ def _check_deep(s: PostinoSettings, engine: Engine, md: MetaData) -> list[Findin
     out.extend(_check_mailbox_maildir_pairing(s, mailbox_rows))
     out.extend(_check_orphan_maildirs(s, mailbox_rows))
     out.extend(_check_orphan_domain_maildirs(s, domain_names))
+    out.extend(_check_mailing_lists(s, engine, md))
+    return out
+
+
+def _check_mailing_lists(s: PostinoSettings, engine: Engine, md: MetaData) -> list[Finding]:
+    """Reconcile mlmmj spool tree against ``domain.transport='mlmmj'`` rows.
+
+    Surfaces three drift conditions invisible to the rest of the deep
+    check:
+
+    1. ``domain`` rows with ``transport='mlmmj'`` but missing a spool
+       dir (failed list-create that left no FS trace; mail for that
+       domain currently bounces).
+    2. Spool dirs under ``mlmmj_spool_dir`` whose ``@<domain>`` portion
+       does not match any ``domain`` row, or whose ``control/owner``
+       file is missing/empty (corrupt list state).
+    3. ``.deleting.*`` / ``.tmp-*`` artefact dirs left behind by a
+       partial-delete or partial-create rollback. The current
+       MailingListService.delete is FS-first and uses no rename
+       sentinel, but operators can move spool dirs aside by hand —
+       and a future delete refactor may adopt the rename pattern.
+
+    Skipped silently when ``mlmmj_spool_dir`` is not configured.
+    """
+    spool_root = s.mlmmj_spool_dir
+    if spool_root is None:
+        return []
+    if not spool_root.is_dir():
+        return [_warn("mailing_lists", f"mlmmj_spool_dir does not exist: {spool_root}")]
+
+    domain_t = md.tables["domain"]
+    with engine.connect() as conn:
+        mlmmj_domains = {
+            str(r._mapping["domain"])  # type: ignore[index]  # WHY: SQLAlchemy RowMapping[str, Any] indexing.
+            for r in conn.execute(
+                select(domain_t.c.domain).where(domain_t.c.transport == "mlmmj")
+            ).fetchall()
+        }
+
+    out: list[Finding] = []
+    # Spool dirs on disk; classify each.
+    on_disk: set[str] = set()
+    corrupt: list[str] = []
+    orphan_address: list[str] = []
+    artefacts: list[str] = []
+    try:
+        entries = list(spool_root.iterdir())
+    except OSError as e:
+        return [_warn("mailing_lists", f"cannot scan {spool_root}: {e}")]
+    for entry in entries:
+        if not entry.is_dir():
+            continue
+        name = entry.name
+        if name.startswith(".deleting.") or name.startswith(".tmp-"):
+            artefacts.append(name)
+            continue
+        on_disk.add(name)
+        owner = entry / "control" / "owner"
+        if not owner.exists() or owner.read_text().strip() == "":
+            corrupt.append(name)
+            continue
+        _, _, fqdn = name.partition("@")
+        if fqdn not in mlmmj_domains:
+            orphan_address.append(name)
+
+    if corrupt:
+        out.append(
+            _err(
+                "mlmmj_lists_corrupt",
+                f"{len(corrupt)} spool dir(s) missing/empty control/owner: {corrupt[:5]}",
+            )
+        )
+    else:
+        out.append(_ok("mlmmj_lists_corrupt", "all spool dirs have control/owner"))
+
+    if orphan_address:
+        out.append(
+            _err(
+                "mlmmj_lists_orphan_domain",
+                f"{len(orphan_address)} spool dir(s) without a matching "
+                f"transport=mlmmj domain row: {orphan_address[:5]}",
+            )
+        )
+    else:
+        out.append(_ok("mlmmj_lists_orphan_domain", "all spool dirs map to mlmmj domains"))
+
+    if artefacts:
+        out.append(
+            _warn(
+                "mlmmj_lists_artefacts",
+                f"{len(artefacts)} partial-delete/create artefact dir(s): {artefacts[:5]}",
+            )
+        )
     return out
 
 

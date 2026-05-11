@@ -133,9 +133,16 @@ class MailingListService:
         Refuses (CapacityError) if ``subscriber_count > 0`` and ``force`` is False.
         Raises NotFoundError if the list spool dir does not exist.
 
-        DB-first: audit row commits before the spool tree is removed. If the
-        post-commit ``adapter.delete`` fails, the audit is over-inclusive but
-        the spool tree is recoverable; the inverse leaves a ghost mutation.
+        FS-first ordering: ``adapter.delete`` removes the spool tree, then
+        an audit row commits. A phantom-delete audit row whose spool tree
+        still exists is misleading (admins trust audit). Failure of the FS
+        removal leaves both FS + audit untouched — safe to retry.
+
+        If the audit write fails *after* the spool has been removed, the
+        operation has succeeded but the log row is missing; we emit a
+        side-channel ``postino.mailing_list.audit_dropped`` row in a fresh
+        transaction so the gap is surfaced to admins instead of silently
+        dropped.
         """
         _, _, domain = str(address).partition("@")
         if force:
@@ -151,22 +158,39 @@ class MailingListService:
                     f"pass --force to delete anyway"
                 )
 
-        with translate_db_errors(), self._engine.begin() as conn:
-            self._audit.write(
-                conn,
-                action=mk_action("mailing_list", "delete"),
-                domain=domain,
-                data=f"{address} force={force}",
-            )
+        # FS-first: if rmtree fails, nothing is written; the caller can retry.
+        self._adapter.delete(address=address)
 
         try:
-            self._adapter.delete(address=address)
-        except Exception as fs_err:
+            with translate_db_errors(), self._engine.begin() as conn:
+                self._audit.write(
+                    conn,
+                    action=mk_action("mailing_list", "delete"),
+                    domain=domain,
+                    data=f"{address} force={force}",
+                )
+        except Exception as audit_err:
             _logger.error(
-                "post-audit: adapter.delete(%s) failed: %s",
+                "audit row dropped after successful spool delete %s: %s",
                 address,
-                fs_err,
+                audit_err,
             )
+            # Side-channel: best-effort surface the gap without
+            # masking the original failure if this also breaks.
+            try:
+                with self._engine.begin() as conn:
+                    self._audit.write(
+                        conn,
+                        action=mk_action("mailing_list", "audit_dropped"),
+                        domain=domain,
+                        data=f"{address} original_error={audit_err!r}",
+                    )
+            except Exception as side_err:
+                _logger.error(
+                    "audit_dropped side-channel also failed for %s: %s",
+                    address,
+                    side_err,
+                )
             raise
 
     def list_all(self, *, domain: str | None = None) -> list[MailingList]:

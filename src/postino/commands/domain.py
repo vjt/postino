@@ -2,26 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Annotated, cast
+from typing import Annotated
 
 import typer
-from pydantic import BaseModel
 
+from postino.exit import exit_with_error, get_services, is_json
 from postino.output import Renderer
 from postino_core.enums import DomainTransport
 from postino_core.errors import MailctlError
 from postino_core.quota import parse_quota
-from postino_core.services.bundle import ServicesBundle
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
-
-
-def _services(ctx: typer.Context) -> ServicesBundle:
-    return ctx.obj["services"]  # type: ignore[no-any-return]
-
-
-def _renderer(ctx: typer.Context) -> Renderer:
-    return Renderer(json=bool(ctx.obj["json"]))
 
 
 @app.command("add")
@@ -36,10 +27,8 @@ def add(
     transport: Annotated[DomainTransport, typer.Option("--transport")] = DomainTransport.VIRTUAL,
     backupmx: Annotated[bool, typer.Option("--backupmx/--no-backupmx")] = False,
 ) -> None:
-    from postino.cli import exit_with_error as _exit
-
     try:
-        d = _services(ctx).domain.add(
+        d = get_services(ctx).domain.add(
             domain=domain,
             description=description,
             max_aliases=max_aliases,
@@ -49,9 +38,9 @@ def add(
             transport=transport,
             backupmx=backupmx,
         )
-        _renderer(ctx).render(d)
+        Renderer(json=is_json(ctx)).render(d)
     except MailctlError as e:
-        _exit(e)
+        exit_with_error(e)
 
 
 @app.command("del")
@@ -77,17 +66,15 @@ def delete(
         ),
     ] = False,
 ) -> None:
-    from postino.cli import exit_with_error as _exit
-
     if not yes:
         typer.confirm(f"Delete domain {domain}?", abort=True)
     try:
-        _services(ctx).domain.delete(domain, force=force, keep_maildir=keep_maildir)
+        get_services(ctx).domain.delete(domain, force=force, keep_maildir=keep_maildir)
     except MailctlError as e:
-        _exit(e)
+        exit_with_error(e)
 
 
 @app.command("list")
 def list_(ctx: typer.Context) -> None:
-    items = _services(ctx).domain.list()
-    _renderer(ctx).render(cast(list[BaseModel], items))
+    items = get_services(ctx).domain.list()
+    Renderer(json=is_json(ctx)).render(items)

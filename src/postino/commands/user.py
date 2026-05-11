@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Annotated, cast
+from typing import Annotated
 
 import typer
-from pydantic import BaseModel, SecretStr
+from pydantic import SecretStr
 
+from postino.exit import exit_with_error, get_services, is_json
 from postino.output import Renderer
 from postino_core.enums import MailboxStatus, PasswordScheme
-from postino_core.errors import ConfigError
+from postino_core.errors import ConfigError, MailctlError, NotFoundError
 from postino_core.models import MailboxCreate
 from postino_core.quota import parse_quota
-from postino_core.services.bundle import ServicesBundle
 
 
 def _prompt_new_password(label: str = "Password") -> SecretStr:
@@ -28,14 +28,6 @@ def _prompt_new_password(label: str = "Password") -> SecretStr:
 
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
-
-
-def _services(ctx: typer.Context) -> ServicesBundle:
-    return ctx.obj["services"]  # type: ignore[no-any-return]
-
-
-def _renderer(ctx: typer.Context) -> Renderer:
-    return Renderer(json=bool(ctx.obj["json"]))
 
 
 @app.command("add")
@@ -63,11 +55,8 @@ def add(
     the mailbox row is later reconciled — letting `user add` create one
     here would silently bypass the IdP.
     """
-    from postino.cli import exit_with_error as _exit
-    from postino_core.errors import MailctlError
-
     try:
-        s = _services(ctx)
+        s = get_services(ctx)
         if not s.identity.supports_local_provisioning():
             raise ConfigError(
                 "identity_backend=noauth: provision mailboxes via the external IdP, "
@@ -83,9 +72,9 @@ def add(
                 scheme=scheme,
             )
         )
-        _renderer(ctx).render(m)
+        Renderer(json=is_json(ctx)).render(m)
     except MailctlError as e:
-        _exit(e)
+        exit_with_error(e)
 
 
 @app.command("del")
@@ -96,15 +85,12 @@ def delete(
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation.")] = False,
 ) -> None:
     """Delete a mailbox."""
-    from postino.cli import exit_with_error as _exit
-    from postino_core.errors import MailctlError
-
     if not yes:
         typer.confirm(f"Delete mailbox {username}?", abort=True)
     try:
-        _services(ctx).mailbox.delete(username, keep_maildir=keep_maildir)
+        get_services(ctx).mailbox.delete(username, keep_maildir=keep_maildir)
     except MailctlError as e:
-        _exit(e)
+        exit_with_error(e)
 
 
 @app.command("list")
@@ -114,27 +100,24 @@ def list_(
     include_disabled: Annotated[bool, typer.Option("--all/--enabled-only")] = False,
 ) -> None:
     """List mailboxes."""
-    s = _services(ctx)
+    s = get_services(ctx)
     items = s.mailbox.list(
         domain=domain or None,
         include_disabled=include_disabled,
     )
-    _renderer(ctx).render(cast(list[BaseModel], items))
+    Renderer(json=is_json(ctx)).render(items)
 
 
 @app.command("show")
 def show(ctx: typer.Context, username: str) -> None:
     """Show one mailbox."""
-    from postino.cli import exit_with_error as _exit
-    from postino_core.errors import MailctlError, NotFoundError
-
     try:
-        m = _services(ctx).mailbox.get(username)
+        m = get_services(ctx).mailbox.get(username)
         if m is None:
             raise NotFoundError(f"mailbox {username} does not exist")
-        _renderer(ctx).render(m)
+        Renderer(json=is_json(ctx)).render(m)
     except MailctlError as e:
-        _exit(e)
+        exit_with_error(e)
 
 
 @app.command("passwd")
@@ -148,41 +131,32 @@ def passwd(
     Prompts for the new password twice. As with `user add`, the
     password is never accepted on the command line.
     """
-    from postino.cli import exit_with_error as _exit
-    from postino_core.errors import MailctlError
-
     try:
-        s = _services(ctx)
+        s = get_services(ctx)
         if not s.identity.supports_password_change():
             raise ConfigError("password change not supported by current identity backend")
         password = _prompt_new_password("New password")
         s.mailbox.set_password(username, password, scheme)
     except MailctlError as e:
-        _exit(e)
+        exit_with_error(e)
 
 
 @app.command("enable")
 def enable(ctx: typer.Context, username: str) -> None:
     """Set status=ACTIVE."""
-    from postino.cli import exit_with_error as _exit
-    from postino_core.errors import MailctlError
-
     try:
-        _services(ctx).mailbox.set_status(username, MailboxStatus.ACTIVE)
+        get_services(ctx).mailbox.set_status(username, MailboxStatus.ACTIVE)
     except MailctlError as e:
-        _exit(e)
+        exit_with_error(e)
 
 
 @app.command("disable")
 def disable(ctx: typer.Context, username: str) -> None:
     """Set status=DISABLED."""
-    from postino.cli import exit_with_error as _exit
-    from postino_core.errors import MailctlError
-
     try:
-        _services(ctx).mailbox.set_status(username, MailboxStatus.DISABLED)
+        get_services(ctx).mailbox.set_status(username, MailboxStatus.DISABLED)
     except MailctlError as e:
-        _exit(e)
+        exit_with_error(e)
 
 
 @app.command("quota")
@@ -192,16 +166,13 @@ def quota_cmd(
     set_value: Annotated[str, typer.Option("--set", help="New quota, e.g. 5G.")] = "",
 ) -> None:
     """Show or set quota cap."""
-    from postino.cli import exit_with_error as _exit
-    from postino_core.errors import MailctlError, NotFoundError
-
     try:
-        s = _services(ctx)
+        s = get_services(ctx)
         if set_value:
             s.mailbox.set_quota(username, parse_quota(set_value))
         m = s.mailbox.get(username)
         if m is None:
-            _exit(NotFoundError(f"mailbox {username} does not exist"))
+            raise NotFoundError(f"mailbox {username} does not exist")
+        Renderer(json=is_json(ctx)).render(m)
     except MailctlError as e:
-        _exit(e)
-    _renderer(ctx).render(m)  # type: ignore[arg-type]
+        exit_with_error(e)

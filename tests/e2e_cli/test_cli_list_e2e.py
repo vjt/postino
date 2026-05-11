@@ -1,8 +1,9 @@
 """End-to-end CLI tests for `postino list`.
 
 Spawns real subprocesses (`python -m postino list ...`) against a real
-DB + real mlmmj binaries + tmp spool. Skipped when mlmmj-make-ml is
-not installed."""
+DB + real mlmmj binaries + tmp spool. Skipped when mlmmj-sub is not
+installed (v0.5+ writes the spool directly; only the subscriber-mgmt
+binaries are still shelled out)."""
 
 from __future__ import annotations
 
@@ -19,8 +20,12 @@ from tests.e2e_cli.conftest import WriteEnv
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
-        shutil.which("mlmmj-make-ml") is None,
-        reason="mlmmj-make-ml not on PATH; install mlmmj 1.3.x to run this suite",
+        shutil.which("mlmmj-sub") is None,
+        reason=(
+            "mlmmj-sub not on PATH; install mlmmj to run this suite. "
+            "v0.5+ writes the spool layout directly; only mlmmj-sub/unsub/list "
+            "are required at runtime."
+        ),
     ),
 ]
 

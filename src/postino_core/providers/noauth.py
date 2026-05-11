@@ -33,7 +33,17 @@ class NoAuthProvider:
         password: SecretStr | None,
         scheme: PasswordScheme | None,
     ) -> None:
-        return None
+        del conn, username, name
+        # Reject non-None password/scheme: the caller is asking for a
+        # local password under a NoAuth backend, which would silently
+        # discard the secret (the sentinel stays in mailbox.password).
+        # Make it fail loudly so callers either gate via
+        # supports_local_provisioning() or hand SecretStr(None).
+        if password is not None or scheme is not None:
+            raise ConfigError(
+                "identity_backend=noauth: cannot accept password/scheme; "
+                "provision credentials in the external IdP"
+            )
 
     def set_password(
         self,

@@ -21,8 +21,12 @@ from postino_core.services.mailing_list import MailingListService
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
-        shutil.which("mlmmj-make-ml") is None,
-        reason="mlmmj-make-ml not on PATH; install mlmmj 1.3.x to run this suite",
+        shutil.which("mlmmj-sub") is None,
+        reason=(
+            "mlmmj-sub not on PATH; install mlmmj to run this suite. "
+            "v0.5+ writes the spool layout directly, so only mlmmj-sub/unsub/list "
+            "need to be installed (mlmmj-make-ml is no longer required)."
+        ),
     ),
 ]
 

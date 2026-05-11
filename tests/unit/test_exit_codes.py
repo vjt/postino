@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import pytest
 
-from postino.cli import (
+from postino.exit import (
     _EXIT_CODES,  # pyright: ignore[reportPrivateUsage]  # WHY: defence-in-depth regression guard for exit-code mapping; module-private by design.
     exit_with_error,
 )

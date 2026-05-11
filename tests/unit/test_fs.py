@@ -77,7 +77,8 @@ def test_create_maildir_rolls_back_freshly_created_parent_on_failure(
 ) -> None:
     fs = FilesystemAdapter(mail_root=tmp_path, vmail_uid=os.getuid(), vmail_gid=os.getgid())
 
-    def fail_chown(path: object, uid: int, gid: int) -> None:
+    def fail_chown(path: object, uid: int, gid: int, *, follow_symlinks: bool = True) -> None:
+        del follow_symlinks
         raise OSError("simulated chown EPERM")
 
     monkeypatch.setattr("postino_core.fs.os.chown", fail_chown)
@@ -93,7 +94,8 @@ def test_create_maildir_rollback_preserves_existing_parent(
     parent.mkdir(mode=0o755)
     fs = FilesystemAdapter(mail_root=tmp_path, vmail_uid=os.getuid(), vmail_gid=os.getgid())
 
-    def fail_chown(path: object, uid: int, gid: int) -> None:
+    def fail_chown(path: object, uid: int, gid: int, *, follow_symlinks: bool = True) -> None:
+        del follow_symlinks
         raise OSError("simulated chown EPERM")
 
     monkeypatch.setattr("postino_core.fs.os.chown", fail_chown)
@@ -101,3 +103,35 @@ def test_create_maildir_rollback_preserves_existing_parent(
         fs.create_maildir(Path("example.com/foo/"))
     assert parent.exists()
     assert not (parent / "foo").exists()
+
+
+def test_safe_join_refuses_absolute(tmp_path: Path) -> None:
+    fs = FilesystemAdapter(mail_root=tmp_path, vmail_uid=-1, vmail_gid=-1)
+    with pytest.raises(FilesystemError, match="absolute"):
+        fs.create_maildir(Path("/etc/passwd"))
+
+
+def test_safe_join_refuses_symlinked_parent(tmp_path: Path) -> None:
+    """A symlinked domain dir would redirect the maildir write outside the tree."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (tmp_path / "evil.example.org").symlink_to(outside)
+    fs = FilesystemAdapter(mail_root=tmp_path, vmail_uid=-1, vmail_gid=-1)
+    with pytest.raises(FilesystemError, match="symlink"):
+        fs.create_maildir(Path("evil.example.org/foo/"))
+    assert list(outside.iterdir()) == []
+
+
+def test_remove_maildir_refuses_to_descend_through_symlink(tmp_path: Path) -> None:
+    """rmtree must not follow a symlink that points outside the tree."""
+    fs = FilesystemAdapter(mail_root=tmp_path, vmail_uid=-1, vmail_gid=-1)
+    fs.create_maildir(Path("example.com/foo/"))
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "do-not-touch"
+    sentinel.write_text("alive")
+    # Plant a symlink inside the maildir pointing at the outside dir.
+    (tmp_path / "example.com" / "foo" / "link").symlink_to(outside)
+    fs.remove_maildir(Path("example.com/foo/"))
+    assert sentinel.read_text() == "alive", "rmtree followed symlink into outside dir"
+    assert outside.is_dir()

@@ -14,6 +14,19 @@ from postino_core.adapters.mlmmj import MlmmjAdapter
 from postino_core.errors import AlreadyExistsError, FilesystemError, MlmmjError, NotFoundError
 
 
+@pytest.fixture(autouse=True)
+def _stub_which(monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]  # WHY: autouse pytest fixture is invoked by the framework, not directly referenced.
+    """Make ``shutil.which`` deterministic so the post-v0.5 hardening
+    that raises ``MlmmjError`` on missing binaries doesn't trip the
+    unit suite on CI runners without mlmmj installed. Subprocess calls
+    are still mocked separately by each test."""
+
+    def _which(name: str) -> str:
+        return f"/usr/bin/{name}"
+
+    monkeypatch.setattr("postino_core.adapters.mlmmj.shutil.which", _which)
+
+
 def _adapter(tmp_path: Path) -> MlmmjAdapter:
     return MlmmjAdapter(
         spool_root=tmp_path,
@@ -86,6 +99,56 @@ def test_create_no_chown_when_uid_gid_negative(tmp_path: Path) -> None:
     with patch("postino_core.adapters.mlmmj.os.chown") as chown:
         a.create(address="team@lists.example.org", primary_owner="alice@example.org")
     chown.assert_not_called()
+
+
+def test_listdir_rejects_address_with_slash(tmp_path: Path) -> None:
+    """An EmailStr can technically carry a quoted ``/`` in its local part;
+    treat it as path-traversal."""
+    a = _adapter(tmp_path)
+    with pytest.raises(FilesystemError, match="invalid path"):
+        a.exists(address="bad/foo@lists.example.org")
+
+
+def test_listdir_refuses_symlinked_listdir(tmp_path: Path) -> None:
+    """A symlinked spool entry would let mlmmj writes redirect outside."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (tmp_path / "evil@lists.example.org").symlink_to(outside)
+    a = _adapter(tmp_path)
+    with pytest.raises(FilesystemError, match="symlink"):
+        a.exists(address="evil@lists.example.org")
+
+
+def test_bin_raises_mlmmjerror_when_binary_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``_bin`` must surface a typed MlmmjError when which() returns None
+    rather than letting subprocess.run inherit a bare basename and fail
+    opaquely under mlmmj 1.5.x's full-path requirement."""
+
+    def _which_none(name: str) -> None:
+        del name
+
+    monkeypatch.setattr("postino_core.adapters.mlmmj.shutil.which", _which_none)
+    a = _adapter(tmp_path)
+    (tmp_path / "team@lists.example.org").mkdir()
+    with pytest.raises(MlmmjError, match="not found on PATH"):
+        a.subscribe(address="team@lists.example.org", email="bob@example.org")
+
+
+def test_create_rolls_back_on_non_oserror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Earlier rollback caught only OSError. A non-OSError raised mid-
+    create (e.g. unforeseen exception from _chown_tree) must still leave
+    no partial spool dir behind."""
+
+    def raise_other(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("simulated unexpected exception")
+
+    monkeypatch.setattr("postino_core.adapters.mlmmj.MlmmjAdapter._chown_tree", raise_other)
+    a = MlmmjAdapter(spool_root=tmp_path, mlmmj_uid=1234, mlmmj_gid=5678, timeout=5.0)
+    with pytest.raises(RuntimeError, match="simulated unexpected exception"):
+        a.create(address="team@lists.example.org", primary_owner="alice@example.org")
+    assert not (tmp_path / "team@lists.example.org").exists()
 
 
 def test_append_owner_creates_owner_file_if_absent(tmp_path: Path) -> None:

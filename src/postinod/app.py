@@ -28,7 +28,7 @@ from postino_core.config import load_postino_settings
 from postino_core.errors import ConfigError
 from postino_core.fs import FilesystemAdapter
 from postino_core.hooks import HookRunner
-from postino_core.providers import NoAuthProvider
+from postino_core.providers import IdentityProvider, NoAuthProvider
 from postino_core.services.alias import AliasService
 from postino_core.services.bundle import build_services
 from postino_core.services.domain import DomainService
@@ -136,18 +136,27 @@ def _utc_now() -> datetime:
     return datetime.now(UTC)
 
 
-def _assert_noauth_identity(identity: object) -> None:
-    """Fail-fast guard: postinod refuses to wire any non-NoAuth provider.
+def _assert_noauth_identity(identity: IdentityProvider) -> None:
+    """Fail-fast guard: postinod refuses any backend that allows local
+    credential ownership.
 
     The daemon's contract is that an external IdP owns credentials and
-    Dovecot's passdb chain verifies them. Booting with LocalProvider
-    would silently expose mailbox.password to SCIM/Zitadel writes —
-    making the IdP-owned-credentials promise unenforceable.
+    Dovecot's passdb chain verifies them. Booting under a backend that
+    advertises ``supports_password_change()`` or
+    ``supports_local_provisioning()`` would silently expose
+    mailbox.password to SCIM/Zitadel writes — making the
+    IdP-owned-credentials promise unenforceable.
+
+    Uses the Protocol's capability predicates rather than
+    ``isinstance(identity, NoAuthProvider)`` so any future backend that
+    satisfies the same "external IdP owns credentials" contract is
+    accepted without naming the concrete class here.
     """
-    if not isinstance(identity, NoAuthProvider):
+    if identity.supports_password_change() or identity.supports_local_provisioning():
         raise ConfigError(
-            "postinod requires identity_backend=noauth in postino.toml "
-            f"(got {type(identity).__name__})"
+            "postinod requires an identity backend that owns no local "
+            "credentials (e.g. identity_backend=noauth in postino.toml); "
+            f"got {type(identity).__name__}"
         )
 
 

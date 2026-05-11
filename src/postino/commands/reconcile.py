@@ -9,7 +9,8 @@ from __future__ import annotations
 import typer
 
 
-def run() -> None:
+def run(ctx: typer.Context) -> None:
+    del ctx  # registered under @app.callback like every other verb; services unused.
     typer.echo(
         "error: reconcile lands in postino V2 (IdP-driven sync via postinod)",
         err=True,

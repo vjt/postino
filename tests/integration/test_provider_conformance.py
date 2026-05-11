@@ -185,16 +185,25 @@ def test_provider_mutation_visible_only_on_commit(
 
     Roll back the outer transaction and assert the mutation vanishes — the
     direct read on a fresh connection must see the original sentinel.
+
+    For NoAuth this is a positive assertion in disguise: even though
+    NoAuth.create_identity is a no-op (and rejects a non-None password),
+    we still run it inside a rolled-back tx with ``password=None`` and
+    confirm the sentinel is intact afterwards. That conformance check
+    locks the "NoAuth never mutates mailbox.password" contract into the
+    shared matrix instead of carrying it as a comment elsewhere.
     """
     backend, p, md = provider
-    if backend != "local":
-        pytest.skip("NoAuth never mutates mailbox.password")
 
     # Stage 1: seed and commit so the row exists outside the rollback scope.
     with db.begin() as conn:
         _seed_mailbox(conn, md, "rb@example.com")
 
     # Stage 2: mutate inside a transaction, then explicitly rollback.
+    # Under noauth pass password=None/scheme=None (NoAuth rejects non-None);
+    # the no-op call must still leave the sentinel intact after rollback.
+    password: SecretStr | None = SecretStr("rolledback") if backend == "local" else None
+    scheme: PasswordScheme | None = PasswordScheme.BCRYPT if backend == "local" else None
     raw = db.connect()
     try:
         tx = raw.begin()
@@ -202,8 +211,8 @@ def test_provider_mutation_visible_only_on_commit(
             raw,
             "rb@example.com",
             name="rb",
-            password=SecretStr("rolledback"),
-            scheme=PasswordScheme.BCRYPT,
+            password=password,
+            scheme=scheme,
         )
         tx.rollback()
     finally:
