@@ -86,7 +86,7 @@
 12 = "WHY: passlib lacks a typed __init__; PR-A5 wraps via PasswordHasher Protocol."
 
 [test_type_ignore_justified."src/postino_core/services/alias.py"]
-96 = "WHY: SQLAlchemy RowMapping access yields Any; documented project-wide."
+98 = "WHY: SQLAlchemy RowMapping access yields Any; documented project-wide."
 129 = "WHY: SQLAlchemy RowMapping access yields Any."
 133 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 134 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
@@ -108,13 +108,14 @@
 278 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/mailbox.py"]
-# Line numbers shifted +5 when run_postcreation gained the four-arg PA contract
-# (username, domain, maildir, quota); all entries are SQLAlchemy RowMapping Any.
-150 = "WHY: SQLAlchemy RowMapping access yields Any."
-219 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-222 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-223 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+# Lines shifted when MailboxService.__init__ gained `audit_writer` and the
+# write_audit free-function calls collapsed to self._audit.write; entries
+# are all SQLAlchemy RowMapping Any in get / _row_to_model / list.
+152 = "WHY: SQLAlchemy RowMapping access yields Any."
+221 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 224 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+225 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+226 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 299 = "WHY: SQLAlchemy RowMapping access yields Any."
 
 [test_type_ignore_justified."src/postino_core/services/quota.py"]

@@ -5,6 +5,7 @@ code. Anything else propagates to Rich's traceback handler and exits 99."""
 
 from __future__ import annotations
 
+import getpass
 import sys
 from datetime import UTC, datetime
 from typing import NoReturn
@@ -92,6 +93,18 @@ def _load_settings() -> PostinoSettings:
         raise ConfigError(f"invalid config: {details}") from e
 
 
+def _cli_actor() -> str:
+    """OS user running the CLI; recorded in PA's `log.username` column.
+
+    Falls back to ``"postino"`` if the env strip is so aggressive that
+    getpass cannot resolve the calling user (rare; daemonised invocations
+    with no controlling tty)."""
+    try:
+        return getpass.getuser()
+    except OSError:
+        return "postino"
+
+
 def _version_callback(value: bool) -> None:
     if value:
         from importlib.metadata import version
@@ -115,7 +128,12 @@ def _entry(  # pyright: ignore[reportUnusedFunction]
     install_traceback(show_locals=False)
     try:
         settings = _load_settings()
-        services = build_services(settings, clock=lambda: datetime.now(UTC), echo=False)
+        services = build_services(
+            settings,
+            clock=lambda: datetime.now(UTC),
+            echo=False,
+            actor=_cli_actor,
+        )
     except MailctlError as e:
         exit_with_error(e)
     ctx.obj = {"services": services, "json": json}

@@ -228,6 +228,49 @@ async def test_audit_row_written(
     assert len(rows) >= 1
 
 
+async def test_zitadel_create_writes_atomic_dual_rows(
+    client: AsyncTestClient[Litestar],
+    hmac_secret: bytes,
+    prepared_test_db: PreparedTestDB,
+) -> None:
+    """A successful Zitadel CREATE writes BOTH `postino.mailbox.create` AND
+    `postinod.user.create` rows, mutator + audit committed atomically."""
+    body = json.dumps(
+        {
+            "aggregateID": "a",
+            "userID": "u-atomic",
+            "event_type": "user.human.added",
+            "created_at": "2026-05-10T11:00:00Z",
+            "event_payload": {
+                "email": "atomic@example.org",
+                "firstName": "A",
+                "lastName": "T",
+                "active": True,
+            },
+        }
+    ).encode()
+    r = await client.post(
+        "/zitadel/events",
+        content=body,
+        headers={"ZITADEL-Signature": _sign(hmac_secret, body)},
+    )
+    assert r.status_code == 200, r.text
+
+    log = prepared_test_db.metadata.tables["log"]
+    with prepared_test_db.engine.connect() as conn:
+        postino_rows = conn.execute(
+            select(log).where(
+                log.c.action == "postino.mailbox.create",
+                log.c.data == "atomic@example.org",
+            )
+        ).fetchall()
+        postinod_rows = conn.execute(
+            select(log).where(log.c.action == "postinod.user.create")
+        ).fetchall()
+    assert len(postino_rows) == 1, "missing postino.mailbox.create mirror row"
+    assert any("atomic@example.org" in str(r.data) for r in postinod_rows)
+
+
 @pytest.fixture
 async def short_window_client(
     prepared_test_db: PreparedTestDB,

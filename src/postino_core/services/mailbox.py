@@ -26,7 +26,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.exc import IntegrityError
 
-from postino_core.audit import mk_action, write_audit
+from postino_core.audit import AuditWriter, DefaultAuditWriter, mk_action
 from postino_core.db import translate_db_errors
 from postino_core.enums import MailboxStatus, PasswordScheme
 from postino_core.errors import (
@@ -53,6 +53,7 @@ class MailboxService:
         hooks: HookRunner,
         clock: Callable[[], datetime],
         metadata: MetaData,
+        audit_writer: AuditWriter | None = None,
     ) -> None:
         self._engine = engine
         self._identity = identity
@@ -60,6 +61,9 @@ class MailboxService:
         self._hooks = hooks
         self._clock = clock
         self._md = metadata
+        self._audit: AuditWriter = audit_writer or DefaultAuditWriter(
+            metadata=metadata, clock=clock
+        )
 
     def add(self, create: MailboxCreate) -> Mailbox:
         """Create a new mailbox.
@@ -88,10 +92,8 @@ class MailboxService:
                     password=create.password,
                     scheme=create.scheme,
                 )
-                write_audit(
+                self._audit.write(
                     conn,
-                    self._md,
-                    clock=self._clock,
                     action=mk_action("mailbox", "create"),
                     domain=domain,
                     data=str(create.username),
@@ -243,10 +245,8 @@ class MailboxService:
             quota2 = self._md.tables["quota2"]
             conn.execute(quota2.delete().where(quota2.c.username == str(username)))
             conn.execute(mailbox.delete().where(mailbox.c.username == str(username)))
-            write_audit(
+            self._audit.write(
                 conn,
-                self._md,
-                clock=self._clock,
                 action=mk_action("mailbox", "delete"),
                 domain=existing.domain,
                 data=str(username),
@@ -308,10 +308,8 @@ class MailboxService:
         _, _, domain = str(username).partition("@")
         with translate_db_errors(), self._engine.begin() as conn:
             self._identity.set_password(conn, str(username), password, scheme)
-            write_audit(
+            self._audit.write(
                 conn,
-                self._md,
-                clock=self._clock,
                 action=mk_action("mailbox", "set_password"),
                 domain=domain,
                 data=str(username),
@@ -330,10 +328,8 @@ class MailboxService:
             )
             if result.rowcount == 0:
                 raise NotFoundError(f"mailbox {username} does not exist")
-            write_audit(
+            self._audit.write(
                 conn,
-                self._md,
-                clock=self._clock,
                 action=mk_action("mailbox", "set_name"),
                 domain=domain,
                 data=str(username),
@@ -352,10 +348,8 @@ class MailboxService:
             )
             if result.rowcount == 0:
                 raise NotFoundError(f"mailbox {username} does not exist")
-            write_audit(
+            self._audit.write(
                 conn,
-                self._md,
-                clock=self._clock,
                 action=mk_action("mailbox", "set_status"),
                 domain=domain,
                 data=f"{username}={status.name}",
@@ -378,10 +372,8 @@ class MailboxService:
             )
             if result.rowcount == 0:
                 raise NotFoundError(f"mailbox {username} does not exist")
-            write_audit(
+            self._audit.write(
                 conn,
-                self._md,
-                clock=self._clock,
                 action=mk_action("mailbox", "set_quota"),
                 domain=domain,
                 data=f"{username}={quota_bytes}",

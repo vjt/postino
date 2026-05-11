@@ -32,6 +32,7 @@ from postino_core.services.alias import AliasService
 from postino_core.services.bundle import build_services
 from postino_core.services.domain import DomainService
 from postino_core.services.mailbox import MailboxService
+from postinod.audit import PostinodAuditWriter
 from postinod.auth.hmac_guard import HmacVerifier
 from postinod.auth.jwks import JwksCache
 from postinod.auth.jwt_guard import JwksLike, JwtVerifier
@@ -71,7 +72,12 @@ def build_app(*, toml_path: Path) -> Litestar:
     hmac_secrets = read_zitadel_hmac_secrets()
     replay_window = read_zitadel_replay_window_sec()
 
-    bundle = build_services(postino_settings, clock=_utc_now, echo=False)
+    bundle = build_services(
+        postino_settings,
+        clock=_utc_now,
+        echo=False,
+        audit_writer_factory=lambda md: PostinodAuditWriter(metadata=md, clock=_utc_now),
+    )
 
     hmac_verifier = HmacVerifier(secrets=hmac_secrets)
     jwks = JwksCache(
@@ -93,11 +99,6 @@ def build_app(*, toml_path: Path) -> Litestar:
             return False
         return True
 
-    # NOTE (deferred): the postinod surface-attribution audit row currently
-    # rides outside the MailboxService mutation transaction. Resume-doc
-    # carry-over: plumb a shared Connection through MailboxService so the
-    # postinod audit row joins the mutation tx. Tracked separately; not
-    # fixed in PR-B14 to keep scope focused on production wiring.
     return Litestar(
         route_handlers=[
             build_health_router(ready_callback=_ready),
@@ -113,17 +114,11 @@ def build_app(*, toml_path: Path) -> Litestar:
             build_users_router(
                 mailbox_service=bundle.mailbox,
                 jwt_verifier=jwt_verifier,
-                engine=bundle.engine,
-                metadata=bundle.metadata,
-                clock=_utc_now,
                 default_quota_bytes=postino_settings.default_quota_bytes,
             ),
             build_aliases_router(
                 alias_service=bundle.alias,
                 jwt_verifier=jwt_verifier,
-                engine=bundle.engine,
-                metadata=bundle.metadata,
-                clock=_utc_now,
             ),
             build_domains_router(
                 domain_service=bundle.domain,
@@ -167,6 +162,7 @@ def build_app_for_test(
     """
     fs = FilesystemAdapter(mail_root=mail_root, vmail_uid=-1, vmail_gid=-1)
     hooks = HookRunner(script_path=postcreation_hook)
+    audit_writer = PostinodAuditWriter(metadata=metadata, clock=_utc_now)
     mailbox = MailboxService(
         engine=db_engine,
         identity=NoAuthProvider(),
@@ -174,14 +170,18 @@ def build_app_for_test(
         hooks=hooks,
         clock=_utc_now,
         metadata=metadata,
+        audit_writer=audit_writer,
     )
-    alias_service = AliasService(engine=db_engine, metadata=metadata, clock=_utc_now)
+    alias_service = AliasService(
+        engine=db_engine, metadata=metadata, clock=_utc_now, audit_writer=audit_writer
+    )
     domain_service = DomainService(
         engine=db_engine,
         metadata=metadata,
         clock=_utc_now,
         fs=fs,
         lmtp_destination="localhost:24",
+        audit_writer=audit_writer,
     )
     verifier = HmacVerifier(secrets=(hmac_secret,))
 
@@ -211,17 +211,11 @@ def build_app_for_test(
             build_users_router(
                 mailbox_service=mailbox,
                 jwt_verifier=jwt_verifier,
-                engine=db_engine,
-                metadata=metadata,
-                clock=_utc_now,
                 default_quota_bytes=default_quota_bytes,
             ),
             build_aliases_router(
                 alias_service=alias_service,
                 jwt_verifier=jwt_verifier,
-                engine=db_engine,
-                metadata=metadata,
-                clock=_utc_now,
             ),
             build_domains_router(
                 domain_service=domain_service,

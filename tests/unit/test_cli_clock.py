@@ -20,6 +20,7 @@ def test_cli_default_clock_is_utc(monkeypatch: pytest.MonkeyPatch) -> None:
         *,
         clock: Callable[[], datetime],
         echo: bool,
+        **_kwargs: object,
     ) -> Any:
         del settings, echo
         captured["clock"] = clock

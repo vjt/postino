@@ -11,7 +11,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.exc import IntegrityError
 
-from postino_core.audit import mk_action, write_audit
+from postino_core.audit import AuditWriter, DefaultAuditWriter, mk_action
 from postino_core.db import translate_db_errors
 from postino_core.enums import MailboxStatus
 from postino_core.errors import AlreadyExistsError, CapacityError, DBError, NotFoundError
@@ -25,10 +25,14 @@ class AliasService:
         engine: Engine,
         metadata: MetaData,
         clock: Callable[[], datetime],
+        audit_writer: AuditWriter | None = None,
     ) -> None:
         self._engine = engine
         self._md = metadata
         self._clock = clock
+        self._audit: AuditWriter = audit_writer or DefaultAuditWriter(
+            metadata=metadata, clock=clock
+        )
 
     def add(self, *, address: EmailStr, goto: str) -> Alias:
         """Create a new alias.
@@ -57,10 +61,8 @@ class AliasService:
                 )
             except IntegrityError as e:
                 raise AlreadyExistsError(f"alias {address} already exists") from e
-            write_audit(
+            self._audit.write(
                 conn,
-                self._md,
-                clock=self._clock,
                 action=mk_action("alias", "create"),
                 domain=domain,
                 data=f"{address}->{goto}",
@@ -106,10 +108,8 @@ class AliasService:
             result = conn.execute(alias.delete().where(alias.c.address == str(address)))
             if result.rowcount == 0:
                 raise NotFoundError(f"alias {address} does not exist")
-            write_audit(
+            self._audit.write(
                 conn,
-                self._md,
-                clock=self._clock,
                 action=mk_action("alias", "delete"),
                 domain=domain,
                 data=str(address),

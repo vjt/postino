@@ -26,9 +26,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
-from datetime import datetime
-from typing import Protocol
 
 import jwt
 from litestar import Request, Router, delete, get, patch, post
@@ -37,8 +34,6 @@ from litestar.exceptions import HTTPException
 from litestar.response import Response
 from litestar.status_codes import HTTP_200_OK, HTTP_201_CREATED
 from pydantic import EmailStr, TypeAdapter, ValidationError
-from sqlalchemy import MetaData
-from sqlalchemy.engine import Engine
 
 from postino_core.enums import MailboxStatus
 from postino_core.errors import (
@@ -49,7 +44,7 @@ from postino_core.errors import (
 )
 from postino_core.models import Mailbox, MailboxCreate
 from postino_core.services.mailbox import MailboxService
-from postinod.audit import write_postinod_audit
+from postinod.audit import PostinodAuditExtra, audit_context
 from postinod.auth.jwt_guard import JwtVerifier
 from postinod.scim.errors import scim_error_from_exception
 from postinod.scim.models import (
@@ -71,25 +66,6 @@ _logger = logging.getLogger(__name__)
 _email_adapter: TypeAdapter[EmailStr] = TypeAdapter(EmailStr)
 
 SCIM_CONTENT_TYPE = "application/scim+json"
-
-
-class _AuditCallback(Protocol):
-    """Callable that records a postinod audit row.
-
-    Closes over `engine`, `metadata`, `clock`, and surface tag inside
-    `build_users_router`; per-handler call sites supply only the
-    resource/verb/domain/external_id/payload tuple.
-    """
-
-    def __call__(
-        self,
-        *,
-        resource: str,
-        verb: str,
-        domain: str,
-        external_id: str,
-        payload: dict[str, str],
-    ) -> None: ...
 
 
 def _as_email(s: str) -> EmailStr:
@@ -141,52 +117,42 @@ def build_users_router(
     *,
     mailbox_service: MailboxService,
     jwt_verifier: JwtVerifier,
-    engine: Engine,
-    metadata: MetaData,
-    clock: Callable[[], datetime],
     default_quota_bytes: int,
 ) -> Router:
     """Build the /scim/v2/Users sub-router.
 
-    `engine` and `metadata` are injected separately (rather than reaching
-    into `mailbox_service._engine` / `._md`) so the audit write opens its
-    own transaction without depending on private MailboxService state.
-    JWT verification is inline (not via Litestar Guards) to avoid the
-    body-receive-channel hazard.
+    Audit rows ride inside `mailbox_service`'s mutation transaction via
+    `PostinodAuditWriter` + the per-request `audit_context` contextvar —
+    handlers set the SCIM-flavoured (resource, verb) override and surface
+    metadata before each mutator call. JWT verification is inline (not via
+    Litestar Guards) to avoid the body-receive-channel hazard.
     """
 
-    async def _verify_bearer(request: Request[None, None, State]) -> None:
+    async def _verify_bearer(request: Request[None, None, State]) -> str:
         auth = request.headers.get("Authorization")
         if not auth or not auth.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="missing bearer token")
         token = auth.removeprefix("Bearer ").strip()
         try:
-            await jwt_verifier.verify(token)
+            claims = await jwt_verifier.verify(token)
         except (jwt.InvalidTokenError, jwt.InvalidKeyError, KeyError):
             raise HTTPException(status_code=401, detail="invalid bearer token") from None
+        sub = claims.get("sub")
+        return str(sub) if isinstance(sub, str) and sub else "scim-client"
 
-    def _audit_impl(
+    def _extra(
         *,
-        resource: str,
-        verb: str,
-        domain: str,
-        external_id: str,
-        payload: dict[str, str],
-    ) -> None:
-        with engine.begin() as conn:
-            write_postinod_audit(
-                conn,
-                metadata,
-                clock=clock,
-                resource=resource,
-                verb=verb,
-                domain=domain,
-                surface="scim",
-                external_id=external_id,
-                payload=payload,
-            )
-
-    _audit: _AuditCallback = _audit_impl
+        username_str: str,
+        actor_sub: str,
+        postinod_action: tuple[str, str],
+    ) -> PostinodAuditExtra:
+        return PostinodAuditExtra(
+            surface="scim",
+            external_id=username_str,
+            payload={"email": username_str},
+            actor_resolver=lambda: actor_sub,
+            postinod_action=postinod_action,
+        )
 
     @get("/scim/v2/Users", status_code=HTTP_200_OK)
     async def list_users(
@@ -195,7 +161,7 @@ def build_users_router(
         count: int | None = None,
         filter: str | None = None,
     ) -> Response[dict[str, object]]:
-        await _verify_bearer(request)
+        _ = await _verify_bearer(request)
 
         try:
             q = parse_list_query(start_index=startIndex, count=count, filter_expr=filter)
@@ -223,7 +189,7 @@ def build_users_router(
     async def create_user(
         request: Request[None, None, State],
     ) -> Response[dict[str, object]]:
-        await _verify_bearer(request)
+        actor_sub = await _verify_bearer(request)
 
         try:
             raw = json.loads(await request.body())
@@ -236,27 +202,24 @@ def build_users_router(
             err = ScimError(status="400", scimType="invalidValue", detail=str(e))
             return _scim_response(err, 400)
 
+        extra = _extra(
+            username_str=str(user.user_name),
+            actor_sub=actor_sub,
+            postinod_action=("user", "create"),
+        )
         try:
-            created = mailbox_service.add(
-                MailboxCreate(
-                    username=user.user_name,
-                    name=user.name.formatted,
-                    quota_bytes=default_quota_bytes,
+            with audit_context(extra):
+                created = mailbox_service.add(
+                    MailboxCreate(
+                        username=user.user_name,
+                        name=user.name.formatted,
+                        quota_bytes=default_quota_bytes,
+                    )
                 )
-            )
         except (NotFoundError, AlreadyExistsError, CapacityError, ConfigError) as e:
             return _err(e, create_path=isinstance(e, NotFoundError))
 
         username_str = str(created.username)
-        _, _, domain = username_str.partition("@")
-        _audit(
-            resource="user",
-            verb="create",
-            domain=domain,
-            external_id=username_str,
-            payload={"email": username_str},
-        )
-
         location = f"/scim/v2/Users/{username_str}"
         return _scim_response(_user_from_mailbox(created), HTTP_201_CREATED, location=location)
 
@@ -265,7 +228,7 @@ def build_users_router(
         request: Request[None, None, State],
         user_id: str,
     ) -> Response[dict[str, object]]:
-        await _verify_bearer(request)
+        _ = await _verify_bearer(request)
 
         try:
             email = _as_email(user_id)
@@ -285,7 +248,7 @@ def build_users_router(
         request: Request[None, None, State],
         user_id: str,
     ) -> Response[dict[str, object]]:
-        await _verify_bearer(request)
+        actor_sub = await _verify_bearer(request)
 
         try:
             raw = json.loads(await request.body())
@@ -305,7 +268,6 @@ def build_users_router(
             return _scim_response(err, 400)
 
         username_str = user_id
-        _, _, domain = username_str.partition("@")
 
         # RFC 7644 §3.5.2 — atomic PATCH: validate all ops before applying any.
         # First pass: reject immediately if any op is unsupported.
@@ -338,31 +300,29 @@ def build_users_router(
         for op in patch_req.operations:
             if op.op == "replace" and op.path == "active":
                 new_status = MailboxStatus.ACTIVE if op.value else MailboxStatus.DISABLED
+                verb = "enable" if new_status == MailboxStatus.ACTIVE else "disable"
+                extra = _extra(
+                    username_str=username_str,
+                    actor_sub=actor_sub,
+                    postinod_action=("user", verb),
+                )
                 try:
-                    mailbox_service.set_status(email, new_status)
+                    with audit_context(extra):
+                        mailbox_service.set_status(email, new_status)
                 except NotFoundError as e:
                     return _err(e)
-                verb = "enable" if new_status == MailboxStatus.ACTIVE else "disable"
-                _audit(
-                    resource="user",
-                    verb=verb,
-                    domain=domain,
-                    external_id=username_str,
-                    payload={"email": username_str},
-                )
 
             elif op.op == "replace" and op.path == "name.formatted":
+                extra = _extra(
+                    username_str=username_str,
+                    actor_sub=actor_sub,
+                    postinod_action=("user", "update"),
+                )
                 try:
-                    mailbox_service.set_name(email, str(op.value))
+                    with audit_context(extra):
+                        mailbox_service.set_name(email, str(op.value))
                 except NotFoundError as e:
                     return _err(e)
-                _audit(
-                    resource="user",
-                    verb="update",
-                    domain=domain,
-                    external_id=username_str,
-                    payload={"email": username_str},
-                )
 
         # Re-fetch to return current state.
         m = mailbox_service.get(email)
@@ -382,28 +342,23 @@ def build_users_router(
         # test suite only asserts 204 on success. SCIM Error envelope on DELETE
         # 404 would require the workaround status_code=200 + explicit Response,
         # which introduces two type: ignore lines worse than this trade-off.
-        await _verify_bearer(request)
+        actor_sub = await _verify_bearer(request)
 
         try:
             email = _as_email(user_id)
         except ValidationError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
-        username_str = user_id
-        _, _, domain = username_str.partition("@")
-
+        extra = _extra(
+            username_str=user_id,
+            actor_sub=actor_sub,
+            postinod_action=("user", "disable"),
+        )
         try:
-            mailbox_service.set_status(email, MailboxStatus.DISABLED)
+            with audit_context(extra):
+                mailbox_service.set_status(email, MailboxStatus.DISABLED)
         except NotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
-
-        _audit(
-            resource="user",
-            verb="disable",
-            domain=domain,
-            external_id=username_str,
-            payload={"email": username_str},
-        )
 
     return Router(
         path="/",

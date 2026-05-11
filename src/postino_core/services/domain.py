@@ -18,7 +18,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.exc import IntegrityError
 
-from postino_core.audit import mk_action, write_audit
+from postino_core.audit import AuditWriter, DefaultAuditWriter, mk_action
 from postino_core.db import translate_db_errors
 from postino_core.enums import DomainTransport, MailboxStatus
 from postino_core.errors import (
@@ -49,12 +49,16 @@ class DomainService:
         clock: Callable[[], datetime],
         fs: FilesystemAdapter,
         lmtp_destination: str,
+        audit_writer: AuditWriter | None = None,
     ) -> None:
         self._engine = engine
         self._md = metadata
         self._clock = clock
         self._fs = fs
         self._lmtp_destination = lmtp_destination
+        self._audit: AuditWriter = audit_writer or DefaultAuditWriter(
+            metadata=metadata, clock=clock
+        )
 
     def _transport_to_db(self, transport: DomainTransport) -> str:
         """Render an enum value into postfix's transport_maps cell.
@@ -113,10 +117,8 @@ class DomainService:
                 )
             except IntegrityError as e:
                 raise AlreadyExistsError(f"domain {domain!r} already exists") from e
-            write_audit(
+            self._audit.write(
                 conn,
-                self._md,
-                clock=self._clock,
                 action=mk_action("domain", "create"),
                 domain=domain,
                 data=domain,
@@ -198,10 +200,8 @@ class DomainService:
                 conn.execute(domain_admins.delete().where(domain_admins.c.domain == domain))
 
             conn.execute(d.delete().where(d.c.domain == domain))
-            write_audit(
+            self._audit.write(
                 conn,
-                self._md,
-                clock=self._clock,
                 action=mk_action("domain", "delete"),
                 domain=domain,
                 data=f"{domain} force={force}",

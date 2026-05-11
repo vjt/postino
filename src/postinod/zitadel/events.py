@@ -2,9 +2,9 @@
 
 Reads the raw body once, verifies HMAC inline (Litestar Guards drop the
 receive channel — see auth/hmac_guard.py module docstring), parses with
-`ZitadelEvent`, dispatches via the mapping table, calls the matching
-`MailboxService` method, writes a `postinod.<resource>.<verb>` audit row
-to PA's `log` table, and returns 200 OK on success or known no-op.
+`ZitadelEvent`, dispatches via the mapping table, and calls the matching
+`MailboxService` method inside an `audit_context` that produces both a
+`postino.<r>.<v>` and a `postinod.<r>.<v>` row in the same transaction.
 
 Error mapping (spec §4.5):
 * HMAC mismatch / missing signature → 401
@@ -16,13 +16,12 @@ Error mapping (spec §4.5):
 * `user.human.email.changed` (REJECT outcome) → 400 (operator must
   use a different flow; out of scope for postinod V2)
 
-Email-as-resolver (vjt 2026-05-11): the Zitadel Action target templates
-`email` into every payload — including lifecycle events
-(deactivated/reactivated/removed) and `profile.changed` which Zitadel
-does not natively include. Without the template, postinod cannot
-resolve the aggregate_id back to a mailbox username and would have to
-maintain a local cache. The template eliminates that state. See
-docs/postinod-deploy.md (Task 19) for the operator-side Action body.
+Email-as-resolver: the Zitadel Action target templates `email` into every
+payload — including lifecycle events (deactivated/reactivated/removed) and
+`profile.changed` which Zitadel does not natively include. Without the
+template, postinod cannot resolve the aggregate_id back to a mailbox
+username and would have to maintain a local cache. See
+docs/postinod-deploy.md for the operator-side Action body.
 """
 
 from __future__ import annotations
@@ -31,7 +30,6 @@ import json
 import logging
 from collections.abc import Callable
 from datetime import datetime
-from typing import Protocol
 
 from litestar import Request, Router, post
 from litestar.datastructures import State
@@ -50,7 +48,7 @@ from postino_core.errors import (
 )
 from postino_core.models import MailboxCreate
 from postino_core.services.mailbox import MailboxService
-from postinod.audit import write_postinod_audit
+from postinod.audit import PostinodAuditExtra, audit_context, write_postinod_audit
 from postinod.auth.hmac_guard import HmacVerifier
 from postinod.zitadel.mapping import EventOutcome, dispatch_event
 from postinod.zitadel.models import (
@@ -75,9 +73,12 @@ def build_zitadel_router(
 ) -> Router:
     """Build the /zitadel/events sub-router.
 
-    `engine` and `metadata` are injected separately (rather than reaching
-    into `mailbox_service._engine` / `._md`) so the audit write opens its
-    own transaction without depending on private MailboxService state.
+    Mutation-tied audit rows ride inside `mailbox_service`'s transaction
+    via `PostinodAuditWriter` + the per-request `audit_context`
+    contextvar. The side-channel `postinod.zitadel.replay` row (no
+    corresponding mutation) still uses `write_postinod_audit` against the
+    engine directly — that's why `engine` / `metadata` remain router
+    parameters.
 
     `replay_window_seconds` rejects events whose `created_at` is outside
     [now - window, now + window]. A small clock skew either direction is
@@ -85,26 +86,34 @@ def build_zitadel_router(
     a `postinod.zitadel.replay` audit row tagged with the event identifiers.
     """
 
-    def _audit(
-        *,
-        resource: str,
-        verb: str,
-        domain: str,
-        external_id: str,
-        payload: dict[str, str],
-    ) -> None:
+    def _replay_audit(*, external_id: str, event_type: str, skew: int) -> None:
         with engine.begin() as conn:
             write_postinod_audit(
                 conn,
                 metadata,
                 clock=clock,
-                resource=resource,
-                verb=verb,
-                domain=domain,
+                resource="zitadel",
+                verb="replay",
+                domain="",
                 surface="zitadel",
                 external_id=external_id,
-                payload=payload,
+                payload={"event_type": event_type, "skew_sec": str(skew)},
             )
+
+    def _extra(
+        *,
+        event: ZitadelEvent,
+        username: str,
+        postinod_action: tuple[str, str],
+    ) -> PostinodAuditExtra:
+        editor = _resolve_editor(event)
+        return PostinodAuditExtra(
+            surface="zitadel",
+            external_id=event.user_id,
+            payload={"email": username, "event_type": event.event_type},
+            actor_resolver=lambda: editor,
+            postinod_action=postinod_action,
+        )
 
     @post("/zitadel/events", status_code=HTTP_200_OK)
     async def events(request: Request[None, None, State]) -> dict[str, bool]:
@@ -137,15 +146,10 @@ def build_zitadel_router(
                 int(skew),
             )
             try:
-                _audit(
-                    resource="zitadel",
-                    verb="replay",
-                    domain="",
+                _replay_audit(
                     external_id=event.user_id,
-                    payload={
-                        "event_type": event.event_type,
-                        "skew_sec": str(int(skew)),
-                    },
+                    event_type=event.event_type,
+                    skew=int(skew),
                 )
             except Exception:
                 # WHY: audit failure must not mask the replay rejection —
@@ -173,20 +177,20 @@ def build_zitadel_router(
                 _handle_create(
                     event=event,
                     mailbox_service=mailbox_service,
-                    audit=_audit,
+                    extra_for=_extra,
                     default_quota_bytes=default_quota_bytes,
                 )
             elif outcome is EventOutcome.UPDATE:
                 _handle_update(
                     event=event,
                     mailbox_service=mailbox_service,
-                    audit=_audit,
+                    extra_for=_extra,
                 )
             elif outcome is EventOutcome.DISABLE:
                 _handle_set_status(
                     event=event,
                     mailbox_service=mailbox_service,
-                    audit=_audit,
+                    extra_for=_extra,
                     status=MailboxStatus.DISABLED,
                     verb="disable",
                 )
@@ -194,7 +198,7 @@ def build_zitadel_router(
                 _handle_set_status(
                     event=event,
                     mailbox_service=mailbox_service,
-                    audit=_audit,
+                    extra_for=_extra,
                     status=MailboxStatus.ACTIVE,
                     verb="enable",
                 )
@@ -208,30 +212,25 @@ def build_zitadel_router(
     return Router(path="/", route_handlers=[events])
 
 
-class _AuditCallback(Protocol):
-    """Callable that records a postinod audit row.
+_ExtraBuilder = Callable[..., PostinodAuditExtra]
 
-    Closes over `engine`, `metadata`, `clock`, and surface tag inside
-    `build_zitadel_router`; the per-event handlers below only supply
-    the resource/verb/domain/external_id/payload tuple.
+
+def _resolve_editor(event: ZitadelEvent) -> str:
+    """Identity recorded in `log.username` for postinod-attributed rows.
+
+    Zitadel includes an `editor.userId` field on most events; postino
+    does not currently parse it (ZitadelEvent has no editor field), so
+    we fall back to `event.user_id` until the model captures it. Tracked
+    as a small follow-up; the event_id is still a useful audit trail.
     """
-
-    def __call__(
-        self,
-        *,
-        resource: str,
-        verb: str,
-        domain: str,
-        external_id: str,
-        payload: dict[str, str],
-    ) -> None: ...
+    return f"zitadel:{event.user_id}"
 
 
 def _handle_create(
     *,
     event: ZitadelEvent,
     mailbox_service: MailboxService,
-    audit: _AuditCallback,
+    extra_for: _ExtraBuilder,
     default_quota_bytes: int,
 ) -> None:
     payload = event.event_payload
@@ -241,28 +240,22 @@ def _handle_create(
             detail="payload shape mismatch for user.human.added",
         )
     username = str(payload.email)
-    _, _, domain = username.partition("@")
-    mailbox_service.add(
-        MailboxCreate(
-            username=payload.email,
-            name=f"{payload.first_name} {payload.last_name}".strip(),
-            quota_bytes=default_quota_bytes,
+    extra = extra_for(event=event, username=username, postinod_action=("user", "create"))
+    with audit_context(extra):
+        mailbox_service.add(
+            MailboxCreate(
+                username=payload.email,
+                name=f"{payload.first_name} {payload.last_name}".strip(),
+                quota_bytes=default_quota_bytes,
+            )
         )
-    )
-    audit(
-        resource="user",
-        verb="create",
-        domain=domain,
-        external_id=event.user_id,
-        payload={"email": username},
-    )
 
 
 def _handle_update(
     *,
     event: ZitadelEvent,
     mailbox_service: MailboxService,
-    audit: _AuditCallback,
+    extra_for: _ExtraBuilder,
 ) -> None:
     payload = event.event_payload
     if not isinstance(payload, HumanProfilePayload):
@@ -271,22 +264,16 @@ def _handle_update(
             detail="payload shape mismatch for user.human.profile.changed",
         )
     username = str(payload.email)
-    _, _, domain = username.partition("@")
-    mailbox_service.set_name(payload.email, f"{payload.first_name} {payload.last_name}".strip())
-    audit(
-        resource="user",
-        verb="update",
-        domain=domain,
-        external_id=event.user_id,
-        payload={"email": username},
-    )
+    extra = extra_for(event=event, username=username, postinod_action=("user", "update"))
+    with audit_context(extra):
+        mailbox_service.set_name(payload.email, f"{payload.first_name} {payload.last_name}".strip())
 
 
 def _handle_set_status(
     *,
     event: ZitadelEvent,
     mailbox_service: MailboxService,
-    audit: _AuditCallback,
+    extra_for: _ExtraBuilder,
     status: MailboxStatus,
     verb: str,
 ) -> None:
@@ -297,12 +284,6 @@ def _handle_set_status(
             detail=f"payload shape mismatch for lifecycle event ({verb})",
         )
     username = str(payload.email)
-    _, _, domain = username.partition("@")
-    mailbox_service.set_status(payload.email, status)
-    audit(
-        resource="user",
-        verb=verb,
-        domain=domain,
-        external_id=event.user_id,
-        payload={"email": username},
-    )
+    extra = extra_for(event=event, username=username, postinod_action=("user", verb))
+    with audit_context(extra):
+        mailbox_service.set_status(payload.email, status)

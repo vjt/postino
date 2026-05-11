@@ -29,9 +29,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Callable
-from datetime import datetime
-from typing import Protocol
 
 import jwt
 from litestar import Request, Router, delete, get, post
@@ -40,8 +37,6 @@ from litestar.exceptions import HTTPException
 from litestar.response import Response
 from litestar.status_codes import HTTP_200_OK, HTTP_201_CREATED
 from pydantic import EmailStr, TypeAdapter, ValidationError
-from sqlalchemy import MetaData
-from sqlalchemy.engine import Engine
 
 from postino_core.errors import (
     AlreadyExistsError,
@@ -54,7 +49,7 @@ from postino_core.errors import (
 )
 from postino_core.models import Alias
 from postino_core.services.alias import AliasService
-from postinod.audit import write_postinod_audit
+from postinod.audit import PostinodAuditExtra, audit_context
 from postinod.auth.jwt_guard import JwtVerifier
 from postinod.scim.errors import scim_error_from_exception
 from postinod.scim.models import ALIAS_SCHEMA, ScimAlias, ScimError, ScimListResponse
@@ -69,25 +64,6 @@ _logger = logging.getLogger(__name__)
 _email_adapter: TypeAdapter[EmailStr] = TypeAdapter(EmailStr)
 
 SCIM_CONTENT_TYPE = "application/scim+json"
-
-
-class _AuditCallback(Protocol):
-    """Callable that records a postinod audit row.
-
-    Closes over `engine`, `metadata`, `clock`, and surface tag inside
-    `build_aliases_router`; per-handler call sites supply only the
-    resource/verb/domain/external_id/payload tuple.
-    """
-
-    def __call__(
-        self,
-        *,
-        resource: str,
-        verb: str,
-        domain: str,
-        external_id: str,
-        payload: dict[str, str],
-    ) -> None: ...
 
 
 def _as_email(s: str) -> EmailStr:
@@ -137,51 +113,41 @@ def build_aliases_router(
     *,
     alias_service: AliasService,
     jwt_verifier: JwtVerifier,
-    engine: Engine,
-    metadata: MetaData,
-    clock: Callable[[], datetime],
 ) -> Router:
     """Build the /scim/v2/Aliases sub-router.
 
-    `engine` and `metadata` are injected separately (rather than reaching
-    into `alias_service._engine` / `._md`) so the audit write opens its
-    own transaction without depending on private AliasService state.
+    Audit rows ride inside `alias_service`'s mutation transaction via
+    `PostinodAuditWriter` + the per-request `audit_context` contextvar.
     JWT verification is inline (not via Litestar Guards) to avoid the
     body-receive-channel hazard.
     """
 
-    async def _verify_bearer(request: Request[None, None, State]) -> None:
+    async def _verify_bearer(request: Request[None, None, State]) -> str:
         auth = request.headers.get("Authorization")
         if not auth or not auth.startswith("Bearer "):
             raise HTTPException(status_code=401, detail="missing bearer token")
         token = auth.removeprefix("Bearer ").strip()
         try:
-            await jwt_verifier.verify(token)
+            claims = await jwt_verifier.verify(token)
         except (jwt.InvalidTokenError, jwt.InvalidKeyError, KeyError):
             raise HTTPException(status_code=401, detail="invalid bearer token") from None
+        sub = claims.get("sub")
+        return str(sub) if isinstance(sub, str) and sub else "scim-client"
 
-    def _audit_impl(
+    def _extra(
         *,
-        resource: str,
-        verb: str,
-        domain: str,
-        external_id: str,
-        payload: dict[str, str],
-    ) -> None:
-        with engine.begin() as conn:
-            write_postinod_audit(
-                conn,
-                metadata,
-                clock=clock,
-                resource=resource,
-                verb=verb,
-                domain=domain,
-                surface="scim",
-                external_id=external_id,
-                payload=payload,
-            )
-
-    _audit: _AuditCallback = _audit_impl
+        address_str: str,
+        actor_sub: str,
+        postinod_action: tuple[str, str],
+        payload: dict[str, str] | None = None,
+    ) -> PostinodAuditExtra:
+        return PostinodAuditExtra(
+            surface="scim",
+            external_id=address_str,
+            payload=payload or {},
+            actor_resolver=lambda: actor_sub,
+            postinod_action=postinod_action,
+        )
 
     @get("/scim/v2/Aliases", status_code=HTTP_200_OK)
     async def list_aliases(
@@ -190,7 +156,7 @@ def build_aliases_router(
         count: int | None = None,
         filter: str | None = None,
     ) -> Response[dict[str, object]]:
-        await _verify_bearer(request)
+        _ = await _verify_bearer(request)
 
         try:
             q = parse_list_query(start_index=startIndex, count=count, filter_expr=filter)
@@ -218,7 +184,7 @@ def build_aliases_router(
     async def create_alias(
         request: Request[None, None, State],
     ) -> Response[dict[str, object]]:
-        await _verify_bearer(request)
+        actor_sub = await _verify_bearer(request)
 
         try:
             raw = json.loads(await request.body())
@@ -231,8 +197,15 @@ def build_aliases_router(
             err = ScimError(status="400", scimType="invalidValue", detail=str(e))
             return _scim_response(err, 400)
 
+        extra = _extra(
+            address_str=str(res.address),
+            actor_sub=actor_sub,
+            postinod_action=("alias", "create"),
+            payload={"goto": res.goto},
+        )
         try:
-            created = alias_service.add(address=res.address, goto=res.goto)
+            with audit_context(extra):
+                created = alias_service.add(address=res.address, goto=res.goto)
         except NotFoundError as e:
             return _err(e, create_path=True)
         except (AlreadyExistsError, CapacityError, ConfigError) as e:
@@ -241,15 +214,6 @@ def build_aliases_router(
             return _err(e)
 
         address_str = str(created.address)
-        _, _, domain = address_str.partition("@")
-        _audit(
-            resource="alias",
-            verb="create",
-            domain=domain,
-            external_id=address_str,
-            payload={"goto": created.goto},
-        )
-
         location = f"/scim/v2/Aliases/{address_str}"
         return _scim_response(_alias_to_resource(created), HTTP_201_CREATED, location=location)
 
@@ -258,7 +222,7 @@ def build_aliases_router(
         request: Request[None, None, State],
         alias_id: str,
     ) -> Response[dict[str, object]]:
-        await _verify_bearer(request)
+        _ = await _verify_bearer(request)
 
         try:
             email = _as_email(alias_id)
@@ -282,28 +246,23 @@ def build_aliases_router(
         # not a SCIM Error envelope. Acceptable: DELETE 404 is rare and the
         # test suite only asserts 204 on success. Mirrors Users router behaviour
         # after PR-B11.1.
-        await _verify_bearer(request)
+        actor_sub = await _verify_bearer(request)
 
         try:
             email = _as_email(alias_id)
         except ValidationError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
 
-        address_str = alias_id
-        _, _, domain = address_str.partition("@")
-
+        extra = _extra(
+            address_str=alias_id,
+            actor_sub=actor_sub,
+            postinod_action=("alias", "delete"),
+        )
         try:
-            alias_service.delete(email)
+            with audit_context(extra):
+                alias_service.delete(email)
         except NotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
-
-        _audit(
-            resource="alias",
-            verb="delete",
-            domain=domain,
-            external_id=address_str,
-            payload={},
-        )
 
     return Router(
         path="/",

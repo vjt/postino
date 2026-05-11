@@ -12,6 +12,7 @@ from sqlalchemy import MetaData
 from sqlalchemy.engine import Engine
 
 from postino_core.adapters.mlmmj import MlmmjAdapter
+from postino_core.audit import AuditWriter, DefaultAuditWriter, default_actor
 from postino_core.config import PostinoSettings
 from postino_core.db import make_engine, reflect_schema
 from postino_core.enums import IdentityBackend
@@ -59,10 +60,23 @@ def build_services(
     *,
     clock: Callable[[], datetime],
     echo: bool,
+    actor: Callable[[], str] | None = None,
+    audit_writer_factory: Callable[[MetaData], AuditWriter] | None = None,
 ) -> ServicesBundle:
     """Construct a ServicesBundle from settings.
 
-    Returns: a fully wired ServicesBundle. Caller owns engine disposal."""
+    `actor` is the callable that resolves the audit-log username when the
+    default writer is used; the CLI passes ``getpass.getuser`` (kept
+    outside `postino_core` so the core layer never imports getpass).
+
+    `audit_writer_factory` overrides the default `DefaultAuditWriter` —
+    postinod passes a factory that builds a `PostinodAuditWriter` so
+    `postino.*` and `postinod.*` rows commit atomically with the
+    mutation transaction. The factory receives the just-reflected
+    MetaData so it can bind to the same `log` table.
+
+    Returns: a fully wired ServicesBundle. Caller owns engine disposal.
+    """
     creds = settings.mailbox_creds()
     engine = make_engine(creds, echo=echo)
     metadata = reflect_schema(engine)
@@ -76,6 +90,15 @@ def build_services(
         script_path=settings.postcreation_hook,
         timeout=settings.postcreation_hook_timeout,
     )
+    writer: AuditWriter = (
+        audit_writer_factory(metadata)
+        if audit_writer_factory is not None
+        else DefaultAuditWriter(
+            metadata=metadata,
+            clock=clock,
+            actor=actor or default_actor,
+        )
+    )
     mailing_list: MailingListService | None = None
     if settings.mlmmj_spool_dir is not None:
         adapter = MlmmjAdapter(
@@ -88,6 +111,7 @@ def build_services(
             metadata=metadata,
             adapter=adapter,
             clock=clock,
+            audit_writer=writer,
         )
     return ServicesBundle(
         engine=engine,
@@ -100,14 +124,16 @@ def build_services(
             hooks=hooks,
             clock=clock,
             metadata=metadata,
+            audit_writer=writer,
         ),
-        alias=AliasService(engine=engine, metadata=metadata, clock=clock),
+        alias=AliasService(engine=engine, metadata=metadata, clock=clock, audit_writer=writer),
         domain=DomainService(
             engine=engine,
             metadata=metadata,
             clock=clock,
             fs=fs,
             lmtp_destination=settings.lmtp_destination,
+            audit_writer=writer,
         ),
         quota=QuotaService(engine=engine, metadata=metadata),
         status=StatusService(engine=engine, metadata=metadata),

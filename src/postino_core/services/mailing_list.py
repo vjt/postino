@@ -22,7 +22,7 @@ from sqlalchemy import MetaData, select
 from sqlalchemy.engine import Connection, Engine
 
 from postino_core.adapters.mlmmj import MlmmjAdapter
-from postino_core.audit import mk_action, write_audit
+from postino_core.audit import AuditWriter, DefaultAuditWriter, mk_action
 from postino_core.db import translate_db_errors
 from postino_core.enums import DomainTransport
 from postino_core.errors import (
@@ -44,11 +44,15 @@ class MailingListService:
         metadata: MetaData,
         adapter: MlmmjAdapter,
         clock: Callable[[], datetime],
+        audit_writer: AuditWriter | None = None,
     ) -> None:
         self._engine = engine
         self._md = metadata
         self._adapter = adapter
         self._clock = clock
+        self._audit: AuditWriter = audit_writer or DefaultAuditWriter(
+            metadata=metadata, clock=clock
+        )
 
     def add(self, create: MailingListCreate) -> MailingList:
         """Create a new mlmmj mailing list.
@@ -71,10 +75,8 @@ class MailingListService:
             for owner in create.owners[1:]:
                 self._adapter.append_owner(address=create.address, owner=owner)
             with translate_db_errors(), self._engine.begin() as conn:
-                write_audit(
+                self._audit.write(
                     conn,
-                    self._md,
-                    clock=self._clock,
                     action=mk_action("mailing_list", "create"),
                     domain=domain,
                     data=str(create.address),
@@ -102,10 +104,8 @@ class MailingListService:
         _, _, domain = str(address).partition("@")
         self._adapter.subscribe(address=address, email=email)
         with translate_db_errors(), self._engine.begin() as conn:
-            write_audit(
+            self._audit.write(
                 conn,
-                self._md,
-                clock=self._clock,
                 action=mk_action("mailing_list", "subscribe"),
                 domain=domain,
                 data=f"{address} {email}",
@@ -116,10 +116,8 @@ class MailingListService:
         _, _, domain = str(address).partition("@")
         self._adapter.unsubscribe(address=address, email=email)
         with translate_db_errors(), self._engine.begin() as conn:
-            write_audit(
+            self._audit.write(
                 conn,
-                self._md,
-                clock=self._clock,
                 action=mk_action("mailing_list", "unsubscribe"),
                 domain=domain,
                 data=f"{address} {email}",
@@ -154,10 +152,8 @@ class MailingListService:
                 )
 
         with translate_db_errors(), self._engine.begin() as conn:
-            write_audit(
+            self._audit.write(
                 conn,
-                self._md,
-                clock=self._clock,
                 action=mk_action("mailing_list", "delete"),
                 domain=domain,
                 data=f"{address} force={force}",

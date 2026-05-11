@@ -234,3 +234,49 @@ def test_domain_create_delete_writes_audit(
     actions = _audit_actions(db)
     assert ("postino.domain.create", "example.com", "example.com") in actions
     assert any(a[0] == "postino.domain.delete" and "example.com" in a[2] for a in actions)
+
+
+def test_audit_writer_failure_rolls_back_mutation(
+    db: Engine,
+    frozen_clock: datetime,
+) -> None:
+    """An audit-writer raise inside the mutation tx must roll the mutation back.
+
+    Documents the AuditWriter contract: `write()` runs on the caller's
+    Connection inside `engine.begin()`, so any exception aborts the tx —
+    the alias row and the audit row roll back together. This is the
+    `mutation/audit atomicity` guarantee Task 2 of the v0.4 plan locks in.
+    """
+    from sqlalchemy.engine import Connection
+
+    from postino_core.audit import AuditWriter
+
+    class _BoomWriter:
+        def write(
+            self,
+            conn: Connection,
+            *,
+            action: str,
+            domain: str,
+            data: str,
+        ) -> None:
+            del conn, action, domain, data
+            raise RuntimeError("simulated audit-writer failure")
+
+    boom: AuditWriter = _BoomWriter()
+    _seed_domain(db, "example.com")
+    md = MetaData()
+    md.reflect(bind=db)
+    svc = AliasService(engine=db, metadata=md, clock=lambda: frozen_clock, audit_writer=boom)
+
+    with pytest.raises(RuntimeError, match="simulated audit-writer failure"):
+        svc.add(address="x@example.com", goto="y@example.com")
+
+    alias = md.tables["alias"]
+    with db.connect() as conn:
+        rows = conn.execute(select(alias).where(alias.c.address == "x@example.com")).fetchall()
+    assert rows == [], "alias row leaked despite audit-writer failure"
+    actions = _audit_actions(db)
+    assert all("alias.create" not in a[0] for a in actions), (
+        "audit row leaked despite mutation rollback"
+    )
