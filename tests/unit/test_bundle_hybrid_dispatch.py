@@ -9,7 +9,7 @@ from sqlalchemy import MetaData
 from postino_core.enums import IdentityBackend
 from postino_core.providers import HybridProvider, LocalProvider, NoAuthProvider
 from postino_core.services.bundle import (
-    _provider_for,  # type: ignore[private-usage]  # WHY: testing private dispatch logic that must be verified per-backend.
+    _provider_for,  # pyright: ignore[reportPrivateUsage]  # WHY: testing private dispatch logic that must be verified per-backend.
 )
 
 
