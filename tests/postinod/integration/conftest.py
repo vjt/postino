@@ -36,6 +36,8 @@ from litestar.testing import AsyncTestClient
 from sqlalchemy import MetaData
 from sqlalchemy.engine import Engine
 
+from postino_core.enums import IdentityBackend
+
 _ISSUER = "https://idp.test"
 _AUDIENCE = "postinod"
 _KID = "test-kid"
@@ -132,21 +134,15 @@ def auth_header(keypair: RSAPrivateKey) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-@pytest.fixture
-async def client(
-    prepared_test_db: PreparedTestDB,
-    keypair: RSAPrivateKey,
-    app_paths: tuple[Path, Path],
-) -> collections.abc.AsyncGenerator[AsyncTestClient[Litestar], None]:
-    """Async test client wired against a real test DB and stub JWKS."""
-    from postinod.app import build_app_for_test
+def _build_jwk(keypair: RSAPrivateKey) -> dict[str, object]:
+    """Encode an RSA public key as a JWK dict (kid = _KID)."""
 
     def _b64(i: int) -> str:
         b = i.to_bytes((i.bit_length() + 7) // 8, "big")
         return base64.urlsafe_b64encode(b).decode().rstrip("=")
 
     pub_numbers = keypair.public_key().public_numbers()
-    jwk: dict[str, object] = {
+    return {
         "kty": "RSA",
         "kid": _KID,
         "use": "sig",
@@ -155,8 +151,18 @@ async def client(
         "e": _b64(pub_numbers.e),
     }
 
+
+@pytest.fixture
+async def client(
+    prepared_test_db: PreparedTestDB,
+    keypair: RSAPrivateKey,
+    app_paths: tuple[Path, Path],
+) -> collections.abc.AsyncGenerator[AsyncTestClient[Litestar], None]:
+    """Async test client wired against a real test DB and stub JWKS (NOAUTH backend)."""
+    from postinod.app import build_app_for_test
+
     mail_root, postcreation_hook = app_paths
-    jwks = StubJwks([jwk])
+    jwks = StubJwks([_build_jwk(keypair)])
     app = build_app_for_test(
         db_engine=prepared_test_db.engine,
         metadata=prepared_test_db.metadata,
@@ -166,6 +172,70 @@ async def client(
         scim_issuer=_ISSUER,
         scim_audience=_AUDIENCE,
         jwks=jwks,
+        identity_backend=IdentityBackend.NOAUTH,
+    )
+    async with AsyncTestClient(app=app) as c:
+        yield c
+
+
+@pytest.fixture
+async def fresh_sentinel_user(
+    hybrid_client: AsyncTestClient[Litestar],
+    auth_header: dict[str, str],
+) -> str:
+    """POST a SCIM user without a password (IdP-owned row) and return its id."""
+    username = "fresh-sentinel@example.org"
+    body = {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+        "userName": username,
+        "name": {"formatted": "Fresh Sentinel"},
+        "active": True,
+    }
+    r = await hybrid_client.post("/scim/v2/Users", json=body, headers=auth_header)
+    assert r.status_code == 201, r.text
+    return username
+
+
+@pytest.fixture
+async def fresh_bcrypt_user(
+    hybrid_client: AsyncTestClient[Litestar],
+    auth_header: dict[str, str],
+) -> str:
+    """POST a SCIM user with a password (SQL-auth row) and return its id."""
+    username = "fresh-bcrypt@example.org"
+    body = {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+        "userName": username,
+        "name": {"formatted": "Fresh Bcrypt"},
+        "password": "initial-pw",
+        "active": True,
+    }
+    r = await hybrid_client.post("/scim/v2/Users", json=body, headers=auth_header)
+    assert r.status_code == 201, r.text
+    return username
+
+
+@pytest.fixture
+async def hybrid_client(
+    prepared_test_db: PreparedTestDB,
+    keypair: RSAPrivateKey,
+    app_paths: tuple[Path, Path],
+) -> collections.abc.AsyncGenerator[AsyncTestClient[Litestar], None]:
+    """Async test client wired with the HybridProvider — per-row credential ownership."""
+    from postinod.app import build_app_for_test
+
+    mail_root, postcreation_hook = app_paths
+    jwks = StubJwks([_build_jwk(keypair)])
+    app = build_app_for_test(
+        db_engine=prepared_test_db.engine,
+        metadata=prepared_test_db.metadata,
+        hmac_secret=b"unused",
+        mail_root=mail_root,
+        postcreation_hook=postcreation_hook,
+        scim_issuer=_ISSUER,
+        scim_audience=_AUDIENCE,
+        jwks=jwks,
+        identity_backend=IdentityBackend.HYBRID,
     )
     async with AsyncTestClient(app=app) as c:
         yield c

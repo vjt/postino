@@ -29,7 +29,12 @@ from postino_core.enums import IdentityBackend
 from postino_core.errors import ConfigError
 from postino_core.fs import FilesystemAdapter
 from postino_core.hooks import HookRunner
-from postino_core.providers import IdentityProvider, NoAuthProvider
+from postino_core.providers import (
+    HybridProvider,
+    IdentityProvider,
+    LocalProvider,
+    NoAuthProvider,
+)
 from postino_core.services.alias import AliasService
 from postino_core.services.bundle import build_services
 from postino_core.services.domain import DomainService
@@ -181,13 +186,16 @@ def build_app_for_test(
     scim_audience: str = "postinod",
     jwks: JwksLike | None = None,
     replay_window_seconds: int = 86400,
+    identity_backend: IdentityBackend = IdentityBackend.NOAUTH,
 ) -> Litestar:
     """Test-only Litestar app factory.
 
-    Wires a `MailboxService` against the supplied test engine using the
-    NoAuthProvider (postinod V2 ships with the IdP-owns-credentials
-    contract; LocalProvider is for the postino CLI). Production wiring
-    with settings-driven DI lands in Task 15.
+    Wires a `MailboxService` against the supplied test engine. The
+    ``identity_backend`` parameter selects the provider implementation
+    so SCIM/Zitadel routers can be exercised under each deployment
+    posture; default ``NOAUTH`` preserves the original contract for
+    pre-existing callers. Production wiring with settings-driven DI
+    lands in Task 15.
 
     `mail_root` and `postcreation_hook` are required; callers (pytest
     fixtures) are responsible for temp-path lifecycle via tmp_path / tmp_path_factory.
@@ -198,7 +206,13 @@ def build_app_for_test(
     fs = FilesystemAdapter(mail_root=mail_root, vmail_uid=-1, vmail_gid=-1)
     hooks = HookRunner(script_path=postcreation_hook)
     audit_writer = PostinodAuditWriter(metadata=metadata, clock=_utc_now)
-    identity = NoAuthProvider()
+    identity: IdentityProvider
+    if identity_backend is IdentityBackend.HYBRID:
+        identity = HybridProvider(metadata=metadata, clock=_utc_now)
+    elif identity_backend is IdentityBackend.LOCAL:
+        identity = LocalProvider(metadata=metadata, clock=_utc_now)
+    else:
+        identity = NoAuthProvider()
     mailbox = MailboxService(
         engine=db_engine,
         identity=identity,
