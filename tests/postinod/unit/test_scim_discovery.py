@@ -50,3 +50,43 @@ async def test_schemas(client: AsyncTestClient[Litestar]) -> None:
     schema_ids = {s["id"] for s in j["Resources"]}
     assert "urn:ietf:params:scim:schemas:core:2.0:User" in schema_ids
     assert "urn:postino:params:scim:schemas:core:2.0:Alias" in schema_ids
+    assert "urn:postino:params:scim:schemas:core:2.0:Domain" in schema_ids
+
+
+async def test_schemas_introspection_shape(client: AsyncTestClient[Litestar]) -> None:
+    """Pydantic introspection must emit the right SCIM shape per resource."""
+    r = await client.get("/scim/v2/Schemas")
+    j = r.json()
+    by_id = {s["id"]: s for s in j["Resources"]}
+
+    user = by_id["urn:ietf:params:scim:schemas:core:2.0:User"]
+    user_attrs = {a["name"]: a for a in user["attributes"]}
+    # userName: required string, server-uniqueness
+    assert user_attrs["userName"]["type"] == "string"
+    assert user_attrs["userName"]["required"] is True
+    assert user_attrs["userName"]["uniqueness"] == "server"
+    # name: complex with sub-attributes
+    assert user_attrs["name"]["type"] == "complex"
+    sub = {a["name"] for a in user_attrs["name"]["subAttributes"]}
+    assert sub == {"formatted", "givenName", "familyName"}
+    # emails: multiValued complex
+    assert user_attrs["emails"]["type"] == "complex"
+    assert user_attrs["emails"]["multiValued"] is True
+    # active: boolean
+    assert user_attrs["active"]["type"] == "boolean"
+    # common attributes (schemas/id/meta/externalId) must NOT leak into per-resource attrs
+    assert "schemas" not in user_attrs
+    assert "id" not in user_attrs
+    assert "meta" not in user_attrs
+
+    alias = by_id["urn:postino:params:scim:schemas:core:2.0:Alias"]
+    alias_attrs = {a["name"]: a for a in alias["attributes"]}
+    assert alias_attrs["address"]["uniqueness"] == "server"
+    assert alias_attrs["goto"]["required"] is True
+
+    domain = by_id["urn:postino:params:scim:schemas:core:2.0:Domain"]
+    dom_attrs = {a["name"]: a for a in domain["attributes"]}
+    assert dom_attrs["domain"]["uniqueness"] == "server"
+    assert dom_attrs["maxAliases"]["type"] == "integer"
+    assert dom_attrs["backupmx"]["type"] == "boolean"
+    assert dom_attrs["transport"]["type"] == "string"

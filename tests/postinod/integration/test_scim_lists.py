@@ -281,3 +281,32 @@ async def test_list_domains_requires_auth(
 ) -> None:
     r = await client.get("/scim/v2/Domains")
     assert r.status_code == 401
+
+
+async def test_domain_envelope_meta_and_content_type(
+    client: AsyncTestClient[Litestar],
+    auth_header: dict[str, str],
+    prepared_test_db: PreparedTestDB,
+) -> None:
+    r = await client.get("/scim/v2/Domains/example.org", headers=auth_header)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/scim+json")
+    body = r.json()
+    assert body["schemas"] == ["urn:postino:params:scim:schemas:core:2.0:Domain"]
+    meta = body["meta"]
+    assert meta["resourceType"] == "Domain"
+    assert meta["location"] == "/scim/v2/Domains/example.org"
+    assert "created" in meta and "lastModified" in meta
+
+
+async def test_user_list_envelope_content_type(
+    client: AsyncTestClient[Litestar],
+    auth_header: dict[str, str],
+    prepared_test_db: PreparedTestDB,
+) -> None:
+    r = await client.get("/scim/v2/Users", headers=auth_header)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/scim+json")
+    j = r.json()
+    assert j["schemas"] == ["urn:ietf:params:scim:api:messages:2.0:ListResponse"]
+    assert "totalResults" in j and "Resources" in j

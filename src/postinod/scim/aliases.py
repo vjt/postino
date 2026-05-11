@@ -52,7 +52,7 @@ from postino_core.services.alias import AliasService
 from postinod.audit import PostinodAuditExtra, audit_context
 from postinod.auth.jwt_guard import JwtVerifier
 from postinod.scim.errors import scim_error_from_exception
-from postinod.scim.models import ALIAS_SCHEMA, ScimAlias, ScimError, ScimListResponse
+from postinod.scim.models import ALIAS_SCHEMA, ScimAlias, ScimError, ScimListResponse, ScimMeta
 from postinod.scim.query import (
     InvalidFilterError,
     ListQuery,
@@ -76,11 +76,18 @@ def _as_email(s: str) -> EmailStr:
 
 def _alias_to_resource(a: Alias) -> ScimAlias:
     """Build a ScimAlias view from an Alias domain object."""
+    address_str = str(a.address)
     return ScimAlias(
         schemas=[ALIAS_SCHEMA],
-        id=str(a.address),
+        id=address_str,
         address=a.address,
         goto=a.goto,
+        meta=ScimMeta(
+            resourceType="Alias",  # type: ignore[call-arg]  # WHY: pydantic accepts alias at construction; pyright sees field name only
+            created=a.created,
+            lastModified=a.modified,  # type: ignore[call-arg]  # WHY: see above
+            location=f"/scim/v2/Aliases/{address_str}",
+        ),
     )
 
 

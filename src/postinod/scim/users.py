@@ -52,6 +52,7 @@ from postinod.scim.models import (
     ScimEmail,
     ScimError,
     ScimListResponse,
+    ScimMeta,
     ScimName,
     ScimUser,
 )
@@ -78,13 +79,20 @@ def _as_email(s: str) -> EmailStr:
 
 def _user_from_mailbox(m: Mailbox) -> ScimUser:
     """Build a ScimUser view from a Mailbox domain object."""
+    username_str = str(m.username)
     return ScimUser(
         schemas=["urn:ietf:params:scim:schemas:core:2.0:User"],
-        id=str(m.username),
-        userName=str(m.username),  # type: ignore[call-arg]  # WHY: pydantic accepts alias at construction; pyright sees field name only
+        id=username_str,
+        userName=username_str,  # type: ignore[call-arg]  # WHY: pydantic accepts alias at construction; pyright sees field name only
         name=ScimName(formatted=m.name),
         emails=[ScimEmail(value=m.username, primary=True)],
         active=(m.status == MailboxStatus.ACTIVE),
+        meta=ScimMeta(
+            resourceType="User",  # type: ignore[call-arg]  # WHY: pydantic accepts alias at construction; pyright sees field name only
+            created=m.created,
+            lastModified=m.modified,  # type: ignore[call-arg]  # WHY: see above
+            location=f"/scim/v2/Users/{username_str}",
+        ),
     )
 
 

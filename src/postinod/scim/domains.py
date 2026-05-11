@@ -34,6 +34,7 @@ from postinod.scim.models import (
     ScimDomain,
     ScimError,
     ScimListResponse,
+    ScimMeta,
 )
 from postinod.scim.query import (
     InvalidFilterError,
@@ -54,12 +55,18 @@ def _domain_to_resource(d: Domain) -> ScimDomain:
         domain=d.domain,
         description=d.description,
         transport=d.transport.value,
-        maxAliases=d.max_aliases,
-        maxMailboxes=d.max_mailboxes,
-        maxQuotaBytes=d.max_quota_bytes,
-        defaultQuotaBytes=d.default_quota_bytes,
+        maxAliases=d.max_aliases,  # type: ignore[call-arg]  # WHY: pydantic accepts alias at construction; pyright sees field name only
+        maxMailboxes=d.max_mailboxes,  # type: ignore[call-arg]  # WHY: see above
+        maxQuotaBytes=d.max_quota_bytes,  # type: ignore[call-arg]  # WHY: see above
+        defaultQuotaBytes=d.default_quota_bytes,  # type: ignore[call-arg]  # WHY: see above
         backupmx=d.backupmx,
         active=(int(d.status) == 1),
+        meta=ScimMeta(
+            resourceType="Domain",  # type: ignore[call-arg]  # WHY: see above
+            created=d.created,
+            lastModified=d.modified,  # type: ignore[call-arg]  # WHY: see above
+            location=f"/scim/v2/Domains/{d.domain}",
+        ),
     )
 
 

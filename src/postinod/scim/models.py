@@ -6,6 +6,7 @@ extension under urn:postino:params:scim:schemas:core:2.0:Alias.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
@@ -20,6 +21,21 @@ LIST_SCHEMA = "urn:ietf:params:scim:api:messages:2.0:ListResponse"
 
 class _StrictModel(BaseModel):
     model_config = ConfigDict(strict=True, populate_by_name=True, extra="ignore", frozen=True)
+
+
+class ScimMeta(_StrictModel):
+    """SCIM `meta` block per RFC 7643 §3.1.
+
+    `version` (etag) is intentionally omitted — SPC advertises
+    `etag.supported=False`. Datetimes serialise as ISO 8601 via pydantic's
+    default; PostfixAdmin rows are naive local time, callers should pass
+    tz-aware values or accept the SCIM client treating them as UTC.
+    """
+
+    resource_type: str = Field(alias="resourceType")
+    created: datetime
+    last_modified: datetime = Field(alias="lastModified")
+    location: str
 
 
 class ScimName(_StrictModel):
@@ -42,6 +58,7 @@ class ScimUser(_StrictModel):
     active: bool = True
     id: str | None = None  # set by server
     external_id: str | None = Field(default=None, alias="externalId")
+    meta: ScimMeta | None = None
 
     @field_validator("schemas")
     @classmethod
@@ -57,6 +74,7 @@ class ScimAlias(_StrictModel):
     goto: str  # comma-separated email list per Postfix convention
     id: str | None = None
     external_id: str | None = Field(default=None, alias="externalId")
+    meta: ScimMeta | None = None
 
     @field_validator("schemas")
     @classmethod
@@ -85,6 +103,7 @@ class ScimDomain(_StrictModel):
     backupmx: bool
     active: bool
     id: str | None = None
+    meta: ScimMeta | None = None
 
     @field_validator("schemas")
     @classmethod

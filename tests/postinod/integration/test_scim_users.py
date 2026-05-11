@@ -195,3 +195,45 @@ async def test_post_writes_audit_row(
         )
     assert any('"surface":"scim"' in row["data"] for row in rows)
     assert any('"email":"leo@example.org"' in row["data"] for row in rows)
+
+
+async def test_post_envelope_meta_and_content_type(
+    client: AsyncTestClient[Litestar],
+    auth_header: dict[str, str],
+    prepared_test_db: PreparedTestDB,
+) -> None:
+    body = {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+        "userName": "envelope@example.org",
+        "name": {"formatted": "Env Lope"},
+        "active": True,
+    }
+    r = await client.post("/scim/v2/Users", json=body, headers=auth_header)
+    assert r.status_code == 201, r.text
+    assert r.headers["content-type"].startswith("application/scim+json")
+    j = r.json()
+    assert j["schemas"] == ["urn:ietf:params:scim:schemas:core:2.0:User"]
+    meta = j["meta"]
+    assert meta["resourceType"] == "User"
+    assert meta["location"] == "/scim/v2/Users/envelope@example.org"
+    assert "created" in meta and "lastModified" in meta
+
+
+async def test_get_envelope_meta_and_content_type(
+    client: AsyncTestClient[Litestar],
+    auth_header: dict[str, str],
+    prepared_test_db: PreparedTestDB,
+) -> None:
+    body = {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+        "userName": "meta-get@example.org",
+        "name": {"formatted": "MG"},
+        "active": True,
+    }
+    await client.post("/scim/v2/Users", json=body, headers=auth_header)
+    r = await client.get("/scim/v2/Users/meta-get@example.org", headers=auth_header)
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("application/scim+json")
+    meta = r.json()["meta"]
+    assert meta["resourceType"] == "User"
+    assert meta["location"] == "/scim/v2/Users/meta-get@example.org"

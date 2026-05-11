@@ -123,3 +123,29 @@ async def test_get_nonexistent_alias_returns_404(
 ) -> None:
     r = await client.get("/scim/v2/Aliases/missing@example.org", headers=auth_header)
     assert r.status_code == 404
+
+
+async def test_alias_envelope_meta_and_content_type(
+    client: AsyncTestClient[Litestar],
+    auth_header: dict[str, str],
+    prepared_test_db: PreparedTestDB,
+) -> None:
+    body = {
+        "schemas": ["urn:postino:params:scim:schemas:core:2.0:Alias"],
+        "address": "envmeta@example.org",
+        "goto": "alice@example.org",
+    }
+    r = await client.post("/scim/v2/Aliases", json=body, headers=auth_header)
+    assert r.status_code == 201, r.text
+    assert r.headers["content-type"].startswith("application/scim+json")
+    j = r.json()
+    assert j["schemas"] == ["urn:postino:params:scim:schemas:core:2.0:Alias"]
+    meta = j["meta"]
+    assert meta["resourceType"] == "Alias"
+    assert meta["location"] == "/scim/v2/Aliases/envmeta@example.org"
+    assert "created" in meta and "lastModified" in meta
+
+    g = await client.get("/scim/v2/Aliases/envmeta@example.org", headers=auth_header)
+    assert g.status_code == 200
+    assert g.headers["content-type"].startswith("application/scim+json")
+    assert g.json()["meta"]["resourceType"] == "Alias"

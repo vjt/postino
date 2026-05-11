@@ -20,8 +20,8 @@
 97 = "WHY: **kwargs forwarded verbatim to BaseModel.model_validate; pydantic minors evolve the kwarg set (strict, extra, from_attributes, context, by_alias, by_name) — generic Any avoids LSP drift."
 
 [test_no_any."src/postinod/scim/models.py"]
-107 = "WHY: RFC 7644 §3.5.2 PatchOp.value is an arbitrary JSON node (string, bool, object, array, null) — no narrower type exists at the model layer."
-127 = "WHY: ListResponse.resources is a heterogeneous container of SCIM resource objects (User, Alias, Domain, Error) returned as dicts; concrete type is resolved by the router, not the envelope model."
+126 = "WHY: RFC 7644 §3.5.2 PatchOp.value is an arbitrary JSON node (string, bool, object, array, null) — no narrower type exists at the model layer."
+146 = "WHY: ListResponse.resources is a heterogeneous container of SCIM resource objects (User, Alias, Domain, Error) returned as dicts; concrete type is resolved by the router, not the envelope model."
 
 [test_no_cast]
 [test_no_cast."src/postino/commands/alias.py"]
@@ -139,6 +139,6 @@
 76 = "WHY: ZitadelEvent uses strict=False so the datetime created_at field accepts ISO-8601 strings from raw HTTP JSON; extra='ignore' tolerates Zitadel envelope fields not in our model."
 
 [test_pydantic_strict."src/postinod/scim/models.py"]
-21 = "WHY: SCIM RFC 7644 §3.1 requires servers to ignore unrecognised attributes; extra='ignore' implements this — strict=True enforced on all subclasses for type coercion."
+22 = "WHY: SCIM RFC 7644 §3.1 requires servers to ignore unrecognised attributes; extra='ignore' implements this — strict=True enforced on all subclasses for type coercion."
 
 [test_no_secret_repr]
