@@ -35,7 +35,7 @@ from litestar.response import Response
 from litestar.status_codes import HTTP_200_OK, HTTP_201_CREATED
 from pydantic import EmailStr, TypeAdapter, ValidationError
 
-from postino_core.enums import MailboxStatus
+from postino_core.enums import MailboxStatus, PasswordScheme
 from postino_core.errors import (
     AlreadyExistsError,
     CapacityError,
@@ -119,6 +119,28 @@ def _err(exc: Exception, *, create_path: bool = False) -> Response[dict[str, obj
     """Map an exception to a SCIM Error response."""
     err_model = scim_error_from_exception(exc, create_path=create_path)
     return _scim_response(err_model, int(err_model.status))
+
+
+def _make_mailbox_create(user: ScimUser, *, default_quota_bytes: int) -> MailboxCreate:
+    """Build a MailboxCreate from a parsed ScimUser body.
+
+    BCRYPT is hardcoded — keep the SCIM wire surface KISS. The CLI
+    still exposes --scheme for legacy MD5/SHA512 rotations; SCIM-driven
+    provisioning is bcrypt-only.
+    """
+    if user.password is not None:
+        return MailboxCreate(
+            username=user.user_name,
+            name=user.name.formatted,
+            quota_bytes=default_quota_bytes,
+            password=user.password,
+            scheme=PasswordScheme.BCRYPT,
+        )
+    return MailboxCreate(
+        username=user.user_name,
+        name=user.name.formatted,
+        quota_bytes=default_quota_bytes,
+    )
 
 
 def build_users_router(
@@ -215,14 +237,17 @@ def build_users_router(
             actor_sub=actor_sub,
             postinod_action=("user", "create"),
         )
+        if user.password is not None and not mailbox_service.identity.supports_password_change():
+            err = ScimError(
+                status="403",
+                scimType="mutability",
+                detail="password attribute not writable under this identity backend",
+            )
+            return _scim_response(err, 403)
         try:
             with audit_context(extra):
                 created = mailbox_service.add(
-                    MailboxCreate(
-                        username=user.user_name,
-                        name=user.name.formatted,
-                        quota_bytes=default_quota_bytes,
-                    )
+                    _make_mailbox_create(user, default_quota_bytes=default_quota_bytes)
                 )
         except (NotFoundError, AlreadyExistsError, CapacityError, ConfigError) as e:
             return _err(e, create_path=isinstance(e, NotFoundError))

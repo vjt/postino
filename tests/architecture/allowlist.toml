@@ -95,12 +95,12 @@
 # helper methods (_compensate_remove_maildir, _compensate_delete_mailbox_row,
 # _write_rollback_failed_audit); all entries below remain SQLAlchemy
 # RowMapping Any access in get / _row_to_model / list.
-199 = "WHY: SQLAlchemy RowMapping access yields Any."
-268 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-271 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-272 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-273 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-346 = "WHY: SQLAlchemy RowMapping access yields Any."
+209 = "WHY: SQLAlchemy RowMapping access yields Any."
+278 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+281 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+282 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+283 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+356 = "WHY: SQLAlchemy RowMapping access yields Any."
 
 [test_type_ignore_justified."src/postino_core/services/quota.py"]
 23 = "WHY: SQLAlchemy Row._mapping attribute access not in stubs."

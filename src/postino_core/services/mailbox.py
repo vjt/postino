@@ -65,6 +65,16 @@ class MailboxService:
             metadata=metadata, clock=clock
         )
 
+    @property
+    def identity(self) -> IdentityProvider:
+        """Active IdentityProvider (read-only access).
+
+        Exposed so callers (SCIM handlers, CLI commands) can branch on
+        ``supports_password_change()`` / ``supports_local_provisioning()``
+        / ``supports_release_to_noauth()`` before invoking mutators that
+        would otherwise raise ConfigError mid-transaction."""
+        return self._identity
+
     def add(self, create: MailboxCreate) -> Mailbox:
         """Create a new mailbox.
 
