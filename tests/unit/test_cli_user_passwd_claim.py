@@ -19,6 +19,7 @@ from typer.testing import CliRunner
 
 from postino import cli as cli_module
 from postino.cli import app
+from postino_core.errors import NotFoundError
 
 
 @pytest.fixture
@@ -84,3 +85,11 @@ def test_passwd_on_hash_no_warning(runner: CliRunner, mock_services: MagicMock) 
     result = runner.invoke(app, ["user", "passwd", "u@x.io"], input="hunter2\nhunter2\n")
     assert result.exit_code == 0
     assert "claim" not in result.stderr
+
+
+def test_passwd_on_missing_user_errors(runner: CliRunner, mock_services: MagicMock) -> None:
+    """is_idp_managed raises NotFoundError; CLI surfaces non-zero exit."""
+    mock_services.mailbox.is_idp_managed.side_effect = NotFoundError("missing@x.io")
+    result = runner.invoke(app, ["user", "passwd", "missing@x.io"], input="hunter2\nhunter2\n")
+    assert result.exit_code != 0
+    mock_services.mailbox.set_password.assert_not_called()

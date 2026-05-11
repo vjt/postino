@@ -147,9 +147,9 @@ def passwd(
         s = get_services(ctx)
         if not s.identity.supports_password_change():
             raise ConfigError("password change not supported by current identity backend")
-        current = s.mailbox.get(username)
-        if current is None:
-            raise NotFoundError(f"mailbox {username} does not exist")
+        # WHY: is_idp_managed raises NotFoundError itself when the row is
+        # absent (see postino_core/services/mailbox.py); a separate
+        # mailbox.get() pre-check would be a redundant SQL roundtrip.
         is_sentinel = s.mailbox.is_idp_managed(username)
         if is_sentinel and not claim:
             typer.echo(
