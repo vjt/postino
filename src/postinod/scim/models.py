@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr, field_validator
 
 USER_SCHEMA = "urn:ietf:params:scim:schemas:core:2.0:User"
 ALIAS_SCHEMA = "urn:postino:params:scim:schemas:core:2.0:Alias"
@@ -55,6 +55,7 @@ class ScimUser(_StrictModel):
     user_name: EmailStr = Field(alias="userName")
     name: ScimName
     emails: list[ScimEmail] = []  # pydantic v2 deep-copies list defaults; literal is safe here
+    password: SecretStr | None = Field(default=None, exclude=True)
     active: bool = True
     id: str | None = None  # set by server
     external_id: str | None = Field(default=None, alias="externalId")
