@@ -78,6 +78,30 @@ class IdentityProvider(Protocol):
         MailboxService.delete already drops the row's password)."""
         ...
 
+    def release_identity(
+        self,
+        conn: Connection,
+        username: str,
+    ) -> None:
+        """Reset the row to the ``{NOAUTH}`` sentinel (release to IdP).
+
+        Inverse of ``set_password`` for hybrid deployments. Idempotent: a
+        row already on the sentinel returns without writing. Raises
+        ``ConfigError`` under backends that do not own a credential column
+        (NoAuthProvider — sentinel is always the value) or backends that
+        refuse credential lifecycle transitions (LocalProvider — the
+        deployment-wide contract is that every row carries a hash)."""
+        ...
+
+    def supports_release_to_noauth(self) -> bool:
+        """Whether ``release_identity`` can transition rows back to sentinel.
+
+        Distinct from ``supports_password_change``: LocalProvider supports
+        the latter (rotate within SQL auth) but not the former (cannot
+        release rows to IdP under a no-IdP deployment). Only HybridProvider
+        returns True."""
+        ...
+
     def supports_password_change(self) -> bool:
         """Whether ``postino user passwd`` is exposed."""
         ...
