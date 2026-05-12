@@ -13,7 +13,48 @@ jobs:
   verify:
     uses: ./.github/workflows/verify.yml
 
+  changelog:
+    needs: verify
+    runs-on: ubuntu-latest
+    outputs:
+      body: ${{ steps.cliff.outputs.content }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # git-cliff needs full history
+      - id: cliff
+        uses: orhun/git-cliff-action@v3
+        with:
+          config: cliff.toml
+          args: --latest --strip header
+
+  manpages-check:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install help2man + mandoc
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends help2man mandoc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - run: pip install -e .
+      - name: Regenerate and diff against committed
+        run: |
+          # Pin DATE to committed postinod.8 .TH so daily date doesn't false-positive.
+          DATE=$(sed -nE 's/^\.TH \S+ [0-9]+ "([0-9-]+)".*/\1/p' man/postinod.8 | head -1)
+          export DATE
+          ./scripts/build-manpages.sh
+          if ! git diff --quiet man/; then
+            echo "::error::Committed manpages are stale; run scripts/build-manpages.sh and commit."
+            git diff man/
+            exit 1
+          fi
+
   build-and-publish:
+    if: ${{ !contains(github.ref_name, 'rc') }}
     needs: verify
     runs-on: ubuntu-latest
     environment:
@@ -36,3 +77,99 @@ jobs:
       - run: python -m build
       - run: twine check dist/*
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  deb:
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        dist: [bookworm, trixie]
+        arch: [amd64, arm64]
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    container:
+      image: debian:${{ matrix.dist }}-slim
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build deps
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential debhelper dh-virtualenv \
+            python3 python3-dev python3-venv \
+            libffi-dev libssl-dev cargo \
+            ca-certificates git
+      - name: Build .deb
+        run: dpkg-buildpackage -us -uc -b
+      - name: Move artefact into dist/
+        run: |
+          mkdir -p dist
+          mv ../il-postino_*.deb dist/
+          # Rename to embed dist + arch for unambiguous release attachment.
+          v="${GITHUB_REF_NAME#v}"
+          for f in dist/il-postino_*.deb; do
+            new="dist/il-postino_${v}-1_${{ matrix.dist }}_${{ matrix.arch }}.deb"
+            [ "$f" = "$new" ] || mv "$f" "$new"
+          done
+          ls -la dist/
+      - name: Smoke install
+        run: |
+          apt-get install -y --no-install-recommends mlmmj adduser
+          apt-get install -y --no-install-recommends ./dist/il-postino_*_${{ matrix.dist }}_${{ matrix.arch }}.deb
+          postino --version
+          test -x /usr/bin/postinod
+          test -f /lib/systemd/system/postinod.service
+          test -f /usr/share/man/man1/postino.1.gz
+          test -f /usr/share/man/man8/postinod.8.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-${{ matrix.dist }}-${{ matrix.arch }}
+          path: dist/*.deb
+
+  txz:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build .txz inside FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.2"
+          usesh: true
+          prepare: |
+            pkg install -y python311 py311-pip py311-virtualenv mlmmj git
+          run: |
+            ./scripts/build-txz.sh
+            pkg add dist/il-postino-*.txz
+            postino --version
+            test -x /usr/local/bin/postinod
+            test -f /usr/local/etc/rc.d/postinod
+      - uses: actions/upload-artifact@v4
+        with:
+          name: txz-freebsd14-amd64
+          path: dist/*.txz
+
+  github-release:
+    needs: [verify, deb, txz, changelog, manpages-check]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+      - name: Collect artefacts
+        run: |
+          mkdir -p release
+          find artifacts -name '*.deb' -exec mv {} release/ \;
+          find artifacts -name '*.txz' -exec mv {} release/ \;
+          ls -la release/
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BODY: ${{ needs.changelog.outputs.body }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "postino ${GITHUB_REF_NAME}" \
+            --notes "$BODY" \
+            release/*
