@@ -147,6 +147,39 @@ def _seed_alias(db: Engine, *, address: str, goto: str, domain: str) -> None:
         )
 
 
+def _seed_alias_domain(db: Engine, *, alias_domain: str, target_domain: str) -> None:
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.begin() as conn:
+        conn.execute(
+            md.tables["alias_domain"]
+            .insert()
+            .values(
+                alias_domain=alias_domain,
+                target_domain=target_domain,
+                active=1,
+            )
+        )
+
+
+_ALIAS_DOMAIN_CFS: tuple[str, ...] = (
+    "sql-virtual_alias_alias_domain_maps.cf",
+    "sql-virtual_mailbox_alias_domain_maps.cf",
+)
+
+
+def _clear_alias_domain(db: Engine) -> None:
+    """Wipe every alias_domain row so a test starts from a known-empty state.
+
+    The shared test DB fixture is per-session, so prior tests may have
+    seeded rows that would otherwise leak into the conditional-cf check.
+    """
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.begin() as conn:
+        conn.execute(md.tables["alias_domain"].delete())
+
+
 def _make_maildir(mail_root: Path, relative: str) -> Path:
     p = mail_root / relative
     p.mkdir(parents=True, exist_ok=True)
@@ -262,6 +295,124 @@ def test_fails_when_postfix_cf_credentials_drift(
     f = _by_name(result, "postfix_sql_cf:sql-virtual_mailbox_maps.cf")
     assert f.severity == "error"
     assert "password" in f.message
+
+
+# ---------- alias_domain conditional cf-file policy ----------
+
+
+def test_check_skips_alias_domain_cfs_when_table_empty(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """Empty alias_domain table → 2 conditional cfs absent emits NO findings.
+
+    Neither error (the file is genuinely not required) nor info (we did
+    not look at the file).
+    """
+    _clear_alias_domain(db)
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)  # writes only the 3 always-required cfs
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md)
+    for filename in _ALIAS_DOMAIN_CFS:
+        finding_name = f"postfix_sql_cf:{filename}"
+        assert all(f.name != finding_name for f in result.findings), (
+            f"expected no finding for {finding_name} when alias_domain is empty"
+        )
+
+
+def test_check_demands_alias_domain_cfs_when_table_nonempty(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """alias_domain has rows + 2 conditional cfs absent → ERROR per missing cf."""
+    _clear_alias_domain(db)
+    _seed_domain(db, "primary.example")
+    _seed_domain(db, "alias.example")
+    _seed_alias_domain(db, alias_domain="alias.example", target_domain="primary.example")
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)  # 3 always-required cfs only
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md)
+    for filename in _ALIAS_DOMAIN_CFS:
+        f = _by_name(result, f"postfix_sql_cf:{filename}")
+        assert f.severity == "error", f.model_dump()
+        assert "missing" in f.message
+
+
+def test_check_accepts_alias_domain_cfs_when_present_and_matching(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """alias_domain has rows + 2 conditional cfs present and matching → INFO."""
+    _clear_alias_domain(db)
+    _seed_domain(db, "primary.example")
+    _seed_domain(db, "alias.example")
+    _seed_alias_domain(db, alias_domain="alias.example", target_domain="primary.example")
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(
+        sql_dir,
+        db,
+        files=(
+            "sql-virtual_mailbox_maps.cf",
+            "sql-virtual_alias_maps.cf",
+            "sql-virtual_domain_maps.cf",
+            "sql-virtual_alias_alias_domain_maps.cf",
+            "sql-virtual_mailbox_alias_domain_maps.cf",
+        ),
+    )
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md)
+    for filename in _ALIAS_DOMAIN_CFS:
+        f = _by_name(result, f"postfix_sql_cf:{filename}")
+        assert f.severity == "info", f.model_dump()
+
+
+def test_check_rejects_alias_domain_cfs_when_creds_mismatch(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """alias_domain has rows + 2 conditional cfs present but credentials wrong → ERROR."""
+    _clear_alias_domain(db)
+    _seed_domain(db, "primary.example")
+    _seed_domain(db, "alias.example")
+    _seed_alias_domain(db, alias_domain="alias.example", target_domain="primary.example")
+    sql_dir = tmp_path / "postfix"
+    # Write the 3 always-required cfs with correct creds...
+    _write_postfix_cf(sql_dir, db)
+    # ...then write the 2 conditional cfs with WRONG creds.
+    host, user, _, dbname = _engine_url_parts(db)
+    bad_body = f"hosts = {host}\nuser = {user}\npassword = WRONG\ndbname = {dbname}\n"
+    for filename in _ALIAS_DOMAIN_CFS:
+        cf_path = sql_dir / filename
+        cf_path.write_text(bad_body)
+        cf_path.chmod(0o600)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md)
+    for filename in _ALIAS_DOMAIN_CFS:
+        f = _by_name(result, f"postfix_sql_cf:{filename}")
+        assert f.severity == "error", f.model_dump()
+        assert "password" in f.message
 
 
 # ---------- deep checks ----------

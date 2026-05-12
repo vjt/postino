@@ -33,10 +33,24 @@ from postino_core.errors import ConfigError
 Severity = Literal["info", "warn", "error"]
 
 _REQUIRED_TABLES = frozenset({"mailbox", "alias", "domain", "quota2", "log"})
-_POSTFIX_CF_FILES = (
-    "sql-virtual_mailbox_maps.cf",
-    "sql-virtual_alias_maps.cf",
-    "sql-virtual_domain_maps.cf",
+
+_CfPolicy = Literal["always", "if_alias_domain_nonempty"]
+# Postfix sql-virtual_*.cf files tracked by `postino check`, paired with
+# the policy that decides whether each is mandatory.
+#
+# * ``always`` — required regardless of DB state (core PostfixAdmin map
+#   files). Missing → error.
+# * ``if_alias_domain_nonempty`` — required only when the
+#   ``alias_domain`` table has at least one row (i.e. the operator
+#   actually uses domain aliasing). Missing-while-not-required is silent;
+#   missing-while-required is an error. Present-and-matching always
+#   produces info, regardless of policy.
+_POSTFIX_CF_FILES: tuple[tuple[str, _CfPolicy], ...] = (
+    ("sql-virtual_mailbox_maps.cf", "always"),
+    ("sql-virtual_alias_maps.cf", "always"),
+    ("sql-virtual_domain_maps.cf", "always"),
+    ("sql-virtual_alias_alias_domain_maps.cf", "if_alias_domain_nonempty"),
+    ("sql-virtual_mailbox_alias_domain_maps.cf", "if_alias_domain_nonempty"),
 )
 _MAILDIRPP_SUBDIRS = ("cur", "new", "tmp")
 _HOOK_WRITE_BITS = 0o022
@@ -153,18 +167,41 @@ def _check_postcreation_hook(s: PostinoSettings) -> Finding:
     return _ok("postcreation_hook", f"{h} executable, mode tight")
 
 
+def _alias_domain_has_rows(engine: Engine) -> bool:
+    """Cheap existence probe for the ``alias_domain`` table.
+
+    Drives the conditional-cf policy in ``_check_postfix_sql_cfs``: the
+    two ``*_alias_domain_maps.cf`` files are only mandatory when at
+    least one alias_domain row exists.
+    """
+    with engine.connect() as conn:
+        n = conn.execute(text("SELECT COUNT(*) FROM alias_domain")).scalar_one()
+    return int(n) > 0
+
+
 def _check_postfix_sql_cfs(s: PostinoSettings, engine: Engine) -> list[Finding]:
     """Verify each postfix sql-virtual_*.cf is present AND matches engine.url.
 
     Postfix is the source of truth. Any drift between the file and the
     engine postino is currently using is a config-correctness bug.
+
+    Two cf files (``sql-virtual_alias_alias_domain_maps.cf`` and
+    ``sql-virtual_mailbox_alias_domain_maps.cf``) are required only when
+    the ``alias_domain`` table is non-empty. When the operator does not
+    use domain aliasing those files' absence is silent — no finding is
+    emitted. Present-and-matching always produces info, regardless of
+    policy.
     """
     out: list[Finding] = []
-    for filename in _POSTFIX_CF_FILES:
+    alias_domain_nonempty = _alias_domain_has_rows(engine)
+    for filename, policy in _POSTFIX_CF_FILES:
         cf = s.postfix_sql_dir / filename
         name = f"postfix_sql_cf:{filename}"
+        required = policy == "always" or alias_domain_nonempty
         if not cf.exists():
-            out.append(_err(name, f"postfix sql cf missing: {cf}"))
+            if required:
+                out.append(_err(name, f"postfix sql cf missing: {cf}"))
+            # else: silently skip — file is not required for this deployment.
             continue
         st = cf.stat()
         if st.st_mode & _CF_OTHERS_BITS:
