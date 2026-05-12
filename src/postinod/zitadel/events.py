@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import OrderedDict
 from collections.abc import Callable
 from datetime import datetime
 
@@ -44,12 +45,16 @@ from postino_core.errors import (
     AlreadyExistsError,
     CapacityError,
     ConfigError,
+    DBError,
+    FilesystemError,
+    HookError,
     NotFoundError,
 )
 from postino_core.models import MailboxCreate
 from postino_core.services.mailbox import MailboxService
 from postinod.audit import PostinodAuditExtra, audit_context, write_postinod_audit
 from postinod.auth.hmac_guard import HmacVerifier
+from postinod.scim.errors import scim_validation_detail
 from postinod.zitadel.mapping import EventOutcome, dispatch_event
 from postinod.zitadel.models import (
     HumanProfilePayload,
@@ -59,6 +64,26 @@ from postinod.zitadel.models import (
 )
 
 _logger = logging.getLogger(__name__)
+
+# Bounded dedup cache for Zitadel event replay. Keyed on
+# (user_id, event_type, created_at_iso). "Captured signed event
+# replayed within the wall-clock window flips lifecycle state with no
+# nonce-style dedup" closes here: any captured event recognised on a
+# second delivery short-circuits to 200 OK with no mutation.
+_SEEN_EVENT_CACHE_MAX = 8192
+
+# Audit-data string cap for replay rows. Zitadel event_type is
+# attacker-influenced (HMAC-authenticated but the secret-holder is the
+# threat). Truncating bounds log-table inflation.
+_AUDIT_FIELD_MAX_CHARS = 256
+
+
+def _truncate(value: str, limit: int = _AUDIT_FIELD_MAX_CHARS) -> str:
+    """Cap ``value`` at ``limit`` chars with a trailing marker so the
+    audit row stays bounded under a hostile signed payload."""
+    if len(value) <= limit:
+        return value
+    return value[:limit] + "…[truncated]"
 
 
 def build_zitadel_router(
@@ -84,7 +109,21 @@ def build_zitadel_router(
     [now - window, now + window]. A small clock skew either direction is
     tolerated; replay attacks past the window are rejected with 400 and
     a `postinod.zitadel.replay` audit row tagged with the event identifiers.
+
+    Within the window, a bounded LRU dedup cache keyed on
+    ``(user_id, event_type, created_at)`` collapses duplicate deliveries
+    to 200 OK with no mutation and no additional audit row — closes the
+    captured-signed-event replay path that wall-clock skew alone cannot.
     """
+
+    # OrderedDict-backed FIFO/LRU. Key: deterministic event identity.
+    # Value: True (we only care about membership). On insert past
+    # _SEEN_EVENT_CACHE_MAX we evict the oldest entry — natural for the
+    # delivery-order shape Zitadel produces.
+    seen_events: OrderedDict[tuple[str, str, str], bool] = OrderedDict()
+
+    def _seen_key(event: ZitadelEvent) -> tuple[str, str, str]:
+        return (event.user_id, event.event_type, event.created_at.isoformat())
 
     def _replay_audit(*, external_id: str, event_type: str, skew: int) -> None:
         with engine.begin() as conn:
@@ -96,8 +135,11 @@ def build_zitadel_router(
                 verb="replay",
                 domain="",
                 surface="zitadel",
-                external_id=external_id,
-                payload={"event_type": event_type, "skew_sec": str(skew)},
+                external_id=_truncate(external_id),
+                payload={
+                    "event_type": _truncate(event_type),
+                    "skew_sec": str(skew),
+                },
             )
 
     def _extra(
@@ -135,7 +177,21 @@ def build_zitadel_router(
         try:
             event = ZitadelEvent.model_validate(raw)
         except ValidationError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
+            raise HTTPException(status_code=400, detail=scim_validation_detail(e)) from e
+
+        # Event-id dedup: a delivery we've already accepted within the
+        # current cache window is idempotent. Short-circuit to 200 OK
+        # without re-applying the mutation; the original audit row
+        # already records the apply.
+        key = _seen_key(event)
+        if key in seen_events:
+            seen_events.move_to_end(key)
+            _logger.info(
+                "deduped replayed event_type=%s user_id=%s",
+                event.event_type,
+                event.user_id,
+            )
+            return {"ok": True}
 
         skew = abs((clock() - event.created_at).total_seconds())
         if skew > replay_window_seconds:
@@ -203,10 +259,28 @@ def build_zitadel_router(
                     verb="enable",
                 )
         except AlreadyExistsError:
+            seen_events[key] = True
+            if len(seen_events) > _SEEN_EVENT_CACHE_MAX:
+                seen_events.popitem(last=False)
             return {"ok": True}
         except (NotFoundError, CapacityError, ConfigError) as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
+        except (DBError, FilesystemError, HookError) as e:
+            # Internal mutator failures: log full detail server-side,
+            # return a generic 500 so a privileged HMAC peer cannot probe
+            # DBAPI / FS state via response bodies.
+            _logger.exception(
+                "internal failure processing event_type=%s user_id=%s",
+                event.event_type,
+                event.user_id,
+            )
+            raise HTTPException(status_code=500, detail="internal error") from e
 
+        # Successful apply: remember the event so a re-delivery is a
+        # cheap idempotent no-op.
+        seen_events[key] = True
+        if len(seen_events) > _SEEN_EVENT_CACHE_MAX:
+            seen_events.popitem(last=False)
         return {"ok": True}
 
     return Router(path="/", route_handlers=[events])

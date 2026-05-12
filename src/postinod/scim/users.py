@@ -40,13 +40,16 @@ from postino_core.errors import (
     AlreadyExistsError,
     CapacityError,
     ConfigError,
+    DBError,
+    FilesystemError,
+    HookError,
     NotFoundError,
 )
 from postino_core.models import Mailbox, MailboxCreate
 from postino_core.services.mailbox import MailboxService
 from postinod.audit import PostinodAuditExtra, audit_context
 from postinod.auth.jwt_guard import JwtVerifier
-from postinod.scim.errors import scim_error_from_exception
+from postinod.scim.errors import scim_error_from_exception, scim_validation_detail
 from postinod.scim.models import (
     PatchOp,
     PatchOpRequest,
@@ -246,7 +249,7 @@ def build_users_router(
         try:
             user = ScimUser.model_validate(raw)
         except ValidationError as e:
-            err = ScimError(status="400", scimType="invalidValue", detail=str(e))
+            err = ScimError(status="400", scimType="invalidValue", detail=scim_validation_detail(e))
             return _scim_response(err, 400)
 
         extra = _extra(
@@ -268,6 +271,9 @@ def build_users_router(
                 )
         except (NotFoundError, AlreadyExistsError, CapacityError, ConfigError) as e:
             return _err(e, create_path=isinstance(e, NotFoundError))
+        except (DBError, FilesystemError, HookError) as e:
+            _logger.exception("internal failure creating user %s", user.user_name)
+            return _err(e)
 
         username_str = str(created.username)
         location = f"/scim/v2/Users/{username_str}"
@@ -283,7 +289,7 @@ def build_users_router(
         try:
             email = _as_email(user_id)
         except ValidationError as e:
-            err = ScimError(status="400", scimType="invalidValue", detail=str(e))
+            err = ScimError(status="400", scimType="invalidValue", detail=scim_validation_detail(e))
             return _scim_response(err, 400)
 
         m = mailbox_service.get(email)
@@ -308,13 +314,13 @@ def build_users_router(
         try:
             patch_req = PatchOpRequest.model_validate(raw)
         except ValidationError as e:
-            err = ScimError(status="400", scimType="invalidValue", detail=str(e))
+            err = ScimError(status="400", scimType="invalidValue", detail=scim_validation_detail(e))
             return _scim_response(err, 400)
 
         try:
             email = _as_email(user_id)
         except ValidationError as e:
-            err = ScimError(status="400", scimType="invalidValue", detail=str(e))
+            err = ScimError(status="400", scimType="invalidValue", detail=scim_validation_detail(e))
             return _scim_response(err, 400)
 
         username_str = user_id
@@ -364,6 +370,9 @@ def build_users_router(
                         mailbox_service.set_status(email, new_status)
                 except NotFoundError as e:
                     return _err(e)
+                except (DBError, FilesystemError, HookError) as e:
+                    _logger.exception("internal failure on PATCH active for %s", email)
+                    return _err(e)
 
             elif op.op == "replace" and op.path == "name.formatted":
                 extra = _extra(
@@ -375,6 +384,9 @@ def build_users_router(
                     with audit_context(extra):
                         mailbox_service.set_name(email, str(op.value))
                 except NotFoundError as e:
+                    return _err(e)
+                except (DBError, FilesystemError, HookError) as e:
+                    _logger.exception("internal failure on PATCH name.formatted for %s", email)
                     return _err(e)
 
             elif op.path == "password":
@@ -400,6 +412,9 @@ def build_users_router(
                             )
                     except (NotFoundError, ConfigError) as e:
                         return _err(e)
+                    except (DBError, FilesystemError, HookError) as e:
+                        _logger.exception("internal failure on PATCH password (set) for %s", email)
+                        return _err(e)
                 else:  # release
                     if not mailbox_service.identity.supports_release_to_noauth():
                         err = ScimError(
@@ -417,6 +432,11 @@ def build_users_router(
                         with audit_context(extra):
                             mailbox_service.release_identity(email)
                     except (NotFoundError, ConfigError) as e:
+                        return _err(e)
+                    except (DBError, FilesystemError, HookError) as e:
+                        _logger.exception(
+                            "internal failure on PATCH password (release) for %s", email
+                        )
                         return _err(e)
 
         # Re-fetch to return current state.
@@ -442,7 +462,7 @@ def build_users_router(
         try:
             email = _as_email(user_id)
         except ValidationError as e:
-            raise HTTPException(status_code=400, detail=str(e)) from e
+            raise HTTPException(status_code=400, detail=scim_validation_detail(e)) from e
 
         extra = _extra(
             username_str=user_id,
@@ -454,6 +474,9 @@ def build_users_router(
                 mailbox_service.set_status(email, MailboxStatus.DISABLED)
         except NotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
+        except (DBError, FilesystemError, HookError) as e:
+            _logger.exception("internal failure on DELETE for %s", email)
+            raise HTTPException(status_code=500, detail="internal error") from e
 
     return Router(
         path="/",

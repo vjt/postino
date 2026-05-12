@@ -59,6 +59,13 @@ _logger = logging.getLogger(__name__)
 
 DEFAULT_TEST_QUOTA_BYTES = 1073741824  # 1 GiB
 
+# Hard cap on inbound request body size for postinod's endpoints. The
+# largest realistic SCIM POST (User create with multi-valued emails)
+# is a few KiB; Zitadel event bodies are smaller. Litestar's stock
+# default is 10 MiB which gives an unauthenticated peer 10 MiB of
+# free HMAC-hashing work before refusal — cap at 64 KiB instead.
+_REQUEST_MAX_BODY_SIZE_BYTES = 64 * 1024
+
 
 def build_minimal_app(*, ready_callback: Callable[[], bool]) -> Litestar:
     """Minimal Litestar app with health endpoints only.
@@ -69,6 +76,7 @@ def build_minimal_app(*, ready_callback: Callable[[], bool]) -> Litestar:
     return Litestar(
         route_handlers=[build_health_router(ready_callback=ready_callback)],
         debug=False,
+        request_max_body_size=_REQUEST_MAX_BODY_SIZE_BYTES,
     )
 
 
@@ -135,6 +143,7 @@ def build_app(*, toml_path: Path) -> Litestar:
             build_discovery_router(jwt_verifier=jwt_verifier),
         ],
         debug=False,
+        request_max_body_size=_REQUEST_MAX_BODY_SIZE_BYTES,
     )
 
 
@@ -274,4 +283,5 @@ def build_app_for_test(
             build_discovery_router(jwt_verifier=jwt_verifier),
         ],
         debug=False,
+        request_max_body_size=_REQUEST_MAX_BODY_SIZE_BYTES,
     )
