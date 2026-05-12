@@ -123,6 +123,11 @@ If installing on a slimmed-down FreeBSD host:
 - `tests/fixtures/postfixadmin.sql` is `--no-data` schema only — safe to commit.
 - DB credentials are NEVER stored in `postino.toml`. postino parses
   postfix's `sql-virtual_*.cf` for them; postfix is the single source of truth.
+- `postino check` validates 5 postfix `sql-virtual_*.cf` files. The
+  two `*_alias_domain_maps.cf` files are required iff the
+  `alias_domain` table has rows; otherwise they're optional. The
+  other three (`mailbox_maps`, `alias_maps`, `domain_maps`) are
+  always required.
 
 ## Engineering preferences
 

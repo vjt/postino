@@ -213,6 +213,8 @@ postino domain add example.com \
     --transport virtual
 
 postino domain list
+postino domain enable example.com
+postino domain disable example.com
 postino domain del example.com --yes
 ```
 
@@ -241,8 +243,36 @@ postino user del foo@example.com --keep-maildir
 ```sh
 postino alias add foo@example.com forwarded@elsewhere.test
 postino alias list --domain example.com
+postino alias enable foo@example.com
+postino alias disable foo@example.com
 postino alias del foo@example.com --yes
 ```
+
+### Alias domains
+
+Map one mail domain to another (PostfixAdmin's `alias_domain` table).
+Mail to `user@aliasdom.it` is delivered as `user@target.com` by
+postfix's `virtual_alias_domain_maps`.
+
+```sh
+# Both source and target domains must already exist in `postino domain list`.
+postino domain alias add aliasdom.it --target target.com
+
+postino domain alias list                       # active rows
+postino domain alias list --all                 # include disabled
+postino domain alias list --target target.com   # filter by target
+
+postino domain alias show aliasdom.it
+postino domain alias retarget aliasdom.it --target other.com
+postino domain alias disable aliasdom.it
+postino domain alias enable aliasdom.it
+postino domain alias del aliasdom.it --yes
+```
+
+postino enforces PostfixAdmin parity: no self-alias, no chains
+(source-already-target or target-already-source), both endpoint
+domains must exist, no duplicate rows. Mail loops are rejected at
+creation time. Exit code 10 indicates a rule violation.
 
 ### Quota usage
 

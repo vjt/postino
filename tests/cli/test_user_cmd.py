@@ -57,7 +57,7 @@ def env_for_cli(db_url: str, mail_root: Path, hook: Path, sql_dir: Path) -> dict
     }
 
 
-def make_postfix_cf(db_url: str, sql_dir: Path) -> None:
+def make_postfix_cf(db_url: str, sql_dir: Path, *, include_alias_domain: bool = False) -> None:
     body = db_url.replace("mysql+pymysql://", "")
     auth, _, hostdb = body.partition("@")
     user, _, pwd = auth.partition(":")
@@ -72,16 +72,27 @@ def make_postfix_cf(db_url: str, sql_dir: Path) -> None:
     host, _, _port = host.partition(":")
     sql_dir.mkdir(exist_ok=True)
     cf_body = f"hosts = {host}\nuser = {user}\npassword = {pwd}\ndbname = {dbname}\n"
-    # All three cf files written so `postino check` (which now verifies
+    # All three core cf files written so `postino check` (which now verifies
     # each one matches the engine URL) passes against the test bundle.
     # ``postino check`` also asserts the cf-file is not world/group-readable
     # (the file embeds the SQL password); chmod 0o600 so tests pass
     # regardless of the operator's umask.
-    for filename in (
+    files = [
         "sql-virtual_mailbox_maps.cf",
         "sql-virtual_alias_maps.cf",
         "sql-virtual_domain_maps.cf",
-    ):
+    ]
+    if include_alias_domain:
+        # The 2 conditional cf files — required by `postino check` only
+        # when the ``alias_domain`` table has rows. Opt-in to keep
+        # existing callers (whose tests don't seed alias_domain) green.
+        files.extend(
+            [
+                "sql-virtual_alias_alias_domain_maps.cf",
+                "sql-virtual_mailbox_alias_domain_maps.cf",
+            ]
+        )
+    for filename in files:
         cf_path = sql_dir / filename
         cf_path.write_text(cf_body)
         cf_path.chmod(0o600)

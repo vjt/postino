@@ -125,6 +125,125 @@ async def test_get_nonexistent_alias_returns_404(
     assert r.status_code == 404
 
 
+async def test_patch_active_false(
+    client: AsyncTestClient[Litestar],
+    auth_header: dict[str, str],
+    prepared_test_db: PreparedTestDB,
+) -> None:
+    """PATCH op=replace path=active value=false disables an existing alias."""
+    body = {
+        "schemas": ["urn:postino:params:scim:schemas:core:2.0:Alias"],
+        "address": "patchdown@example.org",
+        "goto": "alice@example.org",
+    }
+    r0 = await client.post("/scim/v2/Aliases", json=body, headers=auth_header)
+    assert r0.status_code == 201, r0.text
+
+    patch = {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        "Operations": [{"op": "replace", "path": "active", "value": False}],
+    }
+    r = await client.patch(
+        "/scim/v2/Aliases/patchdown@example.org", json=patch, headers=auth_header
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["active"] is False
+
+    alias = prepared_test_db.metadata.tables["alias"]
+    with prepared_test_db.engine.connect() as conn:
+        row = conn.execute(
+            select(alias).where(alias.c.address == "patchdown@example.org")
+        ).fetchone()
+    assert row is not None
+    assert row.active == 0
+
+
+async def test_patch_active_true_round_trip(
+    client: AsyncTestClient[Litestar],
+    auth_header: dict[str, str],
+    prepared_test_db: PreparedTestDB,
+) -> None:
+    """Disable then re-enable an alias via PATCH; final state is active."""
+    body = {
+        "schemas": ["urn:postino:params:scim:schemas:core:2.0:Alias"],
+        "address": "roundtrip@example.org",
+        "goto": "alice@example.org",
+    }
+    r0 = await client.post("/scim/v2/Aliases", json=body, headers=auth_header)
+    assert r0.status_code == 201, r0.text
+
+    disable = {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        "Operations": [{"op": "replace", "path": "active", "value": False}],
+    }
+    r1 = await client.patch(
+        "/scim/v2/Aliases/roundtrip@example.org", json=disable, headers=auth_header
+    )
+    assert r1.status_code == 200, r1.text
+    assert r1.json()["active"] is False
+
+    enable = {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        "Operations": [{"op": "replace", "path": "active", "value": True}],
+    }
+    r2 = await client.patch(
+        "/scim/v2/Aliases/roundtrip@example.org", json=enable, headers=auth_header
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["active"] is True
+
+    alias = prepared_test_db.metadata.tables["alias"]
+    with prepared_test_db.engine.connect() as conn:
+        row = conn.execute(
+            select(alias).where(alias.c.address == "roundtrip@example.org")
+        ).fetchone()
+    assert row is not None
+    assert row.active == 1
+
+
+async def test_patch_unsupported_path_returns_400(
+    client: AsyncTestClient[Litestar],
+    auth_header: dict[str, str],
+) -> None:
+    """PATCH with an unsupported path (e.g. goto) → 400 invalidPath."""
+    body = {
+        "schemas": ["urn:postino:params:scim:schemas:core:2.0:Alias"],
+        "address": "badpath@example.org",
+        "goto": "alice@example.org",
+    }
+    await client.post("/scim/v2/Aliases", json=body, headers=auth_header)
+    patch = {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        "Operations": [{"op": "replace", "path": "goto", "value": "bob@example.org"}],
+    }
+    r = await client.patch("/scim/v2/Aliases/badpath@example.org", json=patch, headers=auth_header)
+    assert r.status_code == 400
+    assert r.json()["scimType"] == "invalidPath"
+
+
+async def test_patch_active_missing_alias_returns_404(
+    client: AsyncTestClient[Litestar],
+    auth_header: dict[str, str],
+) -> None:
+    """PATCH on a non-existent alias → 404."""
+    patch = {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        "Operations": [{"op": "replace", "path": "active", "value": False}],
+    }
+    r = await client.patch("/scim/v2/Aliases/nobody@example.org", json=patch, headers=auth_header)
+    assert r.status_code == 404
+
+
+async def test_patch_requires_bearer(client: AsyncTestClient[Litestar]) -> None:
+    """PATCH with no Authorization header → 401."""
+    patch = {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        "Operations": [{"op": "replace", "path": "active", "value": False}],
+    }
+    r = await client.patch("/scim/v2/Aliases/anyone@example.org", json=patch)
+    assert r.status_code == 401
+
+
 async def test_alias_envelope_meta_and_content_type(
     client: AsyncTestClient[Litestar],
     auth_header: dict[str, str],

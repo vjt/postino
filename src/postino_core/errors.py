@@ -50,3 +50,13 @@ class MlmmjError(MailctlError):
     """An mlmmj subprocess exited non-zero, timed out, or produced an
     unparseable output. The detail message includes the truncated stderr
     from the failed subprocess for ops debugging."""
+
+
+class RuleViolationError(MailctlError):
+    """Fail-fast guard against domain rules beyond exists/missing.
+
+    Used when an input would create a cycle, a self-alias, or any
+    other configuration the on-disk schema cannot reject by
+    constraint alone. Distinct from AlreadyExistsError (which is
+    'this row is already there') and ConfigError (which is 'the
+    settings file is wrong')."""

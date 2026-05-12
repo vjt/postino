@@ -20,8 +20,8 @@
 97 = "WHY: **kwargs forwarded verbatim to BaseModel.model_validate; pydantic minors evolve the kwarg set (strict, extra, from_attributes, context, by_alias, by_name) — generic Any avoids LSP drift."
 
 [test_no_any."src/postinod/scim/models.py"]
-127 = "WHY: RFC 7644 §3.5.2 PatchOp.value is an arbitrary JSON node (string, bool, object, array, null) — no narrower type exists at the model layer."
-147 = "WHY: ListResponse.resources is a heterogeneous container of SCIM resource objects (User, Alias, Domain, Error) returned as dicts; concrete type is resolved by the router, not the envelope model."
+128 = "WHY: RFC 7644 §3.5.2 PatchOp.value is an arbitrary JSON node (string, bool, object, array, null) — no narrower type exists at the model layer."
+148 = "WHY: ListResponse.resources is a heterogeneous container of SCIM resource objects (User, Alias, Domain, Error) returned as dicts; concrete type is resolved by the router, not the envelope model."
 
 [test_no_cast]
 [test_no_cast."src/postino/commands/alias.py"]
@@ -70,25 +70,25 @@
 
 [test_type_ignore_justified."src/postino_core/services/alias.py"]
 98 = "WHY: SQLAlchemy RowMapping access yields Any; documented project-wide."
-129 = "WHY: SQLAlchemy RowMapping access yields Any."
-133 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-134 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-135 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-136 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-137 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-138 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+149 = "WHY: SQLAlchemy RowMapping access yields Any."
+153 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+154 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+155 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+156 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+157 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+158 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/domain.py"]
-# Lines 137 and 264 carry inline WHY comments; no allowlist entry needed.
+# Lines 136 and 264 carry inline WHY comments; no allowlist entry needed.
 # Lines below are _row_to_model body: SQLAlchemy RowMapping[str, Any] indexing.
-270 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-271 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-272 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-273 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-275 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-276 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-277 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-278 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+289 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+290 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+291 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+292 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+294 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+295 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+296 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+297 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/mailbox.py"]
 # Lines shifted after the Protocol cleanup (cluster 3 of the

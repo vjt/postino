@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pytest
 
 from postino.exit import (
@@ -13,6 +15,7 @@ from postino_core.errors import (
     MailctlError,
     MlmmjError,
     NotFoundError,
+    RuleViolationError,
 )
 
 
@@ -52,3 +55,25 @@ def test_mlmmj_error_inherits_mailctl_error() -> None:
 def test_mlmmj_error_exits_with_code_9() -> None:
     """Defence-in-depth: regression guard against silent exit-code drift."""
     assert _EXIT_CODES[MlmmjError] == 9
+
+
+def test_rule_violation_error_subclasses_mailctlerror() -> None:
+    err = RuleViolationError("self-alias not allowed")
+    assert isinstance(err, MailctlError)
+    assert str(err) == "self-alias not allowed"
+
+
+def test_rule_violation_error_distinct_from_other_errors() -> None:
+    """RuleViolationError must not be caught by a generic ValueError handler."""
+    err = RuleViolationError("x")
+    assert not isinstance(err, ValueError)
+
+
+def test_rule_violation_error_raises_cleanly() -> None:
+    with pytest.raises(RuleViolationError, match="bad rule"):
+        raise RuleViolationError("bad rule")
+
+
+def test_rule_violation_error_exits_with_code_10() -> None:
+    """Defence-in-depth: regression guard against silent exit-code drift."""
+    assert _EXIT_CODES[RuleViolationError] == 10

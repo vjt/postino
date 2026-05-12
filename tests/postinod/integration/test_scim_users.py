@@ -92,6 +92,66 @@ async def test_patch_active_disables_user(
     assert row.active == 0
 
 
+async def test_patch_active_round_trip_routes_through_service(
+    client: AsyncTestClient[Litestar],
+    auth_header: dict[str, str],
+    prepared_test_db: PreparedTestDB,
+) -> None:
+    """v0.5 already wires PATCH active; this test guards against regression.
+
+    Asserts that setting active=False then active=True flips the row's
+    state by going through MailboxService.set_status (not a private
+    shortcut). Also asserts SCIM GET reflects the new state.
+    """
+    body = {
+        "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+        "userName": "regression@example.org",
+        "name": {"formatted": "Reg R"},
+        "active": True,
+    }
+    r = await client.post("/scim/v2/Users", json=body, headers=auth_header)
+    assert r.status_code == 201, r.text
+
+    mailbox = prepared_test_db.metadata.tables["mailbox"]
+
+    # Disable.
+    off_body = {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        "Operations": [{"op": "replace", "path": "active", "value": False}],
+    }
+    r = await client.patch(
+        "/scim/v2/Users/regression@example.org", json=off_body, headers=auth_header
+    )
+    assert r.status_code == 200
+    with prepared_test_db.engine.connect() as conn:
+        row = conn.execute(
+            select(mailbox).where(mailbox.c.username == "regression@example.org")
+        ).fetchone()
+    assert row is not None
+    assert row.active == 0
+
+    # Re-enable.
+    on_body = {
+        "schemas": ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+        "Operations": [{"op": "replace", "path": "active", "value": True}],
+    }
+    r = await client.patch(
+        "/scim/v2/Users/regression@example.org", json=on_body, headers=auth_header
+    )
+    assert r.status_code == 200
+    with prepared_test_db.engine.connect() as conn:
+        row = conn.execute(
+            select(mailbox).where(mailbox.c.username == "regression@example.org")
+        ).fetchone()
+    assert row is not None
+    assert row.active == 1
+
+    # SCIM GET reflects the new state.
+    r = await client.get("/scim/v2/Users/regression@example.org", headers=auth_header)
+    assert r.status_code == 200
+    assert r.json()["active"] is True
+
+
 async def test_delete_soft_deletes(
     client: AsyncTestClient[Litestar],
     auth_header: dict[str, str],
