@@ -140,6 +140,19 @@ Breaking: JWT tokens missing `iat` are rejected. Tokens older than
 `scim_max_token_age_seconds` (default 1h) are rejected even when
 `exp` is further out.
 
+### v0.7.1 — release pipeline gate (shipped 2026-05-12)
+
+CI/workflow-only patch (wheel code identical to v0.7.0 modulo
+version string). Extracted reusable `verify.yml`
+(`workflow_call`); `ci.yml` and `release.yml` both call it.
+`build-and-publish` now `needs: verify`, so a tag push cannot ship
+to PyPI when the same SHA's lint/test/postinod-e2e pipeline is red.
+
+`scripts/check.sh` now surfaces silent skips (pytest 9 dropped the
+trailing summary line so the previous regex was a no-op). Default:
+yellow warning + remediation hint. `POSTINO_CHECK_STRICT=1` makes
+it fail-exit; use this before tagging.
+
 ## Production hardening (anytime)
 
 - Docker image — official runtime container, FROM python:3.13-slim
