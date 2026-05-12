@@ -21,9 +21,6 @@ and
 System-wide configuration (FreeBSD). Per-deploy identity backend, paths,
 mlmmj settings.
 .TP
-.B /etc/postino/postino.toml
-System-wide configuration (Debian/Ubuntu). Same format as above.
-.TP
 .B ~/.config/postino/postino.toml
 Per-user override; merged on top of the system file.
 .TP
