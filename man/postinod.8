@@ -3,7 +3,6 @@
 postinod \- HTTP daemon: SCIM 2.0 + Zitadel event sink for postino
 .SH SYNOPSIS
 .B postinod
-.RI [ options ]
 .SH DESCRIPTION
 .B postinod
 exposes two HTTP surfaces against the PostfixAdmin SQL schema:
@@ -27,16 +26,22 @@ is enforced at startup and matches the
 configuration.
 .SH ENVIRONMENT
 .TP
-.B POSTINOD_SCIM_HMAC_SECRET
-.TP
 .B POSTINOD_ZITADEL_HMAC_SECRET
-Both required, 32-byte minimum, env-only (never read from TOML).
+Required, 32-byte minimum, env-only (never read from TOML).
+Guards the
+.B /zitadel/events
+endpoint. SCIM authentication uses JWT/JWKS; HMAC is Zitadel-events-only.
 .TP
 .B POSTINOD_SCIM_MAX_TOKEN_AGE_SECONDS
 JWT \fBiat\fR-anchored max age. Default: 3600.
 .TP
-.B POSTINO_DATABASE_URL
-Inherited from \fBpostino\fR(1); same DSN, same parse rules.
+.B POSTINO_POSTFIX_SQL_DIR
+Path to the directory holding postfix's
+.B sql-virtual_*.cf
+files. postinod (and
+.BR postino (1))
+parse those files for the database
+DSN \(em postfix stays the single source of truth for DB credentials.
 .SH FILES
 .TP
 .B /usr/local/etc/postino/postino.toml
