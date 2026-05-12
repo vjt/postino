@@ -80,7 +80,7 @@ def build_services(
     creds = settings.mailbox_creds()
     engine = make_engine(creds, echo=echo)
     metadata = reflect_schema(engine)
-    identity = _provider_for(settings.identity_backend, metadata=metadata, clock=clock)
+    identity = provider_for(settings.identity_backend, metadata=metadata, clock=clock)
     fs = FilesystemAdapter(
         mail_root=settings.virtual_mailbox_base,
         vmail_uid=settings.vmail_uid,
@@ -142,7 +142,7 @@ def build_services(
     )
 
 
-def _provider_for(
+def provider_for(
     backend: IdentityBackend,
     *,
     metadata: MetaData,

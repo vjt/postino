@@ -12,7 +12,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, EmailStr, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, SecretStr, field_validator, model_validator
 
 from postino_core.enums import (
     DomainTransport,
@@ -48,9 +48,9 @@ class MailboxCreate(BaseModel):
     both the LOCAL backend (which provisions ``mailbox.password`` from
     these fields) and the NOAUTH backend (where dovecot authenticates
     via an external IdP and the ``{NOAUTH}`` sentinel stays in place).
-    ``LocalProvider.create_identity`` raises ``ConfigError`` if either
-    field is None, so callers can't silently provision a passwordless
-    local mailbox.
+    A ``model_validator`` rejects the half-state — both must be set or
+    both None — so providers don't have to re-validate at the mutator
+    layer and a typo at the CLI boundary surfaces immediately.
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
@@ -60,6 +60,14 @@ class MailboxCreate(BaseModel):
     name: str
     quota_bytes: int
     scheme: PasswordScheme | None = None
+
+    @model_validator(mode="after")
+    def _password_scheme_pair(self) -> MailboxCreate:
+        if (self.password is None) != (self.scheme is None):
+            raise ValueError(
+                "password and scheme must be supplied together (both set or both None)"
+            )
+        return self
 
 
 class MailboxUsage(BaseModel):

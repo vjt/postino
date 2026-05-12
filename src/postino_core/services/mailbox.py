@@ -42,7 +42,7 @@ from postino_core.errors import (
 from postino_core.fs import FilesystemAdapter
 from postino_core.hooks import HookRunner
 from postino_core.models import Mailbox, MailboxCreate
-from postino_core.providers import SENTINEL_NOAUTH, IdentityProvider
+from postino_core.providers import IdentityProvider
 
 _logger = logging.getLogger(__name__)
 
@@ -252,27 +252,17 @@ class MailboxService:
         return self._row_to_model(row._mapping)  # type: ignore[arg-type]
 
     def is_idp_managed(self, username: EmailStr) -> bool:
-        """Return True if `username`'s row currently holds the {NOAUTH} sentinel.
+        """Return True if `username`'s row currently belongs to the
+        external IdP.
 
-        Used by CLI guards (`user passwd --claim`, `user release`) to decide
-        whether a credential rotation crosses the IdP↔SQL boundary. The
-        underlying SQL column is not surfaced on the `Mailbox` domain model
-        by design — only the boolean predicate escapes this service.
-        """
-        # WHY: we read `mailbox.password` directly here rather than adding
-        # the column to the Mailbox pydantic model. Surfacing the raw hash
-        # (or the {NOAUTH} sentinel) on a domain model would force every
-        # caller — including JSON renderers — to handle redaction. Keeping
-        # the column behind this predicate confines credential-format
-        # awareness to the service layer.
-        mailbox = self._md.tables["mailbox"]
+        Used by CLI guards (`user passwd --claim`, `user release`) to
+        decide whether a credential rotation crosses the IdP↔SQL boundary.
+        Delegates entirely to the active ``IdentityProvider`` — the
+        ``{NOAUTH}`` sentinel literal is private to the providers.
+
+        Raises ``NotFoundError`` if the mailbox row does not exist."""
         with self._engine.connect() as conn:
-            row = conn.execute(
-                select(mailbox.c.password).where(mailbox.c.username == str(username))
-            ).fetchone()
-        if row is None:
-            raise NotFoundError(f"mailbox {username} does not exist")
-        return str(row[0]) == SENTINEL_NOAUTH
+            return self._identity.is_idp_managed(conn, str(username))
 
     def _assert_domain_capacity(self, conn: Connection, domain: str) -> None:
         d = self._md.tables["domain"]
@@ -304,7 +294,7 @@ class MailboxService:
             conn.execute(
                 mailbox.insert().values(
                     username=str(create.username),
-                    password=SENTINEL_NOAUTH,
+                    password=self._identity.bootstrap_password_value(),
                     name=create.name,
                     maildir=str(maildir) + "/",
                     quota=create.quota_bytes,

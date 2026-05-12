@@ -104,6 +104,21 @@ class HybridProvider:
     def supports_release_to_noauth(self) -> bool:
         return True
 
+    def is_idp_managed(self, conn: Connection, username: str) -> bool:
+        """Reads ``mailbox.password`` and compares against the
+        ``{NOAUTH}`` sentinel. The column itself stays private to the
+        provider; ``MailboxService`` consumes only the predicate."""
+        current = self._current_password(conn, username)
+        if current is None:
+            raise NotFoundError(f"mailbox {username} does not exist")
+        # Treat empty string the same as the sentinel: dovecot's
+        # passdb-sql falls through on both, so semantically "no local
+        # credential" → IdP-managed.
+        return current in (SENTINEL_NOAUTH, "")
+
+    def bootstrap_password_value(self) -> str:
+        return SENTINEL_NOAUTH
+
     def _current_password(self, conn: Connection, username: str) -> str | None:
         mailbox = self._metadata.tables["mailbox"]
         return conn.execute(

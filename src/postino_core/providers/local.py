@@ -9,12 +9,13 @@ from collections.abc import Callable
 from datetime import datetime
 
 from pydantic import SecretStr
-from sqlalchemy import MetaData, update
+from sqlalchemy import MetaData, select, update
 from sqlalchemy.engine import Connection
 
 from postino_core.enums import PasswordScheme
 from postino_core.errors import ConfigError, NotFoundError
 from postino_core.password import hash_password
+from postino_core.providers.base import SENTINEL_NOAUTH
 
 
 class LocalProvider:
@@ -74,6 +75,24 @@ class LocalProvider:
 
     def supports_release_to_noauth(self) -> bool:
         return False
+
+    def is_idp_managed(self, conn: Connection, username: str) -> bool:
+        """Under the local backend every row carries a hash; rows on
+        the sentinel exist only transiently between the bootstrap
+        INSERT and ``create_identity``'s UPDATE inside the same tx.
+
+        Returns False unconditionally for a known-existing row;
+        raises ``NotFoundError`` if the row is absent."""
+        mailbox = self._metadata.tables["mailbox"]
+        row = conn.execute(
+            select(mailbox.c.username).where(mailbox.c.username == username)
+        ).fetchone()
+        if row is None:
+            raise NotFoundError(f"mailbox {username} does not exist")
+        return False
+
+    def bootstrap_password_value(self) -> str:
+        return SENTINEL_NOAUTH
 
     def _set(
         self,

@@ -29,14 +29,9 @@ from postino_core.enums import IdentityBackend
 from postino_core.errors import ConfigError
 from postino_core.fs import FilesystemAdapter
 from postino_core.hooks import HookRunner
-from postino_core.providers import (
-    HybridProvider,
-    IdentityProvider,
-    LocalProvider,
-    NoAuthProvider,
-)
+from postino_core.providers import IdentityProvider
 from postino_core.services.alias import AliasService
-from postino_core.services.bundle import build_services
+from postino_core.services.bundle import build_services, provider_for
 from postino_core.services.domain import DomainService
 from postino_core.services.mailbox import MailboxService
 from postinod.audit import PostinodAuditWriter
@@ -155,31 +150,57 @@ def _enforce_identity_contract(
     settings: PostinoSettings,
     identity: IdentityProvider,
 ) -> None:
-    """Fail-fast: refuse boot when settings.identity_backend conflicts with the wired provider.
+    """Fail-fast: refuse boot when settings.identity_backend conflicts
+    with the wired provider's capability surface.
 
-    Today the only forbidden combination is::
+    Forbidden combinations:
 
-        settings.identity_backend == NOAUTH and provider supports password writes
+    * ``NOAUTH`` + provider that advertises password writes
+      (``supports_password_change`` or ``supports_local_provisioning``).
+      The deployment promises Dovecot owns the credential chain, but a
+      credential-writing provider would let SCIM/Zitadel writes
+      silently break the IdP-only contract.
+    * ``LOCAL`` + provider that *cannot* write passwords. The
+      deployment promises every row carries a hash, but a no-write
+      provider would silently leave rows on the sentinel that no
+      passdb chain will pick up.
+    * ``HYBRID`` + provider that does not advertise release-to-noauth.
+      The hybrid surface (CLI ``user release``, SCIM PATCH release) is
+      defined; refusing it via a mismatched provider would surface as
+      ConfigError mid-transaction instead of at boot.
 
-    Under that posture the deployment promises Dovecot owns the credential
-    chain, but the provider is happy to mutate ``mailbox.password`` — which
-    would let SCIM/Zitadel writes silently break the IdP-only contract.
-    Other combinations (HYBRID + HybridProvider, LOCAL + LocalProvider, etc.)
-    are accepted; the architecture tests under tests/architecture/ catch
-    SCIM/Zitadel paths that try to write a password under a non-Hybrid
-    deployment.
-
-    Implementation note: uses Protocol capability predicates rather than
-    isinstance() so any future backend that advertises the same contract is
-    accepted without naming concrete classes here.
+    Implementation: capability predicates rather than ``isinstance()``
+    so a future backend advertising the same contract slots in
+    without naming concrete classes here.
     """
-    if settings.identity_backend is IdentityBackend.NOAUTH and (
+    backend = settings.identity_backend
+    provider_name = type(identity).__name__
+    if backend is IdentityBackend.NOAUTH and (
         identity.supports_password_change() or identity.supports_local_provisioning()
     ):
         raise ConfigError(
-            "identity_backend=noauth deployment received a credential-writing provider "
-            f"({type(identity).__name__}); refusing to boot — fix postino.toml or wire "
-            "the matching provider"
+            f"identity_backend=noauth deployment received a credential-writing "
+            f"provider ({provider_name}); refusing to boot — fix postino.toml "
+            "or wire the matching provider"
+        )
+    if backend is IdentityBackend.LOCAL and not (
+        identity.supports_password_change() and identity.supports_local_provisioning()
+    ):
+        raise ConfigError(
+            f"identity_backend=local deployment received a non-credential-writing "
+            f"provider ({provider_name}); refusing to boot — local backend requires "
+            "supports_password_change and supports_local_provisioning"
+        )
+    if backend is IdentityBackend.HYBRID and not (
+        identity.supports_password_change()
+        and identity.supports_local_provisioning()
+        and identity.supports_release_to_noauth()
+    ):
+        raise ConfigError(
+            f"identity_backend=hybrid deployment received a provider "
+            f"({provider_name}) that does not advertise the full hybrid "
+            "capability set (password change + local provisioning + release "
+            "to noauth); refusing to boot"
         )
 
 
@@ -215,13 +236,10 @@ def build_app_for_test(
     fs = FilesystemAdapter(mail_root=mail_root, vmail_uid=-1, vmail_gid=-1)
     hooks = HookRunner(script_path=postcreation_hook)
     audit_writer = PostinodAuditWriter(metadata=metadata, clock=_utc_now)
-    identity: IdentityProvider
-    if identity_backend is IdentityBackend.HYBRID:
-        identity = HybridProvider(metadata=metadata, clock=_utc_now)
-    elif identity_backend is IdentityBackend.LOCAL:
-        identity = LocalProvider(metadata=metadata, clock=_utc_now)
-    else:
-        identity = NoAuthProvider()
+    # Single dispatch site: same `provider_for` production calls via
+    # `build_services` so adding an IdentityBackend enum value lands in
+    # one place. A1.6 in the 2026-05-12 codebase review.
+    identity: IdentityProvider = provider_for(identity_backend, metadata=metadata, clock=_utc_now)
     mailbox = MailboxService(
         engine=db_engine,
         identity=identity,

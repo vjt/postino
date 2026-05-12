@@ -20,6 +20,7 @@ from sqlalchemy.engine import Connection
 
 from postino_core.enums import PasswordScheme
 from postino_core.errors import ConfigError
+from postino_core.providers.base import SENTINEL_NOAUTH
 
 
 class NoAuthProvider:
@@ -83,3 +84,13 @@ class NoAuthProvider:
         # advertise the capability so the SCIM PATCH password handler
         # returns 403 mutability instead of silently no-op'ing.
         return False
+
+    def is_idp_managed(self, conn: Connection, username: str) -> bool:
+        """Every row under noauth is IdP-managed by definition; we do
+        not verify the row exists here (cheap no-op, matches the
+        spirit of NoAuthProvider being a pass-through)."""
+        del conn, username
+        return True
+
+    def bootstrap_password_value(self) -> str:
+        return SENTINEL_NOAUTH

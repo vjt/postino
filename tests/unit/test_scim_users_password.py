@@ -41,12 +41,17 @@ def test_post_without_password_yields_none() -> None:
 
 @pytest.mark.cli
 def test_patch_password_dispatch_table() -> None:
-    """Pure-function dispatcher: maps PatchOp → ("set"|"release", value)."""
+    """Pure-function dispatcher: maps PatchOp → ("set"|"release", SecretStr)."""
     from postinod.scim import users
     from postinod.scim.models import PatchOp
 
+    # Set: cleartext is wrapped in SecretStr at the dispatcher boundary so
+    # downstream locals carry the redacting wrapper, not a bare str.
     set_op = PatchOp(op="replace", path="password", value="hunter2")
-    assert users._patch_password_intent(set_op) == ("set", "hunter2")  # pyright: ignore[reportPrivateUsage]  # WHY: module-private helper exercised directly to assert dialect normalisation
+    intent, value = users._patch_password_intent(set_op)  # pyright: ignore[reportPrivateUsage]  # WHY: module-private helper exercised directly to assert dialect normalisation
+    assert intent == "set"
+    assert value is not None
+    assert value.get_secret_value() == "hunter2"
 
     null_op = PatchOp(op="replace", path="password", value=None)
     assert users._patch_password_intent(null_op) == ("release", None)  # pyright: ignore[reportPrivateUsage]  # WHY: module-private helper exercised directly to assert dialect normalisation

@@ -12,6 +12,7 @@ from pydantic import SecretStr
 from sqlalchemy.engine import Connection
 
 from postino_core.enums import PasswordScheme
+from postino_core.providers.base import SENTINEL_NOAUTH
 
 
 @dataclass
@@ -39,6 +40,8 @@ class FakeIdentityProvider:
 
     supports_password_change_value: bool = True
     supports_local_provisioning_value: bool = True
+    supports_release_to_noauth_value: bool = True
+    is_idp_managed_value: bool = False
     fail_on: str | None = None
     calls: list[FakeIdentityCall] = field(default_factory=_empty_calls)
 
@@ -91,5 +94,11 @@ class FakeIdentityProvider:
         return self.supports_local_provisioning_value
 
     def supports_release_to_noauth(self) -> bool:
-        # Fake allows all operations for maximum test coverage.
-        return True
+        return self.supports_release_to_noauth_value
+
+    def is_idp_managed(self, conn: Connection, username: str) -> bool:
+        del conn, username
+        return self.is_idp_managed_value
+
+    def bootstrap_password_value(self) -> str:
+        return SENTINEL_NOAUTH

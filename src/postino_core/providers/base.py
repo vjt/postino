@@ -113,3 +113,27 @@ class IdentityProvider(Protocol):
         in that mode users must be created in the IdP first and the
         mailbox row gets the ``{NOAUTH}`` sentinel."""
         ...
+
+    def is_idp_managed(self, conn: Connection, username: str) -> bool:
+        """Return True if ``username``'s credential is currently owned by
+        the external IdP (i.e. the row carries the ``{NOAUTH}`` sentinel).
+
+        Exists so ``MailboxService`` doesn't have to read the password
+        column directly — the credential-format awareness stays inside
+        the provider. ``LocalProvider`` always returns False;
+        ``NoAuthProvider`` always returns True; ``HybridProvider`` reads
+        the column.
+
+        Raises ``NotFoundError`` if the mailbox row does not exist."""
+        ...
+
+    def bootstrap_password_value(self) -> str:
+        """The literal value the provider wants to see in
+        ``mailbox.password`` right after the bootstrap INSERT — before
+        ``create_identity`` may rewrite it.
+
+        Returning the ``{NOAUTH}`` sentinel is the default; backends that
+        want a different placeholder (e.g. an empty string under a
+        future LDAP-resident scheme) override here without forcing
+        ``MailboxService`` to know."""
+        ...

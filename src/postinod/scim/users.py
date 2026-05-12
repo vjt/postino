@@ -147,8 +147,15 @@ def _make_mailbox_create(user: ScimUser, *, default_quota_bytes: int) -> Mailbox
     )
 
 
-def _patch_password_intent(op: PatchOp) -> tuple[str, str | None]:
+def _patch_password_intent(op: PatchOp) -> tuple[str, SecretStr | None]:
     """Map a PATCH op on path=password to ("set"|"release", value).
+
+    Wraps the cleartext in ``SecretStr`` here — before this function
+    returns the value lives in a Python ``str`` for at most the
+    duration of one local variable. Keeping the boundary tight means
+    subsequent locals on the stack carry the ``SecretStr`` wrapper
+    (which redacts on repr / model_dump) instead of bare strings that
+    show up in tracebacks under debug renderers.
 
     Accepts Okta-style ``op=remove`` and Azure-style ``op=replace,
     value=null|""``; both collapse to release_identity. ``op=replace``
@@ -159,7 +166,7 @@ def _patch_password_intent(op: PatchOp) -> tuple[str, str | None]:
     if op.op == "replace":
         if op.value is None or op.value == "":
             return ("release", None)
-        return ("set", str(op.value))
+        return ("set", SecretStr(str(op.value)))
     raise ValueError(f"unsupported op {op.op!r} on path=password")
 
 
@@ -407,9 +414,7 @@ def build_users_router(
                     assert value is not None
                     try:
                         with audit_context(extra):
-                            mailbox_service.set_password(
-                                email, SecretStr(value), PasswordScheme.BCRYPT
-                            )
+                            mailbox_service.set_password(email, value, PasswordScheme.BCRYPT)
                     except (NotFoundError, ConfigError) as e:
                         return _err(e)
                     except (DBError, FilesystemError, HookError) as e:
