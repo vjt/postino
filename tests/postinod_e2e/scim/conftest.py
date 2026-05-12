@@ -78,12 +78,14 @@ def bearer_token(keypair: RSAPrivateKey) -> str:
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
+    now = datetime.now(UTC)
     return jwt.encode(
         {
             "iss": "http://jwks-stub",
             "aud": "postinod",
             "sub": "e2e",
-            "exp": datetime.now(UTC) + timedelta(hours=1),
+            "iat": now,
+            "exp": now + timedelta(hours=1),
         },
         pem,
         algorithm="RS256",
