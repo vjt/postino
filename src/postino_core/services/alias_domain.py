@@ -13,6 +13,7 @@ from datetime import datetime
 from sqlalchemy import MetaData, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.row import RowMapping
+from sqlalchemy.exc import IntegrityError
 
 from postino_core.audit import AuditWriter, DefaultAuditWriter, mk_action
 from postino_core.db import translate_db_errors
@@ -106,36 +107,38 @@ class AliasDomainService:
                     raise NotFoundError(f"domain {d} does not exist")
             # Rules 4, 5: no chain — alias_domain not already a target,
             # target not already a source. Single round-trip via OR.
+            # with_for_update() lock-reads under InnoDB REPEATABLE READ so
+            # two concurrent writers can't both pass validation.
             chain = conn.execute(
-                select(t.c.alias_domain).where(
-                    (t.c.target_domain == alias_domain) | (t.c.alias_domain == target)
-                )
+                select(t.c.alias_domain)
+                .where((t.c.target_domain == alias_domain) | (t.c.alias_domain == target))
+                .with_for_update()
             ).first()
             if chain is not None:
                 raise RuleViolationError(
                     f"adding {alias_domain} -> {target} would chain "
                     "with an existing alias_domain row"
                 )
-            # Rule 6: row must not already exist.
-            dup = conn.execute(
-                select(t.c.alias_domain).where(t.c.alias_domain == alias_domain)
-            ).first()
-            if dup is not None:
-                raise AlreadyExistsError(f"alias_domain {alias_domain} already exists")
-            conn.execute(
-                t.insert().values(
-                    alias_domain=alias_domain,
-                    target_domain=target,
-                    created=now,
-                    modified=now,
-                    active=int(MailboxStatus.ACTIVE),
+            # Rule 6: row uniqueness is enforced by the alias_domain PK;
+            # translate the IntegrityError instead of a redundant pre-flight
+            # SELECT (which would lose the race under contention).
+            try:
+                conn.execute(
+                    t.insert().values(
+                        alias_domain=alias_domain,
+                        target_domain=target,
+                        created=now,
+                        modified=now,
+                        active=int(MailboxStatus.ACTIVE),
+                    )
                 )
-            )
+            except IntegrityError as e:
+                raise AlreadyExistsError(f"alias_domain {alias_domain} already exists") from e
             self._audit.write(
                 conn,
                 action=mk_action("alias_domain", "add"),
                 domain=alias_domain,
-                data=f"target={target}",
+                data=f"{alias_domain}->{target}",
             )
         return self.get(alias_domain)
 
