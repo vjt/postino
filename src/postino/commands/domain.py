@@ -90,3 +90,61 @@ def delete(
 def list_(ctx: typer.Context) -> None:
     items = get_services(ctx).domain.list()
     Renderer(json=is_json(ctx)).render(items)
+
+
+alias_app = typer.Typer(
+    no_args_is_help=True,
+    add_completion=False,
+    help="Manage alias_domain rows",
+)
+app.add_typer(alias_app, name="alias")
+
+
+@alias_app.command("add")
+def alias_add(
+    ctx: typer.Context,
+    alias_domain: str,
+    target: Annotated[str, typer.Option("--target", help="Target domain")],
+) -> None:
+    """Map alias_domain -> target."""
+    try:
+        row = get_services(ctx).alias_domain.add(alias_domain, target=target)
+        Renderer(json=is_json(ctx)).render(row)
+    except MailctlError as e:
+        exit_with_error(e)
+
+
+@alias_app.command("list")
+def alias_list(
+    ctx: typer.Context,
+    target: Annotated[str, typer.Option("--target", help="Filter by target_domain")] = "",
+    include_disabled: Annotated[bool, typer.Option("--all/--enabled-only")] = False,
+) -> None:
+    rows = get_services(ctx).alias_domain.list(
+        target=target or None,
+        include_disabled=include_disabled,
+    )
+    Renderer(json=is_json(ctx)).render(rows)
+
+
+@alias_app.command("show")
+def alias_show(ctx: typer.Context, alias_domain: str) -> None:
+    try:
+        row = get_services(ctx).alias_domain.get(alias_domain)
+        Renderer(json=is_json(ctx)).render(row)
+    except MailctlError as e:
+        exit_with_error(e)
+
+
+@alias_app.command("del")
+def alias_del(
+    ctx: typer.Context,
+    alias_domain: str,
+    yes: Annotated[bool, typer.Option("--yes", "-y")] = False,
+) -> None:
+    if not yes:
+        typer.confirm(f"Delete alias_domain {alias_domain}?", abort=True)
+    try:
+        get_services(ctx).alias_domain.delete(alias_domain)
+    except MailctlError as e:
+        exit_with_error(e)
