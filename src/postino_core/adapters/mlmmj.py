@@ -44,6 +44,17 @@ _STDERR_MAX = 512  # truncate noisy mlmmj stderr in error messages
 _CREATE_LOCK_NAME = ".create.lock"
 _DELETING_PREFIX = ".deleting."
 
+# Minimal env passed to mlmmj subprocesses. The parent process may
+# carry POSTINO_*, .env-exported credentials, etc. — none of which
+# mlmmj-sub/unsub/list consume. Some mlmmj debug builds log argv
+# and environment to syslog; scrub the env block to a clean
+# allowlist. (L2-S12)
+_MLMMJ_ENV: dict[str, str] = {
+    "PATH": "/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/sbin:/usr/local/bin",
+    "HOME": "/",
+    "LANG": "C",
+}
+
 # Spool subdirs created for every list — the mlmmj 1.0+ contract.
 # Matches the layout produced by upstream `mlmmj-make-ml`.
 _SPOOL_SUBDIRS: tuple[str, ...] = (
@@ -126,6 +137,8 @@ class MlmmjAdapter:
                 timeout=self._timeout,
                 preexec_fn=self._preexec(),
                 check=False,
+                env=_MLMMJ_ENV,
+                cwd="/",
             )
         except subprocess.TimeoutExpired as e:
             raise MlmmjError(f"{cmd[0]}: timeout after {self._timeout}s") from e

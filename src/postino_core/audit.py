@@ -43,6 +43,26 @@ def mk_postinod_action(resource: str, verb: str) -> str:
     return f"{POSTINOD_ACTION_PREFIX}.{resource}.{verb}"
 
 
+_AUDIT_ERROR_MAX_CHARS = 200
+
+
+def sanitize_audit_error(err: BaseException) -> str:
+    """Render an exception for embedding in an audit-row ``data`` column.
+
+    The PA ``log.data`` column is operator-readable; an unbounded
+    ``repr(err)`` against a SQLAlchemy / DBAPI exception can carry
+    bound query parameters in its ``args`` — and the day a mutator
+    writes to a credential-bearing table, those parameters include the
+    bcrypt hash or token. Render as ``"<ExcType>: <message-capped>"``
+    so the type stays useful for triage and the body cannot smuggle a
+    full DBAPI dump into the audit log. (L1-S34)
+    """
+    message = str(err)
+    if len(message) > _AUDIT_ERROR_MAX_CHARS:
+        message = message[:_AUDIT_ERROR_MAX_CHARS] + "…[truncated]"
+    return f"{type(err).__name__}: {message}"
+
+
 _DEFAULT_ACTOR = "postino"
 
 

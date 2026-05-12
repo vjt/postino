@@ -74,12 +74,17 @@ def make_postfix_cf(db_url: str, sql_dir: Path) -> None:
     cf_body = f"hosts = {host}\nuser = {user}\npassword = {pwd}\ndbname = {dbname}\n"
     # All three cf files written so `postino check` (which now verifies
     # each one matches the engine URL) passes against the test bundle.
+    # ``postino check`` also asserts the cf-file is not world/group-readable
+    # (the file embeds the SQL password); chmod 0o600 so tests pass
+    # regardless of the operator's umask.
     for filename in (
         "sql-virtual_mailbox_maps.cf",
         "sql-virtual_alias_maps.cf",
         "sql-virtual_domain_maps.cf",
     ):
-        (sql_dir / filename).write_text(cf_body)
+        cf_path = sql_dir / filename
+        cf_path.write_text(cf_body)
+        cf_path.chmod(0o600)
 
 
 def test_user_add_then_list(

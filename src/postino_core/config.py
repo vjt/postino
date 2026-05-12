@@ -60,7 +60,11 @@ class PostfixSqlCredentials(BaseModel):
 
     The password is held as ``SecretStr`` so accidental ``repr`` /
     ``str`` / log paths render ``**********`` instead of the cleartext.
-    Call ``sqlalchemy_url`` only when handing the URL to SQLAlchemy.
+    Engine construction goes through ``db.make_engine`` which uses
+    ``sqlalchemy.URL.create(password=...)`` — the password lives on a
+    ``URL`` object that redacts to ``***`` on repr instead of in a
+    free-form string. Do not reintroduce an ``sqlalchemy_url`` helper
+    that returns the cleartext URL (A4.9).
     """
 
     model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
@@ -69,17 +73,6 @@ class PostfixSqlCredentials(BaseModel):
     user: str
     password: SecretStr
     dbname: str
-
-    def sqlalchemy_url(self) -> str:
-        """SQLAlchemy URL for these credentials (PyMySQL driver).
-
-        ``get_secret_value`` is called only at the return statement —
-        keep the cleartext on the stack for as short as possible.
-        """
-        return (
-            f"mysql+pymysql://{self.user}:{self.password.get_secret_value()}"
-            f"@{self.host}/{self.dbname}"
-        )
 
     def __repr__(self) -> str:
         # Belt-and-braces over Pydantic's SecretStr redaction: a custom

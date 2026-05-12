@@ -22,7 +22,7 @@ from sqlalchemy import MetaData, select
 from sqlalchemy.engine import Connection, Engine
 
 from postino_core.adapters.mlmmj import MlmmjAdapter
-from postino_core.audit import AuditWriter, DefaultAuditWriter, mk_action
+from postino_core.audit import AuditWriter, DefaultAuditWriter, mk_action, sanitize_audit_error
 from postino_core.db import translate_db_errors
 from postino_core.enums import DomainTransport
 from postino_core.errors import (
@@ -177,13 +177,16 @@ class MailingListService:
             )
             # Side-channel: best-effort surface the gap without
             # masking the original failure if this also breaks.
+            # ``sanitize_audit_error`` strips bound DBAPI args so the
+            # log row cannot inadvertently embed credentials lifted
+            # from a future credential-bearing writer.
             try:
                 with self._engine.begin() as conn:
                     self._audit.write(
                         conn,
                         action=mk_action("mailing_list", "audit_dropped"),
                         domain=domain,
-                        data=f"{address} original_error={audit_err!r}",
+                        data=(f"{address} original_error={sanitize_audit_error(audit_err)}"),
                     )
             except Exception as side_err:
                 _logger.error(

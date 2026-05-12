@@ -47,9 +47,14 @@ def _write_postfix_cf(sql_dir: Path, db: Engine, *, files: tuple[str, ...] | Non
         "sql-virtual_alias_maps.cf",
         "sql-virtual_domain_maps.cf",
     ):
-        (sql_dir / filename).write_text(
+        cf_path = sql_dir / filename
+        cf_path.write_text(
             f"hosts = {host}\nuser = {user}\npassword = {pwd}\ndbname = {dbname}\n"
         )
+        # ``_check_postfix_sql_cfs`` enforces that the cf file is not
+        # world/group-readable (the file embeds the SQL password).
+        # Match production discipline so tests pass under any umask.
+        cf_path.chmod(0o600)
 
 
 def _settings(

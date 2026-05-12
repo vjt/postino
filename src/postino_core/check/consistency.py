@@ -40,6 +40,11 @@ _POSTFIX_CF_FILES = (
 )
 _MAILDIRPP_SUBDIRS = ("cur", "new", "tmp")
 _HOOK_WRITE_BITS = 0o022
+# A4.1: `sql-virtual_*.cf` files carry the cleartext SQL password.
+# Anything readable beyond the file's owner+group (0o044 = others-read,
+# others-write) silently exposes the DB credential to every local user
+# on the host. Mirror the postcreation-hook discipline.
+_CF_OTHERS_READABLE_BITS = 0o044
 
 
 class Finding(BaseModel):
@@ -161,6 +166,24 @@ def _check_postfix_sql_cfs(s: PostinoSettings, engine: Engine) -> list[Finding]:
         if not cf.exists():
             out.append(_err(name, f"postfix sql cf missing: {cf}"))
             continue
+        st = cf.stat()
+        if st.st_mode & _CF_OTHERS_READABLE_BITS:
+            out.append(
+                _err(
+                    name,
+                    f"postfix sql cf is others-readable "
+                    f"(mode={oct(st.st_mode & 0o777)}); chmod 640 owner:postfix to "
+                    f"protect the embedded SQL password: {cf}",
+                )
+            )
+            continue
+        if os.geteuid() == 0 and st.st_uid != 0:
+            out.append(
+                _warn(
+                    name,
+                    f"postfix sql cf not owned by root: uid={st.st_uid} ({cf})",
+                )
+            )
         try:
             parsed = parse_postfix_sql_cf(cf)
         except ConfigError as e:

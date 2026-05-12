@@ -33,16 +33,6 @@ def test_parse_postfix_cf_missing_field(tmp_path: Path) -> None:
         parse_postfix_sql_cf(bad)
 
 
-def test_settings_dburl() -> None:
-    creds = PostfixSqlCredentials(
-        host="localhost",
-        user="postfix",
-        password=SecretStr("sekret"),
-        dbname="postfix",
-    )
-    assert creds.sqlalchemy_url() == "mysql+pymysql://postfix:sekret@localhost/postfix"
-
-
 def test_credentials_password_redacted_in_repr_and_str() -> None:
     creds = PostfixSqlCredentials(
         host="localhost",

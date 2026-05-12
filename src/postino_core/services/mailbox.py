@@ -29,7 +29,7 @@ from sqlalchemy.engine import Connection, Engine
 from sqlalchemy.engine.row import RowMapping
 from sqlalchemy.exc import IntegrityError
 
-from postino_core.audit import AuditWriter, DefaultAuditWriter, mk_action
+from postino_core.audit import AuditWriter, DefaultAuditWriter, mk_action, sanitize_audit_error
 from postino_core.db import translate_db_errors
 from postino_core.enums import MailboxStatus, PasswordScheme
 from postino_core.errors import (
@@ -170,8 +170,8 @@ class MailboxService:
         return got
 
     def _compensate_remove_maildir(self, relative: Path) -> str | None:
-        """Best-effort remove_maildir. Returns the error message on
-        failure (compensation continues), None on success."""
+        """Best-effort remove_maildir. Returns the sanitized error
+        message on failure (compensation continues), None on success."""
         try:
             self._fs.remove_maildir(relative)
         except Exception as compensation_err:
@@ -180,13 +180,13 @@ class MailboxService:
                 relative,
                 compensation_err,
             )
-            return str(compensation_err)
+            return sanitize_audit_error(compensation_err)
         return None
 
     def _compensate_delete_mailbox_row(self, username: str) -> str | None:
         """Best-effort delete_mailbox_row with bounded retry on
-        DeadlockError. Returns the error message on final failure
-        (compensation continues), None on success."""
+        DeadlockError. Returns the sanitized error message on final
+        failure (compensation continues), None on success."""
         last_err: Exception | None = None
         for attempt in range(_ROW_DELETE_RETRY_ATTEMPTS):
             try:
@@ -208,7 +208,7 @@ class MailboxService:
                     username,
                     compensation_err,
                 )
-                return str(compensation_err)
+                return sanitize_audit_error(compensation_err)
         assert last_err is not None
         _logger.error(
             "compensation: delete mailbox row %s failed after %d retries: %s",
@@ -216,7 +216,7 @@ class MailboxService:
             _ROW_DELETE_RETRY_ATTEMPTS,
             last_err,
         )
-        return str(last_err)
+        return sanitize_audit_error(last_err)
 
     def _write_rollback_failed_audit(
         self, *, username: str, domain: str, orphans: list[str]
