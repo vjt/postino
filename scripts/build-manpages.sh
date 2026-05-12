@@ -21,7 +21,7 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 
-DATE=$(date +%Y-%m-%d)
+DATE="${DATE:-$(date +%Y-%m-%d)}"
 
 # Wrapper script: strip Rich's Unicode box-drawing before help2man sees it.
 # Typer's rich_markup_mode="rich" renders ╭─ ╮ │ ╰ ╯ regardless of NO_COLOR;
