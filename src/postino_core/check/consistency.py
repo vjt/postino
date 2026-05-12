@@ -29,6 +29,7 @@ from sqlalchemy.engine import Engine
 from postino_core.config import PostinoSettings, parse_postfix_sql_cf
 from postino_core.enums import IdentityBackend
 from postino_core.errors import ConfigError
+from postino_core.fs import DELETING_PREFIX
 
 Severity = Literal["info", "warn", "error"]
 
@@ -54,11 +55,15 @@ _POSTFIX_CF_FILES: tuple[tuple[str, _CfPolicy], ...] = (
 )
 _MAILDIRPP_SUBDIRS = ("cur", "new", "tmp")
 _HOOK_WRITE_BITS = 0o022
-# A4.1: `sql-virtual_*.cf` files carry the cleartext SQL password.
+# A4-A4.4: `sql-virtual_*.cf` files carry the cleartext SQL password.
 # Postfix's canonical layout is mode 0o640 owner root group postfix —
-# postfix's worker uid needs read access. Forbid only the OTHERS bits
-# (0o007 = others r/w/x); group-read is legit and required.
-_CF_OTHERS_BITS = 0o007
+# postfix's worker uid needs read on the group bit but MUST NOT be
+# able to rewrite the file (else any process in group `postfix`,
+# including a future helper or compromised sidecar, can inject SQL
+# credentials and postino check would stay green until postfix
+# reload). Forbid group-write, group-exec, and ALL others bits.
+# Tightened from the prior 0o007-only mask which allowed group-w/x.
+_CF_FORBIDDEN_BITS = 0o037
 
 
 class Finding(BaseModel):
@@ -204,23 +209,32 @@ def _check_postfix_sql_cfs(s: PostinoSettings, engine: Engine) -> list[Finding]:
             # else: silently skip — file is not required for this deployment.
             continue
         st = cf.stat()
-        if st.st_mode & _CF_OTHERS_BITS:
+        bad_bits = st.st_mode & _CF_FORBIDDEN_BITS
+        if bad_bits:
             out.append(
                 _err(
                     name,
-                    f"postfix sql cf is accessible to 'others' "
-                    f"(mode={oct(st.st_mode & 0o777)}); chmod 640 + chown root:postfix "
-                    f"to protect the embedded SQL password: {cf}",
+                    f"postfix sql cf has forbidden mode bits "
+                    f"(mode={oct(st.st_mode & 0o777)}, forbidden={oct(bad_bits)}); "
+                    f"chmod 640 + chown root:postfix to protect the embedded "
+                    f"SQL password: {cf}",
                 )
             )
             continue
+        # Non-root ownership: promoted from warn to error (A4-A4.4).
+        # If postino is running as root and the cf is owned by a
+        # non-root user, that user can rewrite the credentials at any
+        # moment — equivalent to group-write but harder to spot.
         if os.geteuid() == 0 and st.st_uid != 0:
             out.append(
-                _warn(
+                _err(
                     name,
-                    f"postfix sql cf not owned by root: uid={st.st_uid} ({cf})",
+                    f"postfix sql cf not owned by root: uid={st.st_uid}; "
+                    f"chown root:postfix to protect the embedded SQL "
+                    f"password: {cf}",
                 )
             )
+            continue
         try:
             parsed = parse_postfix_sql_cf(cf)
         except ConfigError as e:
@@ -441,11 +455,20 @@ def _check_mailing_lists(s: PostinoSettings, engine: Engine, md: MetaData) -> li
     corrupt: list[str] = []
     orphan_address: list[str] = []
     artefacts: list[str] = []
+    symlinks: list[str] = []
     try:
         entries = list(spool_root.iterdir())
     except OSError as e:
         return [_warn("mailing_lists", f"cannot scan {spool_root}: {e}")]
     for entry in entries:
+        # `is_dir()` follows symlinks; the adapter's `_listdir`
+        # refuses any symlink under the spool root, so a symlinked
+        # entry here is operator-injected and worth surfacing
+        # separately (L2-S11) rather than silently treating it as
+        # a list dir.
+        if entry.is_symlink():
+            symlinks.append(entry.name)
+            continue
         if not entry.is_dir():
             continue
         name = entry.name
@@ -487,6 +510,15 @@ def _check_mailing_lists(s: PostinoSettings, engine: Engine, md: MetaData) -> li
             _warn(
                 "mlmmj_lists_artefacts",
                 f"{len(artefacts)} partial-delete/create artefact dir(s): {artefacts[:5]}",
+            )
+        )
+    if symlinks:
+        out.append(
+            _err(
+                "mlmmj_lists_symlinks",
+                f"{len(symlinks)} symlink(s) under mlmmj_spool_dir — "
+                f"adapter refuses these on read/write, so they are operator-injected "
+                f"and represent stale state or a security issue: {symlinks[:5]}",
             )
         )
     return out
@@ -601,25 +633,65 @@ def _check_orphan_maildirs(
     base = s.virtual_mailbox_base
     if not base.is_dir():
         return []
-    expected = {(base / r.maildir).resolve() for r in mailbox_rows}
+    # Build expected paths without symlink-following. `Path.resolve()`
+    # follows every component, which the FS adapter explicitly
+    # refuses (fs._safe_join). Using absolute() preserves the literal
+    # path layout used at provisioning time (L2-S11).
+    expected = {(base / r.maildir).absolute() for r in mailbox_rows}
     orphans: list[str] = []
+    artefacts: list[str] = []
+    symlinks: list[str] = []
     for domain_dir in base.iterdir():
+        if domain_dir.is_symlink():
+            symlinks.append(domain_dir.name)
+            continue
         if not domain_dir.is_dir():
             continue
+        if domain_dir.name.startswith(DELETING_PREFIX):
+            # Per-domain rmtree graveyard from a failed
+            # DomainService.delete post-commit purge. Surfaced
+            # separately so operators can rmtree it explicitly.
+            artefacts.append(domain_dir.name)
+            continue
         for local_dir in domain_dir.iterdir():
+            if local_dir.is_symlink():
+                symlinks.append(f"{domain_dir.name}/{local_dir.name}")
+                continue
             if not local_dir.is_dir():
                 continue
-            resolved = local_dir.resolve()
-            if resolved not in expected:
+            if local_dir.name.startswith(DELETING_PREFIX):
+                artefacts.append(f"{domain_dir.name}/{local_dir.name}")
+                continue
+            if local_dir.absolute() not in expected:
                 orphans.append(f"{domain_dir.name}/{local_dir.name}")
+    out: list[Finding] = []
     if orphans:
-        return [
+        out.append(
             _err(
                 "orphan_maildirs",
                 f"{len(orphans)} maildirs on disk without DB row: {orphans[:5]}",
             )
-        ]
-    return [_ok("orphan_maildirs", "no orphan maildirs on disk")]
+        )
+    else:
+        out.append(_ok("orphan_maildirs", "no orphan maildirs on disk"))
+    if artefacts:
+        out.append(
+            _warn(
+                "maildir_artefacts",
+                f"{len(artefacts)} partial-delete .deleting.* tree(s) "
+                f"left from a post-commit purge failure: {artefacts[:5]}",
+            )
+        )
+    if symlinks:
+        out.append(
+            _err(
+                "maildir_symlinks",
+                f"{len(symlinks)} symlink(s) under virtual_mailbox_base — "
+                f"adapter refuses these, so they are operator-injected and "
+                f"represent stale state or a security issue: {symlinks[:5]}",
+            )
+        )
+    return out
 
 
 def _check_orphan_domain_maildirs(
@@ -641,7 +713,18 @@ def _check_orphan_domain_maildirs(
     base = s.virtual_mailbox_base
     if not base.is_dir():
         return []
-    orphans = sorted(d.name for d in base.iterdir() if d.is_dir() and d.name not in domain_names)
+    # `.deleting.*` graveyards are surfaced by `_check_orphan_maildirs` as
+    # `maildir_artefacts`; skip them here so they don't double-flag as
+    # `orphan_domain_maildirs`. Symlinks are surfaced by
+    # `_check_orphan_maildirs` as `maildir_symlinks`; skip too.
+    orphans = sorted(
+        d.name
+        for d in base.iterdir()
+        if not d.is_symlink()
+        and d.is_dir()
+        and not d.name.startswith(DELETING_PREFIX)
+        and d.name not in domain_names
+    )
     if orphans:
         return [
             _err(

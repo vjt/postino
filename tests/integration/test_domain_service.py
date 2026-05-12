@@ -6,7 +6,13 @@ from sqlalchemy import MetaData, select
 from sqlalchemy.engine import Engine
 
 from postino_core.enums import DomainTransport, MailboxStatus
-from postino_core.errors import AlreadyExistsError, CapacityError, ConfigError, NotFoundError
+from postino_core.errors import (
+    AlreadyExistsError,
+    CapacityError,
+    ConfigError,
+    FilesystemError,
+    NotFoundError,
+)
 from postino_core.fs import FilesystemAdapter
 from postino_core.services.domain import DomainService
 
@@ -14,7 +20,11 @@ pytestmark = pytest.mark.integration
 
 
 def _service(
-    db: Engine, frozen_clock: datetime, fs: FilesystemAdapter | None = None
+    db: Engine,
+    frozen_clock: datetime,
+    fs: FilesystemAdapter | None = None,
+    *,
+    mlmmj_enabled: bool = True,
 ) -> DomainService:
     md = MetaData()
     md.reflect(bind=db)
@@ -28,6 +38,7 @@ def _service(
         clock=lambda: frozen_clock,
         fs=fs,
         lmtp_destination="unix:private/dovecot-lmtp",
+        mlmmj_enabled=mlmmj_enabled,
     )
 
 
@@ -344,30 +355,31 @@ def test_domain_delete_keep_maildir_preserves_tree(
     assert (tmp_path / "archive.example.org" / "u").is_dir()
 
 
-def test_domain_delete_force_fs_failure_rolls_back_db(
+def test_domain_delete_force_stage_failure_rolls_back_db(
     db: Engine, frozen_clock: datetime, tmp_path: Path
 ) -> None:
-    """An FS rmtree failure during force-delete must roll back the DB cascade.
+    """A staging-rename failure during force-delete rolls back the DB cascade.
 
-    The privacy-axis fix (review A3.8): pre-v0.4 the FS step ran AFTER the
-    DB tx committed and any failure was swallowed, leaving the tenant's
-    maildir tree on disk where a same-named re-provisioned mailbox could
-    adopt it. v0.4 moves rmtree into the same transaction so an FS error
-    aborts the DB cascade — operator sees one error and a consistent
-    DB+FS state instead of a half-deleted tenant.
+    Two-phase delete contract (A3-A4): the only FS op inside the DB tx is
+    an atomic ``os.rename`` (``stage_maildir_for_delete``). If that
+    rename fails (cross-FS, EACCES), the surrounding ``engine.begin()``
+    rolls every DB delete back so the tenant's domain + mailbox rows
+    survive together with the still-named-as-was maildir on disk —
+    rather than a partially-wiped state restored over by a buggy
+    rollback. The follow-on rmtree happens *outside* the tx and its
+    failure is documented separately by
+    ``test_domain_delete_force_purge_failure_leaves_graveyard``.
     """
     import shutil
 
     fs = FilesystemAdapter(mail_root=tmp_path, vmail_uid=-1, vmail_gid=-1)
+    original_stage = fs.stage_maildir_for_delete
 
-    # Patch fs.remove_maildir to raise after we've validated/cascaded.
-    original_remove = fs.remove_maildir
-
-    def boom(path: Path) -> None:
+    def boom(path: Path) -> Path | None:
         del path
-        raise OSError("simulated rmtree failure")
+        raise FilesystemError("simulated rename failure")
 
-    fs.remove_maildir = boom  # type: ignore[method-assign]  # WHY: test-only monkeypatch
+    fs.stage_maildir_for_delete = boom  # type: ignore[method-assign]  # WHY: test-only monkeypatch
     try:
         svc = _service(db, frozen_clock, fs=fs)
         svc.add(
@@ -383,11 +395,10 @@ def test_domain_delete_force_fs_failure_rolls_back_db(
         _seed_mailbox(db, "u@boom.example.org", "boom.example.org")
         (tmp_path / "boom.example.org" / "u").mkdir(parents=True)
 
-        with pytest.raises(OSError, match="simulated rmtree failure"):
+        with pytest.raises(FilesystemError, match="simulated rename failure"):
             svc.delete("boom.example.org", force=True)
 
-        # DB cascade must have been rolled back — domain row and mailbox
-        # row both still present.
+        # DB cascade rolled back — domain + mailbox rows both survive.
         md = MetaData()
         md.reflect(bind=db)
         with db.begin() as conn:
@@ -403,9 +414,73 @@ def test_domain_delete_force_fs_failure_rolls_back_db(
             ).fetchone()
         assert d is not None, "domain row vanished despite FS rollback"
         assert m is not None, "mailbox row vanished despite FS rollback"
+        # Maildir is untouched (the rename was the only FS op that
+        # would have run inside the tx).
+        assert (tmp_path / "boom.example.org" / "u").is_dir()
     finally:
-        fs.remove_maildir = original_remove  # type: ignore[method-assign]  # WHY: restore patch
+        fs.stage_maildir_for_delete = original_stage  # type: ignore[method-assign]  # WHY: restore patch
         shutil.rmtree(tmp_path / "boom.example.org", ignore_errors=True)
+
+
+def test_domain_delete_force_purge_failure_leaves_graveyard(
+    db: Engine, frozen_clock: datetime, tmp_path: Path
+) -> None:
+    """Post-commit purge failure leaves a ``.deleting.*`` artefact, DB still committed.
+
+    Two-phase contract: rmtree (purge_staged_maildir) runs after the DB
+    cascade has committed. A failure here cannot un-do the DB op, but
+    the staged graveyard remains on disk for ``postino check --deep``
+    to surface as ``maildir_artefacts``. Verifies the new semantic that
+    replaced the prior FS-inside-tx behaviour."""
+    import shutil
+
+    fs = FilesystemAdapter(mail_root=tmp_path, vmail_uid=-1, vmail_gid=-1)
+    original_purge = fs.purge_staged_maildir
+
+    def boom(staged: Path) -> None:
+        raise FilesystemError(f"simulated rmtree failure on {staged}")
+
+    fs.purge_staged_maildir = boom  # type: ignore[method-assign]  # WHY: test-only monkeypatch
+    try:
+        svc = _service(db, frozen_clock, fs=fs)
+        svc.add(
+            domain="purge.example.org",
+            description="",
+            max_aliases=0,
+            max_mailboxes=10,
+            max_quota_bytes=0,
+            default_quota_bytes=0,
+            transport=DomainTransport.VIRTUAL,
+            backupmx=False,
+        )
+        _seed_mailbox(db, "u@purge.example.org", "purge.example.org")
+        (tmp_path / "purge.example.org" / "u").mkdir(parents=True)
+
+        # Delete completes (purge failure is logged, not raised).
+        svc.delete("purge.example.org", force=True)
+
+        # DB cascade COMMITTED.
+        md = MetaData()
+        md.reflect(bind=db)
+        with db.begin() as conn:
+            d = conn.execute(
+                select(md.tables["domain"]).where(
+                    md.tables["domain"].c.domain == "purge.example.org"
+                )
+            ).fetchone()
+        assert d is None, "domain row should be gone after purge failure"
+
+        # `.deleting.*` graveyard left on disk for check --deep to surface.
+        graveyards = [
+            p for p in tmp_path.iterdir() if p.name.startswith(".deleting.purge.example.org")
+        ]
+        assert len(graveyards) == 1, f"expected one .deleting.* tree, got {graveyards}"
+        assert graveyards[0].is_dir()
+    finally:
+        fs.purge_staged_maildir = original_purge  # type: ignore[method-assign]  # WHY: restore patch
+        for p in tmp_path.iterdir():
+            if p.is_dir():
+                shutil.rmtree(p, ignore_errors=True)
 
 
 def test_domain_delete_alias_domain_pointing_at_domain_blocks(

@@ -52,4 +52,11 @@ def verify_password(password: SecretStr, stored: str) -> bool:
     verifier = _VERIFIERS.get(scheme)
     if verifier is None:
         raise ConfigError(f"no verifier for scheme {scheme}")
-    return cast(bool, verifier.verify(password.get_secret_value(), hashed))
+    try:
+        return cast(bool, verifier.verify(password.get_secret_value(), hashed))
+    except (ValueError, TypeError) as e:
+        # passlib raises ValueError on malformed/truncated hash bytes
+        # (e.g. a corrupted bcrypt row); surface as ConfigError so the
+        # caller (CLI / SCIM) maps to a clean exit code instead of an
+        # uncaught passlib internal (L1-S36).
+        raise ConfigError(f"stored hash unverifiable under scheme {scheme.value}: {e}") from e

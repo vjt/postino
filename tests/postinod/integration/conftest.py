@@ -128,12 +128,14 @@ def auth_header(keypair: RSAPrivateKey) -> dict[str, str]:
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
+    now = datetime.now(UTC)
     token: str = jwt.encode(
         {
             "iss": _ISSUER,
             "aud": _AUDIENCE,
             "sub": "scim-client",
-            "exp": datetime.now(UTC) + timedelta(hours=1),
+            "iat": now,
+            "exp": now + timedelta(hours=1),
         },
         pem,  # type: ignore[arg-type]  # WHY: cryptography returns bytes from private_bytes; pyjwt accepts bytes | str but is typed as str
         algorithm="RS256",

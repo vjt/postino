@@ -42,7 +42,7 @@
 
 [test_no_cast."src/postino_core/password.py"]
 35 = "WHY: passlib's hash()/verify() return Any; PR-A5 introduces a typed PasswordHasher Protocol replacing the cast."
-55 = "WHY: same — passlib returns Any, fixed in PR-A5 by Protocol wrapper."
+56 = "WHY: same — passlib returns Any, fixed in PR-A5 by Protocol wrapper. Wrapped in try/except ValueError for L1-S36."
 
 [test_type_ignore_justified]
 # Most pre-existing ignores are SQLAlchemy `RowMapping` access returning Any
@@ -79,28 +79,27 @@
 158 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/domain.py"]
-# Lines 136 and 264 carry inline WHY comments; no allowlist entry needed.
+# Inline WHY comments cover the two non-_row_to_model ignores.
 # Lines below are _row_to_model body: SQLAlchemy RowMapping[str, Any] indexing.
-289 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-290 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-291 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-292 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-294 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-295 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-296 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-297 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+324 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+325 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+326 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+327 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+329 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+330 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+331 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+332 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/mailbox.py"]
-# Lines shifted after the Protocol cleanup (cluster 3 of the
-# 2026-05-12 codebase review) collapsed is_idp_managed into the
-# provider. All entries remain SQLAlchemy RowMapping Any access in
-# get / _row_to_model / list.
-252 = "WHY: SQLAlchemy RowMapping access yields Any."
-334 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-337 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-338 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-339 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-423 = "WHY: SQLAlchemy RowMapping access yields Any."
+# All entries are SQLAlchemy RowMapping Any access in
+# get / _row_to_model / list. Line numbers re-snapshotted after the
+# 2026-05-12 hardening pass added FS-comp ordering + two-phase delete.
+278 = "WHY: SQLAlchemy RowMapping access yields Any."
+360 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+363 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+364 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+365 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+466 = "WHY: SQLAlchemy RowMapping access yields Any."
 
 [test_type_ignore_justified."src/postino_core/services/quota.py"]
 23 = "WHY: SQLAlchemy Row._mapping attribute access not in stubs."

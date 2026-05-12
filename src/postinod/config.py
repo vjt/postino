@@ -31,8 +31,13 @@ from pydantic_settings import (
 from postino_core.errors import ConfigError
 
 HMAC_MIN_BYTES = 32
-"""Minimum acceptable HMAC secret length, in bytes. 32 bytes ≈ 256 bits,
-the same entropy the openssl-rand-hex-32 generator hint produces."""
+"""Minimum acceptable HMAC secret length, in *raw* bytes (post hex-decode).
+
+32 raw bytes = 256 bits, matching `openssl rand -hex 32`'s output. A
+secret supplied as hex characters is decoded before this check, so an
+operator who pastes `openssl rand -hex 16` (16 raw bytes / 32 hex
+chars) is rejected — fixes A4-A4.6 (prior check compared character
+count, not byte count, accepting half the documented entropy)."""
 
 DEFAULT_REPLAY_WINDOW_SEC = 300
 """Default replay window: reject Zitadel events whose `created_at` is
@@ -89,6 +94,11 @@ class PostinodSettings(BaseSettings):
     scim_issuer: str
     scim_audience: str
     scim_jwks_refresh_seconds: int = 3600
+    # Maximum accepted token age, in seconds. Caps revocation latency
+    # for the SCIM bearer JWT independently of the IdP's `exp` claim
+    # (A4-A4.5). Default 1h; operators with shorter rotation windows
+    # can lower it.
+    scim_max_token_age_seconds: int = 3600
 
 
 def load_postinod_settings(toml_path: Path) -> PostinodSettings:
@@ -140,13 +150,24 @@ def read_zitadel_hmac_secrets(
         )
     secrets: list[bytes] = []
     for i, part in enumerate(parts):
-        if len(part) < HMAC_MIN_BYTES:
+        # Accept the secret as hex (the documented form, matching the
+        # `openssl rand -hex 32` hint). Hex-decode early so the
+        # entropy check operates on raw bytes, not hex-char count
+        # (A4-A4.6). Non-hex inputs are still accepted as raw bytes
+        # for backwards compatibility, but the byte-length floor is
+        # enforced uniformly.
+        try:
+            decoded = bytes.fromhex(part)
+            raw = decoded if len(decoded) >= HMAC_MIN_BYTES else part.encode()
+        except ValueError:
+            raw = part.encode()
+        if len(raw) < HMAC_MIN_BYTES:
             raise ConfigError(
-                f"POSTINOD_ZITADEL_HMAC_SECRET entry #{i + 1} is "
-                f"{len(part)} bytes; minimum is {HMAC_MIN_BYTES} "
-                f"(generate via 'openssl rand -hex 32')."
+                f"POSTINOD_ZITADEL_HMAC_SECRET entry #{i + 1} resolves to "
+                f"{len(raw)} raw bytes; minimum is {HMAC_MIN_BYTES} bytes "
+                f"(256 bits). Generate via 'openssl rand -hex 32'."
             )
-        secrets.append(part.encode())
+        secrets.append(raw)
     return tuple(secrets)
 
 

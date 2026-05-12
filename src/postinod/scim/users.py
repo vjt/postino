@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import logging
 
+import anyio.to_thread
 import jwt
 from litestar import Request, Router, delete, get, patch, post
 from litestar.datastructures import State
@@ -226,7 +227,9 @@ def build_users_router(
             err = ScimError(status="400", scimType="invalidFilter", detail=str(e))
             return _scim_response(err, 400)
 
-        all_rows = _resolve_users(mailbox_service, q)
+        # Service calls hit blocking SQLAlchemy — offload to threadpool
+        # so the uvicorn event loop stays responsive (A3-A3).
+        all_rows = await anyio.to_thread.run_sync(_resolve_users, mailbox_service, q)
         page = all_rows[q.start_index - 1 : q.start_index - 1 + q.count]
         envelope = ScimListResponse(
             totalResults=len(all_rows),
@@ -272,10 +275,12 @@ def build_users_router(
             )
             return _scim_response(err, 403)
         try:
+            mbx_create = _make_mailbox_create(user, default_quota_bytes=default_quota_bytes)
+            # anyio.to_thread.run_sync copies the current contextvars
+            # snapshot into the worker thread, so `audit_context` set
+            # here propagates into the sync service call.
             with audit_context(extra):
-                created = mailbox_service.add(
-                    _make_mailbox_create(user, default_quota_bytes=default_quota_bytes)
-                )
+                created = await anyio.to_thread.run_sync(mailbox_service.add, mbx_create)
         except (NotFoundError, AlreadyExistsError, CapacityError, ConfigError) as e:
             return _err(e, create_path=isinstance(e, NotFoundError))
         except (DBError, FilesystemError, HookError) as e:
@@ -299,7 +304,7 @@ def build_users_router(
             err = ScimError(status="400", scimType="invalidValue", detail=scim_validation_detail(e))
             return _scim_response(err, 400)
 
-        m = mailbox_service.get(email)
+        m = await anyio.to_thread.run_sync(mailbox_service.get, email)
         if m is None:
             err = ScimError(status="404", detail=f"user {user_id!r} not found")
             return _scim_response(err, 404)
@@ -374,7 +379,9 @@ def build_users_router(
                 )
                 try:
                     with audit_context(extra):
-                        mailbox_service.set_status(email, new_status)
+                        await anyio.to_thread.run_sync(
+                            mailbox_service.set_status, email, new_status
+                        )
                 except NotFoundError as e:
                     return _err(e)
                 except (DBError, FilesystemError, HookError) as e:
@@ -389,7 +396,9 @@ def build_users_router(
                 )
                 try:
                     with audit_context(extra):
-                        mailbox_service.set_name(email, str(op.value))
+                        await anyio.to_thread.run_sync(
+                            mailbox_service.set_name, email, str(op.value)
+                        )
                 except NotFoundError as e:
                     return _err(e)
                 except (DBError, FilesystemError, HookError) as e:
@@ -414,7 +423,12 @@ def build_users_router(
                     assert value is not None
                     try:
                         with audit_context(extra):
-                            mailbox_service.set_password(email, value, PasswordScheme.BCRYPT)
+                            await anyio.to_thread.run_sync(
+                                mailbox_service.set_password,
+                                email,
+                                value,
+                                PasswordScheme.BCRYPT,
+                            )
                     except (NotFoundError, ConfigError) as e:
                         return _err(e)
                     except (DBError, FilesystemError, HookError) as e:
@@ -435,7 +449,7 @@ def build_users_router(
                     )
                     try:
                         with audit_context(extra):
-                            mailbox_service.release_identity(email)
+                            await anyio.to_thread.run_sync(mailbox_service.release_identity, email)
                     except (NotFoundError, ConfigError) as e:
                         return _err(e)
                     except (DBError, FilesystemError, HookError) as e:
@@ -445,7 +459,7 @@ def build_users_router(
                         return _err(e)
 
         # Re-fetch to return current state.
-        m = mailbox_service.get(email)
+        m = await anyio.to_thread.run_sync(mailbox_service.get, email)
         if m is None:
             err = ScimError(status="404", detail=f"user {user_id!r} not found")
             return _scim_response(err, 404)
@@ -476,7 +490,9 @@ def build_users_router(
         )
         try:
             with audit_context(extra):
-                mailbox_service.set_status(email, MailboxStatus.DISABLED)
+                await anyio.to_thread.run_sync(
+                    mailbox_service.set_status, email, MailboxStatus.DISABLED
+                )
         except NotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
         except (DBError, FilesystemError, HookError) as e:

@@ -107,14 +107,18 @@ class HybridProvider:
     def is_idp_managed(self, conn: Connection, username: str) -> bool:
         """Reads ``mailbox.password`` and compares against the
         ``{NOAUTH}`` sentinel. The column itself stays private to the
-        provider; ``MailboxService`` consumes only the predicate."""
+        provider; ``MailboxService`` consumes only the predicate.
+
+        Only the literal sentinel counts as IdP-managed. Empty strings
+        used to count too — that semantic disagreed with LocalProvider
+        (always False) and let two providers reach different
+        conclusions on the same DB state. Tightened to a single-source
+        sentinel literal (A1-A6); legacy empty-string rows are
+        operator-actionable via `postino check --deep`."""
         current = self._current_password(conn, username)
         if current is None:
             raise NotFoundError(f"mailbox {username} does not exist")
-        # Treat empty string the same as the sentinel: dovecot's
-        # passdb-sql falls through on both, so semantically "no local
-        # credential" → IdP-managed.
-        return current in (SENTINEL_NOAUTH, "")
+        return current == SENTINEL_NOAUTH
 
     def bootstrap_password_value(self) -> str:
         return SENTINEL_NOAUTH

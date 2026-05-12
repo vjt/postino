@@ -2,17 +2,30 @@
 
 `add` ordering: the per-domain row is locked FOR UPDATE first so a
 concurrent ``domain delete --force`` blocks on the lock; the maildir
-is then created on disk *inside* the same transaction so a DB
-rollback wipes it deterministically. The postcreation hook runs
-after commit because it may produce side effects outside the maildir
-that postino cannot atomicize; on hook failure the row is deleted
-(with bounded retry on deadlock) and the maildir is removed.
+is then created on disk *inside* the same transaction. On any failure
+the DB tx rolls back FIRST (via the surrounding ``engine.begin()``
+context manager), then the FS compensation runs in an outer
+try/except so a deadlock during rollback cannot leave a row
+referencing a deleted maildir.
 
-`delete` ordering: the maildir is removed *inside* the DB tx after
-the row delete (same pattern as ``DomainService.delete force=True``).
-A filesystem failure rolls the row delete back so a future
-provisioning of the same address cannot adopt the prior tenant's
-maildir."""
+The postcreation hook runs after commit because it may produce side
+effects outside the maildir that postino cannot atomicize. On hook
+failure the row is deleted (with bounded retry on deadlock) and the
+maildir is removed. If either compensation step fails, a side-channel
+``mailbox.create_rollback_failed`` audit row records the orphan
+resources so `postino check --deep` and the operator have a durable
+trail. Note: the postcreation hook itself is NOT re-runnable — a
+hook-side side effect (sieve generation, external IMAP profile)
+performed before its failure cannot be undone by postino. Operators
+must reconcile manually via the audit row; a re-runnable hook
+contract is a v0.7 follow-up requiring a `hook_state` schema column.
+
+`delete` ordering: two-phase. An atomic ``os.rename`` to
+``.deleting.<token>`` rides the DB tx; the full ``rmtree`` runs
+post-commit. Rmtree failure leaves a graveyard for `postino check
+--deep` to sweep rather than risking a partially-wiped maildir
+restored under a live DB row (the prior contract's data-loss
+window)."""
 
 from __future__ import annotations
 
@@ -105,16 +118,25 @@ class MailboxService:
                 relative_maildir,
             )
 
-        with translate_db_errors(), self._engine.begin() as conn:
-            # Capacity check first: locks the domain row FOR UPDATE so a
-            # concurrent ``domain delete --force`` blocks here and cannot
-            # race the maildir create on disk.
-            self._assert_domain_capacity(conn, domain)
-            # Maildir create inside the tx: if any later step fails we
-            # rollback the FS op alongside the DB op (skip rollback when
-            # the maildir pre-existed — it isn't ours to delete).
-            self._fs.create_maildir(relative_maildir)
-            try:
+        # Track whether THIS call created the maildir so FS compensation
+        # runs only when we own it (an operator-restored maildir survives
+        # an add failure). Compensation runs OUTSIDE the `engine.begin()`
+        # block so DB rollback completes first — otherwise a deadlock
+        # during rollback could leave a half-committed row pointing at
+        # a deleted maildir (L1-S44).
+        maildir_created_by_us = False
+        try:
+            with translate_db_errors(), self._engine.begin() as conn:
+                # Capacity check first: locks the domain row FOR UPDATE so a
+                # concurrent ``domain delete --force`` blocks here and cannot
+                # race the maildir create on disk.
+                self._assert_domain_capacity(conn, domain)
+                # Maildir create inside the tx: if any later step fails we
+                # rollback the FS op alongside the DB op (skip rollback when
+                # the maildir pre-existed — it isn't ours to delete).
+                self._fs.create_maildir(relative_maildir)
+                if not maildir_existed:
+                    maildir_created_by_us = True
                 self._insert_mailbox_row(conn, create, local_part, domain, relative_maildir)
                 self._insert_quota_row(conn, str(create.username))
                 self._identity.create_identity(
@@ -130,10 +152,14 @@ class MailboxService:
                     domain=domain,
                     data=str(create.username),
                 )
-            except Exception:
-                if not maildir_existed:
-                    self._compensate_remove_maildir(relative_maildir)
-                raise
+        except Exception:
+            # DB tx rolled back by `engine.begin()` before we reach
+            # here. Now compensate the FS op — order matters: DB
+            # first, FS second, so a rollback failure does not leave a
+            # phantom row pointing at a deleted maildir.
+            if maildir_created_by_us:
+                self._compensate_remove_maildir(relative_maildir)
+            raise
 
         try:
             self._hooks.run_postcreation(
@@ -342,24 +368,31 @@ class MailboxService:
     def delete(self, username: EmailStr, *, keep_maildir: bool) -> None:
         """Delete the mailbox row + quota row + (optionally) maildir.
 
-        Maildir removal runs **inside** the DB transaction so a FS
-        failure (NFS hung, EBUSY) rolls the row delete back. Without
-        this, a partial-delete state lets a future provisioning of
-        the same address adopt the previous tenant's maildir
-        contents — a privacy bug.
+        Two-phase maildir delete: an atomic ``os.rename`` of the maildir
+        to a ``.deleting.<token>`` graveyard runs inside the DB
+        transaction. The full ``rmtree`` runs *outside* the tx, after
+        commit. Rationale: ``rmtree`` is non-atomic — a mid-walk OSError
+        used to roll the DB tx back over a partially-wiped maildir,
+        leaving an inconsistent on-disk state restored under a live row
+        (silent message loss). The two-phase rename keeps the tx
+        dependency atomic; a rmtree failure now leaves a
+        ``.deleting.*`` artefact for ``postino check --deep`` to sweep,
+        which is recoverable without data loss.
 
         Logs a WARNING for every alias whose `goto` references this
         username — the alias survives but now has a dead recipient. The
         admin chooses whether to clean up; spec policy is non-blocking.
 
         Raises ``NotFoundError`` if the mailbox row does not exist,
-        ``FilesystemError`` if maildir removal fails."""
+        ``FilesystemError`` if maildir staging fails (rmtree failure is
+        logged and surfaced via the graveyard, not raised)."""
         mailbox = self._md.tables["mailbox"]
         existing = self.get(username)
         if existing is None:
             raise NotFoundError(f"mailbox {username} does not exist")
         relative = existing.maildir
         orphan_aliases = self._aliases_targeting(str(username))
+        staged: Path | None = None
         with translate_db_errors(), self._engine.begin() as conn:
             self._identity.delete_identity(conn, str(username))
             quota2 = self._md.tables["quota2"]
@@ -372,11 +405,21 @@ class MailboxService:
                 data=str(username),
             )
             if not keep_maildir:
-                # FS-inside-tx: matches DomainService.delete(force=True)
-                # (services/domain.py:220). On rmtree failure the DB
-                # cascade rolls back so the maildir + row survive
-                # together rather than splitting.
-                self._fs.remove_maildir(relative)
+                staged = self._fs.stage_maildir_for_delete(relative)
+        # DB tx committed; purge the graveyard outside the tx. rmtree
+        # failure here is non-fatal — leaves a .deleting.* artefact
+        # visible to `postino check --deep`. Do not re-raise: the
+        # delete is already done from the DB perspective.
+        if staged is not None:
+            try:
+                self._fs.purge_staged_maildir(staged)
+            except Exception:
+                _logger.exception(
+                    "post-commit purge of staged maildir %s for %s failed; "
+                    ".deleting.* artefact left for check --deep to sweep",
+                    staged,
+                    username,
+                )
         if orphan_aliases:
             _logger.warning(
                 "deleted %s; %d alias(es) still target it: %s",

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 
+import anyio.to_thread
 import jwt
 from litestar import Request, Router, get
 from litestar.datastructures import State
@@ -115,7 +116,8 @@ def build_domains_router(
             err = ScimError(status="400", scimType="invalidFilter", detail=str(e))
             return _scim_response(err, 400)
 
-        all_rows = _resolve_domains(domain_service, q)
+        # Offload blocking SQLAlchemy to threadpool (A3-A3).
+        all_rows = await anyio.to_thread.run_sync(_resolve_domains, domain_service, q)
         page = all_rows[q.start_index - 1 : q.start_index - 1 + q.count]
         envelope = ScimListResponse(
             totalResults=len(all_rows),
@@ -138,7 +140,7 @@ def build_domains_router(
     ) -> Response[dict[str, object]]:
         await _verify_bearer(request)
 
-        d = domain_service.get(domain_id)
+        d = await anyio.to_thread.run_sync(domain_service.get, domain_id)
         if d is None:
             err = ScimError(status="404", detail=f"domain {domain_id!r} not found")
             return _scim_response(err, 404)

@@ -25,6 +25,7 @@ with destructive ops on chrooted paths."""
 from __future__ import annotations
 
 import os
+import secrets
 import shutil
 import stat
 from pathlib import Path
@@ -38,6 +39,11 @@ assert shutil.rmtree.avoids_symlink_attacks, (
 
 _MAILDIR_MODE = 0o700
 _MAILDIRPP_SUBDIRS = ("cur", "new", "tmp")
+
+# Prefix for the two-phase delete graveyard. Same convention as
+# `MlmmjAdapter._DELETING_PREFIX` so `check/consistency.py` can detect
+# partial-delete artefacts uniformly across maildir and mlmmj spool trees.
+DELETING_PREFIX = ".deleting."
 
 
 class FilesystemAdapter:
@@ -107,6 +113,62 @@ class FilesystemAdapter:
         # tidy when the last mailbox in a domain is removed and prevents
         # orphan per-domain dirs after add-rollback.
         p = target.parent
+        while p != self._mail_root and p != p.parent:
+            try:
+                p.rmdir()
+            except OSError:
+                break
+            p = p.parent
+
+    def stage_maildir_for_delete(self, relative: Path) -> Path | None:
+        """Atomically rename ``relative`` to a ``.deleting.<token>`` sibling
+        and return its absolute path. Returns None if ``relative`` is absent.
+
+        Two-phase delete pattern: callers run this *inside* the DB
+        transaction — an atomic ``os.rename`` on the same filesystem is
+        the only filesystem op the tx needs to depend on. The full rmtree
+        runs outside the tx via ``purge_staged_maildir``. A mid-rmtree
+        crash leaves a ``.deleting.*`` artefact that ``postino check --deep``
+        can sweep, instead of a partially-wiped maildir restored over
+        by a DB rollback (the prior contract's data-loss window).
+
+        Raises ``FilesystemError`` if the rename itself fails (cross-FS,
+        EACCES). On rename failure, the DB tx rolls back via the surrounding
+        ``engine.begin()`` and the maildir is untouched."""
+        target = self._safe_join(relative)
+        if not target.exists():
+            return None
+        staged_name = f"{DELETING_PREFIX}{target.name}.{os.getpid()}.{secrets.token_hex(4)}"
+        staged = target.parent / staged_name
+        try:
+            os.rename(target, staged)
+        except OSError as e:
+            raise FilesystemError(f"stage {target} → {staged} failed: {e}") from e
+        return staged
+
+    def purge_staged_maildir(self, staged: Path) -> None:
+        """``rmtree`` a ``.deleting.<token>`` graveyard from
+        ``stage_maildir_for_delete``. Idempotent on absent path.
+
+        Raises ``FilesystemError`` if rmtree fails. The DB tx has already
+        committed by the time this is called — callers must log the error
+        and surface to the operator (the ``.deleting.*`` tree will then
+        be visible to ``postino check --deep``)."""
+        if not staged.exists():
+            return
+        if not staged.name.startswith(DELETING_PREFIX):
+            raise FilesystemError(
+                f"refusing to purge non-graveyard path {staged} "
+                f"(expected name prefix {DELETING_PREFIX!r})"
+            )
+        if not staged.is_relative_to(self._mail_root):
+            raise FilesystemError(f"refusing to purge {staged} outside mail_root")
+        try:
+            shutil.rmtree(staged)
+        except OSError as e:
+            raise FilesystemError(f"purge_staged_maildir {staged} failed: {e}") from e
+        # Best-effort parent cleanup, same as ``remove_maildir``.
+        p = staged.parent
         while p != self._mail_root and p != p.parent:
             try:
                 p.rmdir()

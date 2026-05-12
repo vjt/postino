@@ -32,6 +32,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from datetime import datetime
 
+import anyio.to_thread
 from litestar import Request, Router, post
 from litestar.datastructures import State
 from litestar.exceptions import HTTPException
@@ -202,10 +203,13 @@ def build_zitadel_router(
                 int(skew),
             )
             try:
-                _replay_audit(
-                    external_id=event.user_id,
-                    event_type=event.event_type,
-                    skew=int(skew),
+                # Blocking SQL — offload to threadpool (A3-A3).
+                await anyio.to_thread.run_sync(
+                    lambda: _replay_audit(
+                        external_id=event.user_id,
+                        event_type=event.event_type,
+                        skew=int(skew),
+                    )
                 )
             except Exception:
                 # WHY: audit failure must not mask the replay rejection —
@@ -229,34 +233,47 @@ def build_zitadel_router(
             )
 
         try:
+            # Offload blocking SQL+FS+hook work to the threadpool so the
+            # uvicorn event loop stays responsive (A3-A3). The
+            # `_handle_*` helpers carry their own `audit_context`
+            # block; anyio.to_thread.run_sync copies the current
+            # contextvars snapshot into the worker.
             if outcome is EventOutcome.CREATE:
-                _handle_create(
-                    event=event,
-                    mailbox_service=mailbox_service,
-                    extra_for=_extra,
-                    default_quota_bytes=default_quota_bytes,
+                await anyio.to_thread.run_sync(
+                    lambda: _handle_create(
+                        event=event,
+                        mailbox_service=mailbox_service,
+                        extra_for=_extra,
+                        default_quota_bytes=default_quota_bytes,
+                    )
                 )
             elif outcome is EventOutcome.UPDATE:
-                _handle_update(
-                    event=event,
-                    mailbox_service=mailbox_service,
-                    extra_for=_extra,
+                await anyio.to_thread.run_sync(
+                    lambda: _handle_update(
+                        event=event,
+                        mailbox_service=mailbox_service,
+                        extra_for=_extra,
+                    )
                 )
             elif outcome is EventOutcome.DISABLE:
-                _handle_set_status(
-                    event=event,
-                    mailbox_service=mailbox_service,
-                    extra_for=_extra,
-                    status=MailboxStatus.DISABLED,
-                    verb="disable",
+                await anyio.to_thread.run_sync(
+                    lambda: _handle_set_status(
+                        event=event,
+                        mailbox_service=mailbox_service,
+                        extra_for=_extra,
+                        status=MailboxStatus.DISABLED,
+                        verb="disable",
+                    )
                 )
             elif outcome is EventOutcome.ENABLE:
-                _handle_set_status(
-                    event=event,
-                    mailbox_service=mailbox_service,
-                    extra_for=_extra,
-                    status=MailboxStatus.ACTIVE,
-                    verb="enable",
+                await anyio.to_thread.run_sync(
+                    lambda: _handle_set_status(
+                        event=event,
+                        mailbox_service=mailbox_service,
+                        extra_for=_extra,
+                        status=MailboxStatus.ACTIVE,
+                        verb="enable",
+                    )
                 )
         except AlreadyExistsError:
             seen_events[key] = True

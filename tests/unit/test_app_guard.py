@@ -25,7 +25,10 @@ def _clock() -> datetime:
 
 
 def test_noauth_with_noauth_provider_passes() -> None:
-    _enforce_identity_contract(_StubSettings(IdentityBackend.NOAUTH), NoAuthProvider())  # type: ignore[arg-type]  # WHY: stub for settings; we only need .identity_backend
+    _enforce_identity_contract(
+        _StubSettings(IdentityBackend.NOAUTH),  # type: ignore[arg-type]  # WHY: stub for settings; we only need .identity_backend
+        NoAuthProvider(metadata=MetaData()),
+    )
 
 
 def test_noauth_with_local_provider_raises() -> None:

@@ -142,6 +142,7 @@ def build_services(
             clock=clock,
             fs=fs,
             lmtp_destination=settings.lmtp_destination,
+            mlmmj_enabled=settings.mlmmj_spool_dir is not None,
             audit_writer=writer,
         ),
         quota=QuotaService(engine=engine, metadata=metadata),
@@ -166,7 +167,7 @@ def provider_for(
     if backend is IdentityBackend.LOCAL:
         return LocalProvider(metadata=metadata, clock=clock)
     if backend is IdentityBackend.NOAUTH:
-        return NoAuthProvider()
+        return NoAuthProvider(metadata=metadata)
     if backend is IdentityBackend.HYBRID:
         return HybridProvider(metadata=metadata, clock=clock)
     raise ConfigError(f"no IdentityProvider implementation for backend {backend.value!r}")

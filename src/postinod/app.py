@@ -99,6 +99,7 @@ def build_app(*, toml_path: Path) -> Litestar:
         issuer=postinod_settings.scim_issuer,
         audience=postinod_settings.scim_audience,
         jwks=jwks,
+        max_token_age_seconds=postinod_settings.scim_max_token_age_seconds,
     )
 
     def _ready() -> bool:
@@ -217,6 +218,7 @@ def build_app_for_test(
     jwks: JwksLike | None = None,
     replay_window_seconds: int = 86400,
     identity_backend: IdentityBackend = IdentityBackend.NOAUTH,
+    max_token_age_seconds: int = 86400,
 ) -> Litestar:
     """Test-only Litestar app factory.
 
@@ -272,6 +274,7 @@ def build_app_for_test(
         issuer=scim_issuer,
         audience=scim_audience,
         jwks=jwks,
+        max_token_age_seconds=max_token_age_seconds,
     )
 
     return Litestar(

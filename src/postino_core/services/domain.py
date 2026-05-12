@@ -2,12 +2,15 @@
 
 `delete` cascades dependents (mailboxes, aliases, alias_domain, domain
 admins) only when `force=True`; otherwise it refuses a non-empty domain.
-After the DB transaction commits, the per-domain maildir tree is removed
-on disk; that step is best-effort and does not strand the DB cleanup if
-it fails."""
+The per-domain maildir tree is removed via a two-phase delete: an atomic
+rename to ``.deleting.<token>`` runs inside the DB transaction; the full
+``rmtree`` runs after commit. Rmtree failure leaves a graveyard for
+``postino check --deep`` to sweep — never a partial wipe restored over
+by a DB rollback."""
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -30,6 +33,8 @@ from postino_core.errors import (
 from postino_core.fs import FilesystemAdapter
 from postino_core.models import Domain
 
+_logger = logging.getLogger(__name__)
+
 # PostfixAdmin's `domain` table reserves the literal `'ALL'` row as a permission
 # system marker (super-admin scope in `domain_admins`). It has no routable mail
 # semantics — empty `transport`, zero capacities, fixed `created`/`modified`.
@@ -46,6 +51,7 @@ class DomainService:
         clock: Callable[[], datetime],
         fs: FilesystemAdapter,
         lmtp_destination: str,
+        mlmmj_enabled: bool = False,
         audit_writer: AuditWriter | None = None,
     ) -> None:
         self._engine = engine
@@ -53,6 +59,7 @@ class DomainService:
         self._clock = clock
         self._fs = fs
         self._lmtp_destination = lmtp_destination
+        self._mlmmj_enabled = mlmmj_enabled
         self._audit: AuditWriter = audit_writer or DefaultAuditWriter(
             metadata=metadata, clock=clock
         )
@@ -92,6 +99,20 @@ class DomainService:
             raise ConfigError(
                 f"'{_PA_PERMISSION_PSEUDO_DOMAIN}' is reserved by PostfixAdmin "
                 "and cannot be used as a domain name"
+            )
+        # L3-S26: refuse mlmmj transport when the spool was not
+        # configured. Pushed down from the CLI so non-CLI consumers
+        # (SCIM, future scripts) inherit the same guarantee — without
+        # this the domain row inserts cleanly but every subsequent
+        # `postino list add` ConfigErrors with a misleading "mlmmj not
+        # configured" message after the operator believes provisioning
+        # succeeded.
+        if transport is DomainTransport.MLMMJ and not self._mlmmj_enabled:
+            raise ConfigError(
+                "domain transport=mlmmj requires postino.toml to set "
+                "mlmmj_spool_dir (and mlmmj_uid / mlmmj_gid); add the "
+                "[postino] mlmmj_* settings before provisioning an "
+                "mlmmj-transport domain"
             )
         d = self._md.tables["domain"]
         now = self._clock()
@@ -144,15 +165,15 @@ class DomainService:
 
         With ``force=True``, cascade-deletes dependents in dependency
         order (alias_domain → alias → quota2 → mailbox → domain_admins
-        → domain) AND removes the per-domain maildir tree on disk —
-        **inside the same transaction**, so a filesystem failure
-        (NFS hung, permission error) aborts the DB cascade. An
-        operator sees a single error instead of a half-deleted state
-        in which the DB no longer references the tenant but the
-        maildir survives on disk and may be re-adopted by a future
-        same-named mailbox.
+        → domain) AND stages the per-domain maildir tree for deletion
+        via an atomic ``os.rename`` to ``.deleting.<token>`` — inside
+        the same transaction. The full ``rmtree`` runs after commit.
+        Rename failure aborts the cascade so an operator sees a single
+        error; rmtree failure post-commit leaves a ``.deleting.*``
+        graveyard for ``postino check --deep`` to sweep, never a
+        partially-wiped tree restored over by a DB rollback.
 
-        ``keep_maildir`` skips the FS removal even on ``force=True`` —
+        ``keep_maildir`` skips the FS staging even on ``force=True`` —
         useful when the caller plans to archive the maildir tree
         before final disposal. Defaults to False; CLI exposes it via
         ``postino domain del --keep-maildir``.
@@ -169,6 +190,7 @@ class DomainService:
         domain_admins = self._md.tables["domain_admins"]
         quota2 = self._md.tables["quota2"]
 
+        staged: Path | None = None
         with translate_db_errors(), self._engine.begin() as conn:
             row = conn.execute(
                 select(d.c.domain).where(d.c.domain == domain).with_for_update()
@@ -213,12 +235,25 @@ class DomainService:
                 domain=domain,
                 data=f"{domain} force={force} keep_maildir={keep_maildir}",
             )
-            # FS removal LAST inside the tx: if rmtree fails, the
-            # surrounding `engine.begin()` rolls every DB delete back
-            # so the tenant's domain row + maildir survive together
-            # rather than splitting.
+            # Stage the per-domain maildir for delete INSIDE the tx —
+            # only the atomic rename rides the DB tx. If the rename
+            # fails (cross-FS, EACCES), the cascade rolls back and the
+            # tree is untouched. rmtree runs post-commit; failure
+            # leaves a .deleting.* artefact rather than risking a
+            # partial wipe under a restored DB row.
             if not keep_maildir:
-                self._fs.remove_maildir(Path(domain))
+                staged = self._fs.stage_maildir_for_delete(Path(domain))
+
+        if staged is not None:
+            try:
+                self._fs.purge_staged_maildir(staged)
+            except Exception:
+                _logger.exception(
+                    "post-commit purge of staged per-domain maildir %s for %s failed; "
+                    ".deleting.* artefact left for check --deep to sweep",
+                    staged,
+                    domain,
+                )
 
     def _count_dependents(self, conn: Connection, domain: str) -> dict[str, int]:
         mailbox = self._md.tables["mailbox"]

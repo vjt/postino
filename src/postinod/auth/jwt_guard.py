@@ -17,11 +17,19 @@ JwtVerifier.verify(token) inline before parsing the SCIM payload.
 
 from __future__ import annotations
 
+import time
 from typing import Protocol
 
 import jwt
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from jwt.algorithms import RSAAlgorithm
+
+# Default upper bound on accepted token age, in seconds. Bearer JWT
+# lifetime is the IdP's call (often hours-to-days), but postinod
+# narrows revocation latency by refusing tokens whose `iat` is older
+# than this. Combined with JWKS rotation (scim_jwks_refresh_seconds)
+# this caps the worst-case window for a leaked key.
+DEFAULT_MAX_TOKEN_AGE_SECONDS = 3600
 
 
 class JwksLike(Protocol):
@@ -36,10 +44,18 @@ class JwksLike(Protocol):
 
 
 class JwtVerifier:
-    def __init__(self, *, issuer: str, audience: str, jwks: JwksLike) -> None:
+    def __init__(
+        self,
+        *,
+        issuer: str,
+        audience: str,
+        jwks: JwksLike,
+        max_token_age_seconds: int = DEFAULT_MAX_TOKEN_AGE_SECONDS,
+    ) -> None:
         self._issuer = issuer
         self._audience = audience
         self._jwks = jwks
+        self._max_age = max_token_age_seconds
 
     async def verify(self, token: str) -> dict[str, object]:
         """Verify a bearer JWT. Returns the decoded claims dict.
@@ -71,6 +87,15 @@ class JwtVerifier:
             algorithms=["RS256"],
             audience=self._audience,
             issuer=self._issuer,
-            options={"require": ["exp"]},
+            options={"require": ["exp", "iat"]},
         )  # type: ignore[assignment]  # WHY: pyjwt.decode returns dict[str, Any]; narrowed to dict[str, object]
+        # Defence-in-depth: cap accepted token age against `iat` so
+        # postinod is not at the IdP's mercy for revocation latency on
+        # long-lived (e.g. 10y) JWTs (A4-A4.5).
+        iat = decoded.get("iat")
+        if not isinstance(iat, (int, float)):
+            raise jwt.InvalidTokenError("token missing/invalid iat claim")
+        age = time.time() - float(iat)
+        if age > self._max_age:
+            raise jwt.ExpiredSignatureError(f"token age {int(age)}s exceeds max {self._max_age}s")
         return decoded

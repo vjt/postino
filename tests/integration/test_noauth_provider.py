@@ -51,7 +51,7 @@ def test_create_identity_is_noop_keeps_sentinel(db: Engine) -> None:
     md.reflect(bind=db)
     with db.begin() as conn:
         _seed_mailbox(conn, md, "foo@example.com")
-        prov = NoAuthProvider()
+        prov = NoAuthProvider(metadata=md)
         prov.create_identity(
             conn,
             "foo@example.com",
@@ -76,7 +76,7 @@ def test_create_identity_rejects_password_argument(db: Engine) -> None:
     md.reflect(bind=db)
     with db.begin() as conn:
         _seed_mailbox(conn, md, "foo@example.com")
-        prov = NoAuthProvider()
+        prov = NoAuthProvider(metadata=md)
         with pytest.raises(ConfigError):
             prov.create_identity(
                 conn,
@@ -94,7 +94,9 @@ def test_create_identity_rejects_password_argument(db: Engine) -> None:
 
 
 def test_set_password_raises_config_error() -> None:
-    prov = NoAuthProvider()
+    # set_password refuses without ever touching MetaData → an empty
+    # MetaData is fine and avoids a DB engine in this unit-style test.
+    prov = NoAuthProvider(metadata=MetaData())
     with pytest.raises(ConfigError):
         prov.set_password(
             conn=None,  # type: ignore[arg-type]  # WHY: ConfigError must be raised before any conn use.
@@ -105,13 +107,13 @@ def test_set_password_raises_config_error() -> None:
 
 
 def test_delete_identity_is_noop() -> None:
-    NoAuthProvider().delete_identity(
+    NoAuthProvider(metadata=MetaData()).delete_identity(
         conn=None,  # type: ignore[arg-type]  # WHY: no-op never touches the connection.
         username="foo@example.com",
     )
 
 
 def test_supports_predicates_both_false() -> None:
-    prov = NoAuthProvider()
+    prov = NoAuthProvider(metadata=MetaData())
     assert prov.supports_password_change() is False
     assert prov.supports_local_provisioning() is False

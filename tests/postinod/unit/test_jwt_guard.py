@@ -48,11 +48,13 @@ def _make_token(
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
+    now = datetime.now(UTC)
     return jwt.encode(
         {
             "iss": iss,
             "aud": aud,
-            "exp": datetime.now(UTC) + timedelta(seconds=exp_offset),
+            "iat": now,
+            "exp": now + timedelta(seconds=exp_offset),
             "sub": "alice@example.org",
         },
         pem,
@@ -117,8 +119,9 @@ async def test_unknown_kid_raises_key_error(
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
+    now = datetime.now(UTC)
     token = jwt.encode(
-        {"iss": ISSUER, "aud": AUDIENCE, "sub": "x", "exp": datetime.now(UTC) + timedelta(hours=1)},
+        {"iss": ISSUER, "aud": AUDIENCE, "sub": "x", "iat": now, "exp": now + timedelta(hours=1)},
         pem,
         algorithm="RS256",
         headers={"kid": "unknown-kid"},
@@ -135,8 +138,9 @@ async def test_missing_kid_rejected(keypair: tuple[rsa.RSAPrivateKey, dict[str, 
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     )
+    now = datetime.now(UTC)
     token = jwt.encode(
-        {"iss": ISSUER, "aud": AUDIENCE, "sub": "x", "exp": datetime.now(UTC) + timedelta(hours=1)},
+        {"iss": ISSUER, "aud": AUDIENCE, "sub": "x", "iat": now, "exp": now + timedelta(hours=1)},
         pem,
         algorithm="RS256",  # no kid in headers
     )

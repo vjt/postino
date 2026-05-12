@@ -64,17 +64,22 @@ class MailingListService:
             MlmmjError, FilesystemError: from the adapter.
         """
         _, _, domain = str(create.address).partition("@")
-        with translate_db_errors(), self._engine.connect() as conn:
-            self._validate_domain_is_mlmmj(conn, domain)
-            self._validate_no_collision(conn, str(create.address))
-
-        # Spool tree first; on failure between adapter.create and audit-row
-        # write we run adapter.delete() to roll back.
-        self._adapter.create(address=create.address, primary_owner=create.owners[0])
+        # Lock the domain row FOR UPDATE before validation + spool
+        # create so a concurrent `postino domain del --force` blocks
+        # here and cannot vanish the domain mid-create (A3-A2). The
+        # lock spans the adapter.create call so spool tree creation
+        # and DB validation share the same serialisation point.
         try:
-            for owner in create.owners[1:]:
-                self._adapter.append_owner(address=create.address, owner=owner)
             with translate_db_errors(), self._engine.begin() as conn:
+                self._validate_domain_is_mlmmj(conn, domain, lock=True)
+                self._validate_no_collision(conn, str(create.address))
+                # Spool tree is created INSIDE the locked tx so a
+                # concurrent `domain del --force` is serialised behind
+                # the domain row lock and cannot vanish the routing
+                # row while the spool is being laid down (A3-A2).
+                self._adapter.create(address=create.address, primary_owner=create.owners[0])
+                for owner in create.owners[1:]:
+                    self._adapter.append_owner(address=create.address, owner=owner)
                 self._audit.write(
                     conn,
                     action=mk_action("mailing_list", "create"),
@@ -82,8 +87,13 @@ class MailingListService:
                     data=str(create.address),
                 )
         except Exception:
+            # On any failure (validation, adapter, audit) the DB tx
+            # has rolled back; compensate the FS spool tree if
+            # adapter.create got far enough to leave one on disk.
             try:
                 self._adapter.delete(address=create.address)
+            except NotFoundError:
+                pass  # adapter.create never got far enough — nothing to undo
             except Exception as compensation_err:
                 _logger.error(
                     "compensation: adapter.delete(%s) failed after partial create: %s",
@@ -200,9 +210,14 @@ class MailingListService:
         """List all mlmmj lists, optionally filtered by FQDN."""
         return self._adapter.list_all(domain=domain)
 
-    def _validate_domain_is_mlmmj(self, conn: Connection, domain: str) -> None:
+    def _validate_domain_is_mlmmj(
+        self, conn: Connection, domain: str, *, lock: bool = False
+    ) -> None:
         d = self._md.tables["domain"]
-        row = conn.execute(select(d.c.transport).where(d.c.domain == domain)).fetchone()
+        stmt = select(d.c.transport).where(d.c.domain == domain)
+        if lock:
+            stmt = stmt.with_for_update()
+        row = conn.execute(stmt).fetchone()
         if row is None:
             raise ConfigError(f"domain {domain!r} does not exist")
         if str(row[0]) != DomainTransport.MLMMJ.value:

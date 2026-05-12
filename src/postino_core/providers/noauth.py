@@ -16,15 +16,19 @@ This provider deliberately refuses to mutate ``mailbox.password``:
 from __future__ import annotations
 
 from pydantic import SecretStr
+from sqlalchemy import MetaData, select
 from sqlalchemy.engine import Connection
 
 from postino_core.enums import PasswordScheme
-from postino_core.errors import ConfigError
+from postino_core.errors import ConfigError, NotFoundError
 from postino_core.providers.base import SENTINEL_NOAUTH
 
 
 class NoAuthProvider:
     """IdentityProvider that defers all credential ops to an external IdP."""
+
+    def __init__(self, *, metadata: MetaData) -> None:
+        self._metadata = metadata
 
     def create_identity(
         self,
@@ -86,10 +90,19 @@ class NoAuthProvider:
         return False
 
     def is_idp_managed(self, conn: Connection, username: str) -> bool:
-        """Every row under noauth is IdP-managed by definition; we do
-        not verify the row exists here (cheap no-op, matches the
-        spirit of NoAuthProvider being a pass-through)."""
-        del conn, username
+        """Every row under noauth is IdP-managed by definition.
+
+        Row existence IS verified — uniform Protocol contract across
+        Local / NoAuth / Hybrid so callers can rely on ``NotFoundError``
+        for absent rows regardless of backend (A1-A6). The previous
+        ``del conn, username; return True`` lied: callers gating on the
+        predicate would have proceeded against a non-existent row."""
+        mailbox = self._metadata.tables["mailbox"]
+        row = conn.execute(
+            select(mailbox.c.username).where(mailbox.c.username == username)
+        ).fetchone()
+        if row is None:
+            raise NotFoundError(f"mailbox {username} does not exist")
         return True
 
     def bootstrap_password_value(self) -> str:

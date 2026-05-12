@@ -163,7 +163,22 @@ class MlmmjAdapter:
           the spool root would let an attacker redirect mlmmj writes).
         """
         addr_str = str(address)
-        if "/" in addr_str or addr_str in ("..", ".") or addr_str.startswith("."):
+        # Defend against bypass-the-EmailStr-boundary callers. EmailStr
+        # would reject most of these, but a future caller passing a
+        # plain str into the adapter must still fail closed.
+        # Reject:
+        # - path separators / traversal segments
+        # - leading dot (`.deleting.*` sentinel collision)
+        # - NUL / newline / CR / backslash (path-component sanitization)
+        # - the literal `_DELETING_PREFIX` (don't let an address claim
+        #   the rename graveyard namespace)
+        forbidden_chars = ("/", "\x00", "\n", "\r", "\\")
+        if (
+            any(c in addr_str for c in forbidden_chars)
+            or addr_str in ("..", ".")
+            or addr_str.startswith(".")
+            or addr_str.startswith(_DELETING_PREFIX)
+        ):
             raise FilesystemError(f"path traversal: {address!r} contains invalid path characters")
         joined = self._spool_root / addr_str
         # Component-by-component lstat: refuse any symlink under the
@@ -479,6 +494,11 @@ class MlmmjAdapter:
     def append_owner(self, *, address: EmailStr, owner: EmailStr) -> None:
         """Append ``owner`` to ``<listdir>/control/owner`` under flock.
 
+        Atomic: read existing under flock, mutate in memory, write via
+        tempfile+fsync+rename (L2-S5). A crash mid-write cannot
+        truncate the owner file or leave a half-written line — readers
+        observe either the pre-write or post-write contents.
+
         Idempotent: a duplicate owner is a no-op. Raises
         ``NotFoundError`` if the list spool dir is missing."""
         listdir = self._listdir(address)
@@ -488,15 +508,20 @@ class MlmmjAdapter:
         owner_file.parent.mkdir(parents=True, exist_ok=True)
         if not owner_file.exists():
             owner_file.touch()
-        with owner_file.open("r+", encoding="utf-8") as fh:
-            try:
-                fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
-                contents = fh.read()
-                existing = {ln.strip() for ln in contents.splitlines() if ln.strip()}
-                if str(owner) in existing:
-                    return
-                if contents and not contents.endswith("\n"):
-                    fh.write("\n")
-                fh.write(f"{owner}\n")
-            finally:
-                fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        # flock on an O_RDONLY fd serialises against concurrent
+        # append_owner / _read_owners; the actual mutation happens
+        # atomically via _atomic_write_text → os.replace.
+        fd = os.open(owner_file, os.O_RDONLY)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            contents = owner_file.read_text(encoding="utf-8")
+            existing = {ln.strip() for ln in contents.splitlines() if ln.strip()}
+            if str(owner) in existing:
+                return
+            if contents and not contents.endswith("\n"):
+                contents += "\n"
+            contents += f"{owner}\n"
+            self._atomic_write_text(owner_file, contents)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)

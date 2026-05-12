@@ -44,7 +44,7 @@ def _build_local(md: MetaData) -> IdentityProvider:
 
 
 def _build_noauth(md: MetaData) -> IdentityProvider:
-    return NoAuthProvider()
+    return NoAuthProvider(metadata=md)
 
 
 _BUILDERS: list[tuple[str, Callable[[MetaData], IdentityProvider]]] = [

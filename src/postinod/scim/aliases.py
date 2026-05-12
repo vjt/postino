@@ -33,6 +33,7 @@ from __future__ import annotations
 import json
 import logging
 
+import anyio.to_thread
 import jwt
 from litestar import Request, Router, delete, get, patch, post
 from litestar.datastructures import State
@@ -183,7 +184,8 @@ def build_aliases_router(
             err = ScimError(status="400", scimType="invalidFilter", detail=str(e))
             return _scim_response(err, 400)
 
-        all_rows = _resolve_aliases(alias_service, q)
+        # Offload blocking SQLAlchemy to threadpool (A3-A3).
+        all_rows = await anyio.to_thread.run_sync(_resolve_aliases, alias_service, q)
         page = all_rows[q.start_index - 1 : q.start_index - 1 + q.count]
         envelope = ScimListResponse(
             totalResults=len(all_rows),
@@ -224,7 +226,9 @@ def build_aliases_router(
         )
         try:
             with audit_context(extra):
-                created = alias_service.add(address=res.address, goto=res.goto)
+                created = await anyio.to_thread.run_sync(
+                    lambda: alias_service.add(address=res.address, goto=res.goto)
+                )
         except NotFoundError as e:
             return _err(e, create_path=True)
         except (AlreadyExistsError, CapacityError, ConfigError) as e:
@@ -249,7 +253,7 @@ def build_aliases_router(
             err = ScimError(status="400", scimType="invalidValue", detail=str(e))
             return _scim_response(err, 400)
 
-        a = alias_service.get(email)
+        a = await anyio.to_thread.run_sync(alias_service.get, email)
         if a is None:
             err = ScimError(status="404", detail=f"alias {alias_id!r} not found")
             return _scim_response(err, 404)
@@ -279,7 +283,7 @@ def build_aliases_router(
         )
         try:
             with audit_context(extra):
-                alias_service.delete(email)
+                await anyio.to_thread.run_sync(alias_service.delete, email)
         except NotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
 
@@ -346,7 +350,9 @@ def build_aliases_router(
                 )
                 try:
                     with audit_context(extra):
-                        alias_service.set_status(str(address), new_status)
+                        await anyio.to_thread.run_sync(
+                            alias_service.set_status, str(address), new_status
+                        )
                 except NotFoundError as e:
                     return _err(e)
                 except (DBError, FilesystemError, HookError) as e:
@@ -354,7 +360,7 @@ def build_aliases_router(
                     return _err(e)
 
         # Re-fetch to return current state.
-        a = alias_service.get(address)
+        a = await anyio.to_thread.run_sync(alias_service.get, address)
         if a is None:
             err = ScimError(status="404", detail=f"alias {alias_id!r} not found")
             return _scim_response(err, 404)
