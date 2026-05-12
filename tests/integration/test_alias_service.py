@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import MetaData
 from sqlalchemy.engine import Engine
 
+from postino_core.enums import MailboxStatus
 from postino_core.errors import AlreadyExistsError, CapacityError, NotFoundError
 from postino_core.services.alias import AliasService
 
@@ -98,3 +99,46 @@ def test_alias_list_by_domain(db: Engine, frozen_clock: datetime) -> None:
     svc.add(address="c@other.example.org", goto="x@x.example.org")
     addresses = {a.address for a in svc.list(domain="example.com")}
     assert addresses == {"a@example.com", "b@example.com"}
+
+
+def test_alias_set_status_disable(db: Engine, frozen_clock: datetime) -> None:
+    _seed_domain(db, "example.it")
+    svc = _service(db, frozen_clock)
+    svc.add(address="x@example.it", goto="y@example.it")
+    svc.set_status("x@example.it", MailboxStatus.DISABLED)
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.connect() as conn:
+        row = (
+            conn.execute(
+                md.tables["alias"].select().where(md.tables["alias"].c.address == "x@example.it")
+            )
+            .mappings()
+            .one()
+        )
+    assert int(row["active"]) == 0
+
+
+def test_alias_set_status_enable_round_trip(db: Engine, frozen_clock: datetime) -> None:
+    _seed_domain(db, "example.it")
+    svc = _service(db, frozen_clock)
+    svc.add(address="x@example.it", goto="y@example.it")
+    svc.set_status("x@example.it", MailboxStatus.DISABLED)
+    svc.set_status("x@example.it", MailboxStatus.ACTIVE)
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.connect() as conn:
+        row = (
+            conn.execute(
+                md.tables["alias"].select().where(md.tables["alias"].c.address == "x@example.it")
+            )
+            .mappings()
+            .one()
+        )
+    assert int(row["active"]) == 1
+
+
+def test_alias_set_status_missing_raises(db: Engine, frozen_clock: datetime) -> None:
+    svc = _service(db, frozen_clock)
+    with pytest.raises(NotFoundError, match=r"alias ghost@example\.it does not exist"):
+        svc.set_status("ghost@example.it", MailboxStatus.DISABLED)

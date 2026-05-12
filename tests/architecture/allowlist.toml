@@ -70,13 +70,13 @@
 
 [test_type_ignore_justified."src/postino_core/services/alias.py"]
 98 = "WHY: SQLAlchemy RowMapping access yields Any; documented project-wide."
-129 = "WHY: SQLAlchemy RowMapping access yields Any."
-133 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-134 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-135 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-136 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-137 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-138 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+149 = "WHY: SQLAlchemy RowMapping access yields Any."
+153 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+154 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+155 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+156 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+157 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+158 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/domain.py"]
 # Lines 136 and 264 carry inline WHY comments; no allowlist entry needed.

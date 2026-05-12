@@ -115,6 +115,26 @@ class AliasService:
                 data=str(address),
             )
 
+    def set_status(self, address: str, status: MailboxStatus) -> None:
+        """Enable / disable an alias. Mirrors MailboxService.set_status."""
+        alias = self._md.tables["alias"]
+        now = self._clock()
+        with translate_db_errors(), self._engine.begin() as conn:
+            result = conn.execute(
+                alias.update()
+                .where(alias.c.address == address)
+                .values(active=int(status), modified=now)
+            )
+            if result.rowcount == 0:
+                raise NotFoundError(f"alias {address} does not exist")
+            _, _, domain = address.partition("@")
+            self._audit.write(
+                conn,
+                action=mk_action("alias", "set_status"),
+                domain=domain,
+                data=f"{address}={status.name}",
+            )
+
     def list(self, *, domain: str | None = None) -> list[Alias]:
         """List aliases, optionally scoped to a domain.
 
