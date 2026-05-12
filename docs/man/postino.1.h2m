@@ -1,0 +1,100 @@
+[NAME]
+postino \- administer a Postfix + Dovecot mail server (PostfixAdmin schema)
+
+[DESCRIPTION]
+.B postino
+is a typed Python CLI for the PostfixAdmin SQL schema. It manages domains,
+mailboxes, aliases, alias-domains, and mlmmj mailing lists, and reads
+postfix's own \fBsql-virtual_*.cf\fR files for database credentials so
+postfix stays the single source of truth.
+
+Three identity backends are supported:
+.BR local ,
+.BR noauth ,
+and
+.BR hybrid
+\(em see the README for partitioning rules.
+
+[FILES]
+.TP
+.B /usr/local/etc/postino/postino.toml
+System-wide configuration (FreeBSD). Per-deploy identity backend, paths,
+mlmmj settings.
+.TP
+.B /etc/postino/postino.toml
+System-wide configuration (Debian/Ubuntu). Same format as above.
+.TP
+.B ~/.config/postino/postino.toml
+Per-user override; merged on top of the system file.
+.TP
+.B /usr/local/etc/postfix/sql-virtual_*.cf
+Read-only: postfix database credentials (FreeBSD path). Set
+.B POSTINO_POSTFIX_SQL_DIR
+to point to the directory on other platforms (e.g. /etc/postfix on Debian).
+Three files are always required (\fBmailbox_maps\fR, \fBalias_maps\fR,
+\fBdomain_maps\fR); two \fB*_alias_domain_maps.cf\fR variants are
+conditionally required when the alias_domain table has rows.
+
+[ENVIRONMENT]
+.TP
+.B POSTINO_CONFIG
+Path to a TOML configuration file. When set, this file is loaded instead
+of (not in addition to) the standard system and user TOML files.
+.TP
+.B POSTINO_*
+Every TOML field can be overridden by the corresponding
+.B POSTINO_<UPPERCASE>
+environment variable (pydantic-settings convention, prefix
+.BR POSTINO_ ).
+Nested fields use double-underscore as separator
+(e.g. \fBPOSTINO_MLMMJ_SPOOL_DIR\fR).
+
+[EXIT STATUS]
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Not found (record does not exist).
+.TP
+.B 2
+Already exists (uniqueness constraint would be violated).
+.TP
+.B 3
+Capacity exceeded (domain mailbox, alias, or quota cap).
+.TP
+.B 4
+Configuration error (missing field, malformed TOML, unsupported value).
+.TP
+.B 5
+Database error (connectivity, schema drift, or query failure).
+.TP
+.B 6
+Filesystem error (maildir mkdir/chown/rm failed).
+.TP
+.B 7
+Hook error (postcreation hook returned non-zero).
+.TP
+.B 8
+Deadlock (MySQL deadlock or innodb_lock_wait_timeout; safe to retry
+idempotent operations).
+.TP
+.B 9
+mlmmj error (subprocess exited non-zero, timed out, or produced
+unparseable output).
+.TP
+.B 10
+Rule violation (cycle, self-alias, or other schema-level constraint
+violation).
+.TP
+.B 99
+Unhandled exception. A full traceback is printed via rich.
+
+[SEE ALSO]
+.BR postinod (8),
+.BR postfix (1),
+.BR dovecot (1),
+.BR mlmmj (1)
+
+[AUTHOR]
+Marcello Barnaba <vjt@openssl.it>
