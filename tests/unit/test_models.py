@@ -219,11 +219,13 @@ def test_alias_domain_model_is_frozen() -> None:
 
 def test_alias_domain_model_rejects_extras() -> None:
     with pytest.raises(PydValidationError):
-        AliasDomain.model_validate({
-            "alias_domain": "x.it",
-            "target_domain": "y.it",
-            "status": 1,
-            "created": _ts(),
-            "modified": _ts(),
-            "stray": "field",
-        })
+        AliasDomain.model_validate(
+            {
+                "alias_domain": "x.it",
+                "target_domain": "y.it",
+                "status": 1,
+                "created": _ts(),
+                "modified": _ts(),
+                "stray": "field",
+            }
+        )
