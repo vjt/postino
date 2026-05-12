@@ -17,23 +17,21 @@ MAN_DIR = REPO_ROOT / "man"
 SCRIPT = REPO_ROOT / "scripts" / "build-manpages.sh"
 
 
-def _have(binary: str) -> bool:
-    return shutil.which(binary) is not None
-
-
 @pytest.mark.skipif(
-    not (_have("help2man") and _have("mandoc")),
+    not (shutil.which("help2man") and shutil.which("mandoc")),
     reason="help2man and/or mandoc not installed",
 )
-def test_committed_manpages_match_build_script(tmp_path: Path) -> None:
+def test_committed_manpages_match_build_script() -> None:
     """Run scripts/build-manpages.sh and confirm man/postino.1 + man/postinod.8 are unchanged."""
-    # Snapshot current content so we can restore if the test fails or the script mutated them.
     postino_1 = MAN_DIR / "postino.1"
     postinod_8 = MAN_DIR / "postinod.8"
     before = {p: p.read_bytes() for p in (postino_1, postinod_8)}
 
-    # Pin DATE to the date in the committed postinod.8 .TH line so the script's
-    # daily date stamp doesn't introduce false drift.
+    # Pin DATE to the committed postinod.8 .TH date so the build script's
+    # default `date +%Y-%m-%d` doesn't cause spurious drift on day rollover.
+    # Regex assumes the troff-template form (bare numeric section: `.TH POSTINOD 8 "DATE"`);
+    # the help2man-generated postino.1 uses a quoted section (`.TH POSTINO "1" "DATE"`)
+    # and is intentionally not used as the date source.
     th_match = re.search(rb'^\.TH \S+ \d+ "([\d-]+)"', before[postinod_8], re.MULTILINE)
     assert th_match is not None, "could not parse .TH date from committed postinod.8"
     pinned_date = th_match.group(1).decode()
