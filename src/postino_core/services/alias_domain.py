@@ -14,10 +14,10 @@ from sqlalchemy import MetaData, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.row import RowMapping
 
-from postino_core.audit import AuditWriter, DefaultAuditWriter
+from postino_core.audit import AuditWriter, DefaultAuditWriter, mk_action
 from postino_core.db import translate_db_errors
 from postino_core.enums import MailboxStatus
-from postino_core.errors import NotFoundError
+from postino_core.errors import AlreadyExistsError, NotFoundError, RuleViolationError
 from postino_core.models import AliasDomain
 
 
@@ -77,6 +77,75 @@ class AliasDomainService:
         if row is None:
             raise NotFoundError(f"alias_domain {alias_domain} does not exist")
         return self._row_to_model(row)
+
+    def add(self, alias_domain: str, *, target: str) -> AliasDomain:
+        """Create an alias_domain row mapping ``alias_domain`` -> ``target``.
+
+        Six validation rules enforced inside the same transaction as the
+        INSERT, so concurrent writes cannot race past them:
+
+        1. no self-alias (source != target);
+        2. source domain must exist in ``domain``;
+        3. target domain must exist in ``domain``;
+        4. source must not already be the target of another row (no chain);
+        5. target must not already be the source of another row (no chain);
+        6. row must not already exist.
+
+        Raises: RuleViolationError on 1/4/5; NotFoundError on 2/3;
+                AlreadyExistsError on 6; DBError on driver-level errors.
+        """
+        self._validate_pair(alias_domain, target)
+        now = self._clock()
+        t = self._md.tables["alias_domain"]
+        domains = self._md.tables["domain"]
+        with translate_db_errors(), self._engine.begin() as conn:
+            # Rules 2, 3: both endpoints must exist as domains.
+            for d in (alias_domain, target):
+                hit = conn.execute(select(domains.c.domain).where(domains.c.domain == d)).first()
+                if hit is None:
+                    raise NotFoundError(f"domain {d} does not exist")
+            # Rules 4, 5: no chain — alias_domain not already a target,
+            # target not already a source. Single round-trip via OR.
+            chain = conn.execute(
+                select(t.c.alias_domain).where(
+                    (t.c.target_domain == alias_domain) | (t.c.alias_domain == target)
+                )
+            ).first()
+            if chain is not None:
+                raise RuleViolationError(
+                    f"adding {alias_domain} -> {target} would chain "
+                    "with an existing alias_domain row"
+                )
+            # Rule 6: row must not already exist.
+            dup = conn.execute(
+                select(t.c.alias_domain).where(t.c.alias_domain == alias_domain)
+            ).first()
+            if dup is not None:
+                raise AlreadyExistsError(f"alias_domain {alias_domain} already exists")
+            conn.execute(
+                t.insert().values(
+                    alias_domain=alias_domain,
+                    target_domain=target,
+                    created=now,
+                    modified=now,
+                    active=int(MailboxStatus.ACTIVE),
+                )
+            )
+            self._audit.write(
+                conn,
+                action=mk_action("alias_domain", "add"),
+                domain=alias_domain,
+                data=f"target={target}",
+            )
+        return self.get(alias_domain)
+
+    @staticmethod
+    def _validate_pair(alias_domain: str, target: str) -> None:
+        # Rule 1: no self-alias.
+        if alias_domain == target:
+            raise RuleViolationError(
+                f"alias_domain {alias_domain} cannot self-alias (source == target)"
+            )
 
     def _row_to_model(self, row: RowMapping) -> AliasDomain:
         return AliasDomain(
