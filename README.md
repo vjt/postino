@@ -5,6 +5,7 @@
 [![PyPI](https://img.shields.io/pypi/v/il-postino.svg)](https://pypi.org/project/il-postino/)
 [![Python](https://img.shields.io/pypi/pyversions/il-postino.svg)](https://pypi.org/project/il-postino/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![codecov](https://codecov.io/gh/vjt/postino/branch/main/graph/badge.svg)](https://codecov.io/gh/vjt/postino)
 
 Typed Python CLI for administering Postfix + Dovecot mail servers that use
 the [PostfixAdmin](https://github.com/postfixadmin/postfixadmin) SQL schema
@@ -98,6 +99,30 @@ Future updates can use the cache and skip rust:
 ```sh
 git pull
 .venv/bin/pip install --no-build-isolation --find-links wheels/ .
+```
+
+### Debian / Ubuntu (.deb)
+
+Bookworm and trixie, amd64 and arm64. The whole CPython venv is bundled in `/usr/share/postino/venv` — no `pip` runs at install time.
+
+```sh
+v=0.8.0
+arch=$(dpkg --print-architecture)         # amd64 or arm64
+codename=$(lsb_release -cs)               # bookworm or trixie
+url="https://github.com/vjt/postino/releases/download/v${v}/il-postino_${v}-1_${codename}_${arch}.deb"
+curl -fLo /tmp/il-postino.deb "$url"
+sudo apt install -y /tmp/il-postino.deb
+```
+
+### FreeBSD (.txz)
+
+FreeBSD 14, amd64. Ships an `rc(8)` script disabled by default; enable with `postinod_enable=YES` in `/etc/rc.conf`.
+
+```sh
+v=0.8.0
+fetch -o /tmp/il-postino.txz \
+  "https://github.com/vjt/postino/releases/download/v${v}/il-postino-${v}.txz"
+sudo pkg add /tmp/il-postino.txz
 ```
 
 ## Configuration
