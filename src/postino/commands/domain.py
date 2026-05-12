@@ -8,7 +8,7 @@ import typer
 
 from postino.exit import exit_with_error, get_services, is_json
 from postino.output import Renderer
-from postino_core.enums import DomainTransport
+from postino_core.enums import DomainTransport, MailboxStatus
 from postino_core.errors import ConfigError, MailctlError
 from postino_core.quota import parse_quota
 
@@ -146,5 +146,37 @@ def alias_del(
         typer.confirm(f"Delete alias_domain {alias_domain}?", abort=True)
     try:
         get_services(ctx).alias_domain.delete(alias_domain)
+    except MailctlError as e:
+        exit_with_error(e)
+
+
+@alias_app.command("enable")
+def alias_enable(ctx: typer.Context, alias_domain: str) -> None:
+    """Set alias_domain.active = 1."""
+    try:
+        get_services(ctx).alias_domain.set_status(alias_domain, MailboxStatus.ACTIVE)
+    except MailctlError as e:
+        exit_with_error(e)
+
+
+@alias_app.command("disable")
+def alias_disable(ctx: typer.Context, alias_domain: str) -> None:
+    """Set alias_domain.active = 0."""
+    try:
+        get_services(ctx).alias_domain.set_status(alias_domain, MailboxStatus.DISABLED)
+    except MailctlError as e:
+        exit_with_error(e)
+
+
+@alias_app.command("retarget")
+def alias_retarget(
+    ctx: typer.Context,
+    alias_domain: str,
+    target: Annotated[str, typer.Option("--target", help="New target domain")],
+) -> None:
+    """Repoint alias_domain to a new target."""
+    try:
+        row = get_services(ctx).alias_domain.retarget(alias_domain, target=target)
+        Renderer(json=is_json(ctx)).render(row)
     except MailctlError as e:
         exit_with_error(e)

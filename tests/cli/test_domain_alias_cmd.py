@@ -1,7 +1,7 @@
 """CLI tests for ``postino domain alias …`` nested subcommand.
 
-Covers the add / list / show / del verbs wired in commands/domain.py.
-Other verbs (enable/disable/retarget) are tested in a sibling task."""
+Covers add / list / show / del + enable / disable / retarget verbs
+wired in commands/domain.py."""
 
 from __future__ import annotations
 
@@ -204,6 +204,168 @@ def test_alias_del_with_yes(
     r = runner.invoke(
         app,
         ["domain", "alias", "show", "src.example.org"],
+        env=env,
+    )
+    assert r.exit_code == 1, r.output
+
+
+def test_disable_then_enable_round_trip(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """`disable` then `enable` round-trips alias_domain.active and the
+    default `alias list` (enabled-only) reflects each state."""
+    db_url = os.environ["POSTINO_TEST_DB_URL"]
+    env = _bootstrap(db_url, tmp_path, fake_postcreation_hook)
+    _seed_domain(env, "src.example.org")
+    _seed_domain(env, "tgt.example.org")
+
+    r = runner.invoke(
+        app,
+        [
+            "domain",
+            "alias",
+            "add",
+            "src.example.org",
+            "--target",
+            "tgt.example.org",
+        ],
+        env=env,
+    )
+    assert r.exit_code == 0, r.output
+
+    # Disable
+    r = runner.invoke(
+        app,
+        ["domain", "alias", "disable", "src.example.org"],
+        env=env,
+    )
+    assert r.exit_code == 0, r.output
+
+    # Default list filters disabled → empty
+    r = runner.invoke(app, ["--json", "domain", "alias", "list"], env=env)
+    assert r.exit_code == 0, r.output
+    assert "src.example.org" not in r.output
+
+    # --all surfaces the disabled row
+    r = runner.invoke(app, ["--json", "domain", "alias", "list", "--all"], env=env)
+    assert r.exit_code == 0, r.output
+    assert "src.example.org" in r.output
+
+    # Re-enable
+    r = runner.invoke(
+        app,
+        ["domain", "alias", "enable", "src.example.org"],
+        env=env,
+    )
+    assert r.exit_code == 0, r.output
+
+    # Default list now shows the row again
+    r = runner.invoke(app, ["--json", "domain", "alias", "list"], env=env)
+    assert r.exit_code == 0, r.output
+    assert "src.example.org" in r.output
+
+
+def test_disable_missing_returns_exit_1(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """NotFoundError → exit code 1 for unknown alias_domain."""
+    db_url = os.environ["POSTINO_TEST_DB_URL"]
+    env = _bootstrap(db_url, tmp_path, fake_postcreation_hook)
+
+    r = runner.invoke(
+        app,
+        ["domain", "alias", "disable", "nope.example.org"],
+        env=env,
+    )
+    assert r.exit_code == 1, r.output
+
+
+def test_retarget_happy(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """`retarget` repoints alias_domain to a fresh target domain."""
+    db_url = os.environ["POSTINO_TEST_DB_URL"]
+    env = _bootstrap(db_url, tmp_path, fake_postcreation_hook)
+    _seed_domain(env, "src.example.org")
+    _seed_domain(env, "tgt1.example.org")
+    _seed_domain(env, "tgt2.example.org")
+
+    r = runner.invoke(
+        app,
+        [
+            "domain",
+            "alias",
+            "add",
+            "src.example.org",
+            "--target",
+            "tgt1.example.org",
+        ],
+        env=env,
+    )
+    assert r.exit_code == 0, r.output
+
+    r = runner.invoke(
+        app,
+        [
+            "domain",
+            "alias",
+            "retarget",
+            "src.example.org",
+            "--target",
+            "tgt2.example.org",
+        ],
+        env=env,
+    )
+    assert r.exit_code == 0, r.output
+
+    # Confirm the new target via JSON list.
+    r = runner.invoke(app, ["--json", "domain", "alias", "list"], env=env)
+    assert r.exit_code == 0, r.output
+    assert "tgt2.example.org" in r.output
+    assert "tgt1.example.org" not in r.output
+
+
+def test_retarget_missing_target_returns_exit_1(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """Retargeting to an unknown domain → exit code 1 (NotFoundError)."""
+    db_url = os.environ["POSTINO_TEST_DB_URL"]
+    env = _bootstrap(db_url, tmp_path, fake_postcreation_hook)
+    _seed_domain(env, "src.example.org")
+    _seed_domain(env, "tgt.example.org")
+
+    r = runner.invoke(
+        app,
+        [
+            "domain",
+            "alias",
+            "add",
+            "src.example.org",
+            "--target",
+            "tgt.example.org",
+        ],
+        env=env,
+    )
+    assert r.exit_code == 0, r.output
+
+    r = runner.invoke(
+        app,
+        [
+            "domain",
+            "alias",
+            "retarget",
+            "src.example.org",
+            "--target",
+            "ghost.example.org",
+        ],
         env=env,
     )
     assert r.exit_code == 1, r.output
