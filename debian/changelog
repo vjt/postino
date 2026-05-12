@@ -1,0 +1,6 @@
+il-postino (0.8.0-1) unstable; urgency=medium
+
+  * Initial Debian package: bundle CPython 3.11+ venv via dh-virtualenv;
+    ship postino(1) and postinod(8) manpages; ship systemd unit.
+
+ -- Marcello Barnaba <vjt@openssl.it>  Tue, 12 May 2026 23:14:15 +0200

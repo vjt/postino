@@ -44,3 +44,14 @@ htmlcov/
 
 # Worktrees
 .worktrees/
+
+# Debian packaging build artefacts
+debian/.debhelper/
+debian/il-postino/
+debian/il-postino.*.debhelper
+debian/files
+debian/*.substvars
+*.deb
+*.buildinfo
+*.changes
+*.ddeb

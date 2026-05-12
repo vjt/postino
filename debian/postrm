@@ -1,0 +1,14 @@
+#!/bin/sh
+set -e
+
+case "$1" in
+  purge)
+    if getent passwd postinod >/dev/null; then
+      deluser --system --quiet postinod || true
+    fi
+    rm -rf /etc/postino /usr/share/postino
+    ;;
+esac
+
+#DEBHELPER#
+exit 0

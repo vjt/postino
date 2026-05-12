@@ -1,0 +1,39 @@
+Source: il-postino
+Section: mail
+Priority: optional
+Maintainer: Marcello Barnaba <vjt@openssl.it>
+Build-Depends:
+ debhelper (>= 13),
+ dh-virtualenv (>= 1.2),
+ python3 (>= 3.11),
+ python3-dev,
+ python3-venv,
+ libffi-dev,
+ libssl-dev,
+ build-essential,
+ cargo,
+Standards-Version: 4.6.2
+Homepage: https://github.com/vjt/postino
+Vcs-Git: https://github.com/vjt/postino.git
+Vcs-Browser: https://github.com/vjt/postino
+
+Package: il-postino
+Architecture: any
+Pre-Depends: dpkg (>= 1.18.5)
+Depends:
+ ${misc:Depends},
+ ${shlibs:Depends},
+ python3 (>= 3.11),
+ adduser,
+ mlmmj,
+Recommends: postfix, dovecot-imapd, mariadb-client
+Description: typed Python CLI + daemon for PostfixAdmin-schema mail servers
+ il-postino administers domains, mailboxes, aliases, alias-domains, and
+ mlmmj mailing lists on a Postfix + Dovecot stack using the PostfixAdmin
+ SQL schema. Includes:
+  * postino(1)   - operator CLI (typed, pyright-strict, audit-logged)
+  * postinod(8)  - HTTP daemon (SCIM 2.0 + Zitadel event sink)
+ .
+ The whole Python venv is bundled in /usr/share/postino/venv so no pip
+ install runs at package-install time. Closed-world, no internet
+ required to install.
