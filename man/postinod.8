@@ -1,0 +1,63 @@
+.TH POSTINOD 8 "2026-05-12" "postinod 0.7.1" "postino daemon"
+.SH NAME
+postinod \- HTTP daemon: SCIM 2.0 + Zitadel event sink for postino
+.SH SYNOPSIS
+.B postinod
+.RI [ options ]
+.SH DESCRIPTION
+.B postinod
+exposes two HTTP surfaces against the PostfixAdmin SQL schema:
+.RS
+.IP \(bu 2
+.B /scim/v2/*
+\- generic SCIM 2.0 endpoints, JWT-bearer-gated. Audience:
+scim-cli, custom scripts, audit/inventory tooling.
+Users, Aliases (POST/PATCH/DELETE), read-only Domains.
+.IP \(bu 2
+.B /zitadel/events
+\- HMAC-signed event sink invoked by Zitadel Actions. The only
+Zitadel-driven path \(em postino does
+.B not
+push identity into Zitadel.
+.RE
+.PP
+Identity backend selection (\fBlocal\fR, \fBnoauth\fR, \fBhybrid\fR)
+is enforced at startup and matches the
+.BR postino (1)
+configuration.
+.SH ENVIRONMENT
+.TP
+.B POSTINOD_SCIM_HMAC_SECRET
+.TP
+.B POSTINOD_ZITADEL_HMAC_SECRET
+Both required, 32-byte minimum, env-only (never read from TOML).
+.TP
+.B POSTINOD_SCIM_MAX_TOKEN_AGE_SECONDS
+JWT \fBiat\fR-anchored max age. Default: 3600.
+.TP
+.B POSTINO_DATABASE_URL
+Inherited from \fBpostino\fR(1); same DSN, same parse rules.
+.SH FILES
+.TP
+.B /usr/local/etc/postino/postino.toml
+Shared config with the CLI.
+.TP
+.B /lib/systemd/system/postinod.service
+systemd unit shipped by the
+.B il-postino
+package (Debian).
+.TP
+.B /usr/local/etc/rc.d/postinod
+rc(8) script shipped by the
+.B il-postino
+FreeBSD package.
+.SH EXIT STATUS
+0 on clean shutdown. Non-zero on startup failure (missing secrets,
+DB unreachable, schema-version mismatch).
+.SH SEE ALSO
+.BR postino (1),
+.BR postfix (1),
+.BR dovecot (1),
+.BR systemd.service (5)
+.SH AUTHOR
+Marcello Barnaba <vjt@openssl.it>
