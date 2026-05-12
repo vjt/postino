@@ -22,7 +22,7 @@ System-wide configuration (FreeBSD). Per-deploy identity backend, paths,
 mlmmj settings.
 .TP
 .B ~/.config/postino/postino.toml
-Per-user override; merged on top of the system file.
+Per-user override; fields defined here take precedence over the system file.
 .TP
 .B /usr/local/etc/postfix/sql-virtual_*.cf
 Read-only: postfix database credentials (FreeBSD path). Set
@@ -35,8 +35,8 @@ conditionally required when the alias_domain table has rows.
 [ENVIRONMENT]
 .TP
 .B POSTINO_CONFIG
-Path to a TOML configuration file. When set, this file is loaded instead
-of (not in addition to) the standard system and user TOML files.
+Path to a TOML configuration file. When set, this file is loaded at
+highest precedence, before the standard system and user TOML files.
 .TP
 .B POSTINO_*
 Every TOML field can be overridden by the corresponding
