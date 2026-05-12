@@ -56,6 +56,7 @@ dev = [
     # scim2-client / scim2-cli are unnecessary — requests stay on httpx,
     # scim2-models alone covers RFC 7643 / 7644 envelope validation.
     "scim2-models>=0.6",
+    "pytest-cov>=5",
 ]
 
 [project.scripts]
