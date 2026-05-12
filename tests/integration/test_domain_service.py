@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import MetaData, select
 from sqlalchemy.engine import Engine
 
-from postino_core.enums import DomainTransport
+from postino_core.enums import DomainTransport, MailboxStatus
 from postino_core.errors import AlreadyExistsError, CapacityError, ConfigError, NotFoundError
 from postino_core.fs import FilesystemAdapter
 from postino_core.services.domain import DomainService
@@ -535,3 +535,67 @@ def test_domain_add_mlmmj_round_trip(db: Engine, frozen_clock: datetime) -> None
     d = svc.get("lists.example.org")
     assert d is not None
     assert d.transport is DomainTransport.MLMMJ
+
+
+# ---------------------------------------------------------------------------
+# set_status — mirrors MailboxService.set_status
+# ---------------------------------------------------------------------------
+
+
+def test_domain_set_status_disable(db: Engine, frozen_clock: datetime) -> None:
+    svc = _service(db, frozen_clock)
+    svc.add(
+        domain="example.it",
+        description="",
+        max_aliases=0,
+        max_mailboxes=0,
+        max_quota_bytes=0,
+        default_quota_bytes=0,
+        transport=DomainTransport.VIRTUAL,
+        backupmx=False,
+    )
+    svc.set_status("example.it", MailboxStatus.DISABLED)
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.connect() as conn:
+        row = (
+            conn.execute(
+                md.tables["domain"].select().where(md.tables["domain"].c.domain == "example.it")
+            )
+            .mappings()
+            .one()
+        )
+    assert int(row["active"]) == 0
+
+
+def test_domain_set_status_enable_round_trip(db: Engine, frozen_clock: datetime) -> None:
+    svc = _service(db, frozen_clock)
+    svc.add(
+        domain="example.it",
+        description="",
+        max_aliases=0,
+        max_mailboxes=0,
+        max_quota_bytes=0,
+        default_quota_bytes=0,
+        transport=DomainTransport.VIRTUAL,
+        backupmx=False,
+    )
+    svc.set_status("example.it", MailboxStatus.DISABLED)
+    svc.set_status("example.it", MailboxStatus.ACTIVE)
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.connect() as conn:
+        row = (
+            conn.execute(
+                md.tables["domain"].select().where(md.tables["domain"].c.domain == "example.it")
+            )
+            .mappings()
+            .one()
+        )
+    assert int(row["active"]) == 1
+
+
+def test_domain_set_status_missing_raises(db: Engine, frozen_clock: datetime) -> None:
+    svc = _service(db, frozen_clock)
+    with pytest.raises(NotFoundError, match=r"domain ghost\.it does not exist"):
+        svc.set_status("ghost.it", MailboxStatus.DISABLED)

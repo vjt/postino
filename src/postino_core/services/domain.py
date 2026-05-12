@@ -263,6 +263,25 @@ class DomainService:
             ).fetchall()
         return [self._row_to_model(r._mapping) for r in rows]  # type: ignore[arg-type]  # WHY: SQLAlchemy RowMapping is typed Any; we access known columns
 
+    def set_status(self, name: str, status: MailboxStatus) -> None:
+        """Enable / disable a domain. Mirrors MailboxService.set_status."""
+        domain = self._md.tables["domain"]
+        now = self._clock()
+        with translate_db_errors(), self._engine.begin() as conn:
+            result = conn.execute(
+                domain.update()
+                .where(domain.c.domain == name)
+                .values(active=int(status), modified=now)
+            )
+            if result.rowcount == 0:
+                raise NotFoundError(f"domain {name} does not exist")
+            self._audit.write(
+                conn,
+                action=mk_action("domain", "set_status"),
+                domain=name,
+                data=f"{name}={status.name}",
+            )
+
     def _row_to_model(self, m: RowMapping) -> Domain:
         return Domain(
             domain=str(m["domain"]),

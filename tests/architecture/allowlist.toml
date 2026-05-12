@@ -79,16 +79,16 @@
 138 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/domain.py"]
-# Lines 137 and 264 carry inline WHY comments; no allowlist entry needed.
+# Lines 136 and 264 carry inline WHY comments; no allowlist entry needed.
 # Lines below are _row_to_model body: SQLAlchemy RowMapping[str, Any] indexing.
-270 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-271 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-272 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-273 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-275 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-276 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-277 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-278 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+289 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+290 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+291 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+292 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+294 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+295 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+296 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+297 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/mailbox.py"]
 # Lines shifted after the Protocol cleanup (cluster 3 of the
