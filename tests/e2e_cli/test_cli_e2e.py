@@ -302,17 +302,6 @@ def test_postino_check_json(e2e_env: dict[str, str]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# reconcile command (V2 stub — exits 4 by design)
-# ---------------------------------------------------------------------------
-
-
-def test_postino_reconcile_exits_4(e2e_env: dict[str, str]) -> None:
-    """reconcile is a V2 stub: always exits 4 (ConfigError-shaped) with a message."""
-    code, _out, err = _run(["reconcile"], e2e_env)
-    assert code == 4, f"stderr: {err}"
-
-
-# ---------------------------------------------------------------------------
 # version flag
 # ---------------------------------------------------------------------------
 

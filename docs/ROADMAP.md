@@ -32,31 +32,34 @@ git push origin main v0.1.1
 
 ## v0.2 — operator quality of life
 
-1. **`postino reconcile`** — drift detector. Reads an "expected state"
-   declaration (TOML/YAML — domains, mailboxes, aliases, quotas) and
-   diffs against live DB. Reports drift; `--apply` to converge.
-   Foundation for IaC-style mail admin.
-2. **Per-subcommand `--json`** — repeat the flag on every command so
+Reconcile dropped: would create a second source-of-truth for mailbox
+state (TOML intent vs DB reality). DB stays sole SoT; drift detection
+that does not invent a second SoT lives in `postino check --deep`. The
+`reconcile` CLI stub was removed in v0.8.
+
+1. **Per-subcommand `--json`** — repeat the flag on every command so
    `postino user list --json` works. Currently top-level only.
-3. **TOML schema validation at startup** — better errors than the
+2. **TOML schema validation at startup** — better errors than the
    Pydantic ValidationError → ConfigError translation. Show file:line
    of the offending field.
-4. **`postino check` extensions**:
+3. **`postino check` extensions**:
    - `vmail` uid/gid resolves to a real user/group on the host
    - postcreation hook is syntactically valid (`sh -n`)
    - DB user has *exactly* the grants postino needs (not over-privileged)
-   - `postfix sql-virtual_*.cf` files are not world-readable
-5. **`CHANGELOG.md`** + GitHub Releases auto-populated from tags.
-6. **`postino rotate-db-pwd`** — rotate the postfix DB user atomically:
+   - `postfix sql-virtual_*.cf` files are not world-readable *(shipped v0.7)*
+4. **`CHANGELOG.md`** + GitHub Releases auto-populated from tags.
+5. **`postino rotate-db-pwd`** — rotate the postfix DB user atomically:
    `ALTER USER`, rewrite all referenced `sql-virtual_*.cf` and dovecot
    sql configs, `postfix reload` + `dovecot reload`, write an audit-log
    entry. Encodes the manual workflow as a single command.
-7. **`postino dump-schema`** — produce `tests/fixtures/postfixadmin.sql`
+6. **`postino dump-schema`** — produce `tests/fixtures/postfixadmin.sql`
    directly with mysqldump warnings / GTID statements / non-DDL noise
    stripped, so the fixture doesn't need hand-editing.
-8. **Shell completion** — `postino --install-completion`.
-9. **Audit log** — postino writes its own ops to the PostfixAdmin `log`
-   table so PA web UI shows them.
+7. **Shell completion** — `postino --install-completion` *(on `main`)*.
+8. **Audit log** — postino writes its own ops to the PostfixAdmin `log`
+   table so PA web UI shows them *(shipped v0.4 via `DefaultAuditWriter`;
+   every mutator service inserts a `postino.<resource>.<verb>` row
+   inside the same transaction as the mutation)*.
 
 ## v0.3 — mlmmj mailing lists (shipped 2026-05-10)
 
@@ -152,6 +155,21 @@ to PyPI when the same SHA's lint/test/postinod-e2e pipeline is red.
 trailing summary line so the previous regex was a no-op). Default:
 yellow warning + remediation hint. `POSTINO_CHECK_STRICT=1` makes
 it fail-exit; use this before tagging.
+
+## Unreleased on `main`
+
+Folded into the next feature release — not worth a tag on their own:
+
+- Top-level Typer flipped to `add_completion=True`. Users get
+  `postino --install-completion {bash,zsh,fish,powershell}` and
+  `postino --show-completion <shell>` for free.
+- `reconcile` CLI stub removed (command, tests, ROADMAP entry).
+  Rationale: any TOML-driven "expected state" would compete with
+  the DB as source-of-truth for mailbox state, and PA web-UI edits
+  would silently revert on the next `--apply`. Drift detection
+  stays in `postino check --deep` (DB-only diff).
+- ROADMAP backfill: v0.4 already shipped the audit-to-PA-`log`
+  surface via `DefaultAuditWriter`; the v0.2 entry was stale doc.
 
 ## Production hardening (anytime)
 

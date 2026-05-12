@@ -17,7 +17,6 @@ from postino.commands import check as check_cmd
 from postino.commands import domain as domain_cmd
 from postino.commands import list as list_cmd
 from postino.commands import quota as quota_cmd
-from postino.commands import reconcile as reconcile_cmd
 from postino.commands import status as status_cmd
 from postino.commands import user as user_cmd
 from postino.exit import CliState, exit_with_error
@@ -27,7 +26,7 @@ from postino_core.services.bundle import build_services
 
 app = typer.Typer(
     no_args_is_help=True,
-    add_completion=False,
+    add_completion=True,
     rich_markup_mode="rich",
     help="postino — administer a Postfix + Dovecot mail server (PostfixAdmin schema).",
 )
@@ -39,7 +38,6 @@ app.add_typer(list_cmd.app, name="list", help="Mailing-list (mlmmj) CRUD.")
 app.add_typer(quota_cmd.app, name="quota", help="Quota inspection.")
 app.command("check", help="Validate consistency between postino and the mail stack.")(check_cmd.run)
 app.command("status", help="Snapshot of mail stack health.")(status_cmd.run)
-app.command("reconcile", help="(V2) drift detection vs identity source.")(reconcile_cmd.run)
 
 
 def _load_settings() -> PostinoSettings:
