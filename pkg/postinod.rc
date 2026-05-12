@@ -1,0 +1,37 @@
+#!/bin/sh
+#
+# PROVIDE: postinod
+# REQUIRE: NETWORKING mariadb
+# KEYWORD: shutdown
+#
+# Add the following to /etc/rc.conf to enable:
+#   postinod_enable="YES"
+#
+
+. /etc/rc.subr
+
+name=postinod
+rcvar=postinod_enable
+
+load_rc_config $name
+
+: ${postinod_enable:="NO"}
+: ${postinod_user:="postinod"}
+: ${postinod_env_file:="/usr/local/etc/postino/postinod.env"}
+
+command="/usr/local/bin/postinod"
+command_args=""
+pidfile="/var/run/${name}.pid"
+
+start_cmd="postinod_start"
+
+postinod_start() {
+  if [ -r "${postinod_env_file}" ]; then
+    set -a
+    . "${postinod_env_file}"
+    set +a
+  fi
+  /usr/sbin/daemon -p ${pidfile} -u ${postinod_user} ${command} ${command_args}
+}
+
+run_rc_command "$1"

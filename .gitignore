@@ -55,3 +55,8 @@ debian/*.substvars
 *.buildinfo
 *.changes
 *.ddeb
+
+# FreeBSD packaging work dir
+pkg/work/
+pkg/*.txz
+*.txz

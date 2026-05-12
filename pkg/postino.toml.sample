@@ -1,0 +1,32 @@
+# /usr/local/etc/postino/postino.toml.sample
+# Copy to /usr/local/etc/postino/postino.toml and edit.
+
+# Identity backend: "local" | "noauth" | "hybrid"
+identity_backend = "local"
+
+# Path to postfix's sql-virtual_*.cf directory.
+postfix_sql_dir = "/usr/local/etc/postfix"
+
+# Maildir root (parent of all <domain>/<user>/Maildir trees).
+virtual_mailbox_base = "/var/mail"
+
+# Hook script executed after mailbox creation (must be executable).
+postcreation_hook = "/usr/local/etc/postino/postcreation.sh"
+
+# Timeout in seconds for the postcreation hook (default: 30).
+# postcreation_hook_timeout = 30.0
+
+# UID/GID of the vmail system user (owner of virtual_mailbox_base).
+vmail_uid = 5000
+vmail_gid = 5000
+
+# Default password scheme for new mailboxes: "BLF-CRYPT" | "SHA512-CRYPT" | "MD5-CRYPT"
+default_password_scheme = "BLF-CRYPT"
+
+# Default mailbox quota in bytes (0 = unlimited).
+default_quota_bytes = 0
+
+# mlmmj spool root (optional; omit or comment out to disable mailing lists).
+# mlmmj_spool_dir = "/var/spool/mlmmj"
+# mlmmj_uid = 100  # must match the mlmmj system user UID
+# mlmmj_gid = 100  # must match the mlmmj system group GID
