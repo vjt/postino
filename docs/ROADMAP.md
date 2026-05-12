@@ -65,6 +65,19 @@ binaries against a `lists.<domain>` PA subdomain with `transport='mlmmj'`.
 Operator notes: `docs/postino-mlmmj.md`. Design spec:
 `docs/superpowers/specs/2026-05-10-postino-v0.3-mlmmj-design.md`.
 
+## v0.6 — alias_domain + enable/disable parity (v0.6.0)
+
+`postino domain alias add/list/show/retarget/enable/disable/del` for
+PostfixAdmin's `alias_domain` table (whole-domain rewrites via
+postfix's `virtual_alias_domain_maps`). Six validation rules enforce
+PA parity: no self-alias, no chains, both endpoints must exist, no
+duplicates. SCIM PATCH /Aliases/{id} active toggle. CLI
+enable/disable for domains and aliases (mailbox enable/disable
+already shipped in v0.5). `postino check` now validates the two
+`*_alias_domain_maps.cf` files conditionally on `alias_domain` row
+count. Design spec:
+`docs/superpowers/specs/2026-05-12-postino-v0.6-alias-domain-design.md`.
+
 ## Production hardening (anytime)
 
 - Docker image — official runtime container, FROM python:3.13-slim
