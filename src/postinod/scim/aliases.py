@@ -1,6 +1,6 @@
 """SCIM /Aliases router — postino extension resource.
 
-Implements POST, GET, DELETE for the Alias resource under the postino
+Implements POST, GET, PATCH, DELETE for the Alias resource under the postino
 custom schema urn:postino:params:scim:schemas:core:2.0:Alias.
 
 This is NOT a RFC 7644 core resource.  The Alias concept maps directly
@@ -21,6 +21,9 @@ Error mapping follows errors.py:
           ConfigError → 400 invalidValue
           DB/FS/Hook errors → 500
   GET:    None → 404 SCIM Error envelope
+  PATCH:  filter-path → 400 invalidPath
+          unsupported path/op combination → 400 invalidPath
+          NotFoundError (set_status) → 404
   DELETE: NotFoundError → 404 (Litestar default JSON; rare path, matches
           Users router behaviour after PR-B11.1)
 """
@@ -31,13 +34,14 @@ import json
 import logging
 
 import jwt
-from litestar import Request, Router, delete, get, post
+from litestar import Request, Router, delete, get, patch, post
 from litestar.datastructures import State
 from litestar.exceptions import HTTPException
 from litestar.response import Response
 from litestar.status_codes import HTTP_200_OK, HTTP_201_CREATED
 from pydantic import EmailStr, TypeAdapter, ValidationError
 
+from postino_core.enums import MailboxStatus
 from postino_core.errors import (
     AlreadyExistsError,
     CapacityError,
@@ -51,8 +55,15 @@ from postino_core.models import Alias
 from postino_core.services.alias import AliasService
 from postinod.audit import PostinodAuditExtra, audit_context
 from postinod.auth.jwt_guard import JwtVerifier
-from postinod.scim.errors import scim_error_from_exception
-from postinod.scim.models import ALIAS_SCHEMA, ScimAlias, ScimError, ScimListResponse, ScimMeta
+from postinod.scim.errors import scim_error_from_exception, scim_validation_detail
+from postinod.scim.models import (
+    ALIAS_SCHEMA,
+    PatchOpRequest,
+    ScimAlias,
+    ScimError,
+    ScimListResponse,
+    ScimMeta,
+)
 from postinod.scim.query import (
     InvalidFilterError,
     ListQuery,
@@ -82,6 +93,7 @@ def _alias_to_resource(a: Alias) -> ScimAlias:
         id=address_str,
         address=a.address,
         goto=a.goto,
+        active=a.status is MailboxStatus.ACTIVE,
         meta=ScimMeta(
             resourceType="Alias",  # type: ignore[call-arg]  # WHY: pydantic accepts alias at construction; pyright sees field name only
             created=a.created,
@@ -271,9 +283,86 @@ def build_aliases_router(
         except NotFoundError as e:
             raise HTTPException(status_code=404, detail=str(e)) from e
 
+    @patch("/scim/v2/Aliases/{alias_id:str}", status_code=HTTP_200_OK)
+    async def patch_alias(
+        request: Request[None, None, State],
+        alias_id: str,
+    ) -> Response[dict[str, object]]:
+        actor_sub = await _verify_bearer(request)
+
+        try:
+            raw = json.loads(await request.body())
+        except json.JSONDecodeError as e:
+            raise HTTPException(status_code=400, detail=f"invalid JSON: {e}") from e
+
+        try:
+            patch_req = PatchOpRequest.model_validate(raw)
+        except ValidationError as e:
+            err = ScimError(status="400", scimType="invalidValue", detail=scim_validation_detail(e))
+            return _scim_response(err, 400)
+
+        try:
+            address = _as_email(alias_id)
+        except ValidationError as e:
+            err = ScimError(status="400", scimType="invalidValue", detail=scim_validation_detail(e))
+            return _scim_response(err, 400)
+
+        # RFC 7644 §3.5.2 — atomic PATCH: validate all ops before applying any.
+        for op in patch_req.operations:
+            if op.path is None:
+                err = ScimError(
+                    status="400",
+                    scimType="invalidPath",
+                    detail="PATCH operations without a path are not supported",
+                )
+                return _scim_response(err, 400)
+            if "[" in op.path:
+                err = ScimError(
+                    status="400",
+                    scimType="invalidPath",
+                    detail=(
+                        f"unsupported PATCH path expression (filters not supported): {op.path!r}"
+                    ),
+                )
+                return _scim_response(err, 400)
+            if op.op == "replace" and op.path == "active":
+                continue
+            err = ScimError(
+                status="400",
+                scimType="invalidPath",
+                detail=f"unsupported PATCH path/op combination: op={op.op!r} path={op.path!r}",
+            )
+            return _scim_response(err, 400)
+
+        # Second pass: apply each op (all validated above).
+        for op in patch_req.operations:
+            if op.op == "replace" and op.path == "active":
+                new_status = MailboxStatus.ACTIVE if op.value else MailboxStatus.DISABLED
+                verb = "enable" if new_status == MailboxStatus.ACTIVE else "disable"
+                extra = _extra(
+                    address_str=str(address),
+                    actor_sub=actor_sub,
+                    postinod_action=("alias", verb),
+                )
+                try:
+                    with audit_context(extra):
+                        alias_service.set_status(str(address), new_status)
+                except NotFoundError as e:
+                    return _err(e)
+                except (DBError, FilesystemError, HookError) as e:
+                    _logger.exception("internal failure on PATCH active for %s", address)
+                    return _err(e)
+
+        # Re-fetch to return current state.
+        a = alias_service.get(address)
+        if a is None:
+            err = ScimError(status="404", detail=f"alias {alias_id!r} not found")
+            return _scim_response(err, 404)
+        return _scim_response(_alias_to_resource(a), HTTP_200_OK)
+
     return Router(
         path="/",
-        route_handlers=[list_aliases, create_alias, get_alias, delete_alias],
+        route_handlers=[list_aliases, create_alias, get_alias, patch_alias, delete_alias],
     )
 
 

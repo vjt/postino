@@ -73,6 +73,7 @@ class ScimAlias(_StrictModel):
     schemas: list[str] = Field(default_factory=lambda: [ALIAS_SCHEMA])
     address: EmailStr
     goto: str  # comma-separated email list per Postfix convention
+    active: bool = True
     id: str | None = None
     external_id: str | None = Field(default=None, alias="externalId")
     meta: ScimMeta | None = None
