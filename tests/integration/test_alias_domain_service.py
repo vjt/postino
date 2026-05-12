@@ -158,3 +158,81 @@ def test_add_rejects_duplicate_row(db: Engine, frozen_clock: datetime) -> None:
     _seed_alias_domain(db, "src.it", "tgt.it")
     with pytest.raises(AlreadyExistsError, match=r"alias_domain src\.it already exists"):
         _service(db, frozen_clock).add("src.it", target="tgt.it")
+
+
+def test_delete_happy(db: Engine, frozen_clock: datetime) -> None:
+    _seed_domain(db, "src.it")
+    _seed_domain(db, "tgt.it")
+    _seed_alias_domain(db, "src.it", "tgt.it")
+    svc = _service(db, frozen_clock)
+    svc.delete("src.it")
+    with pytest.raises(NotFoundError):
+        svc.get("src.it")
+
+
+def test_delete_missing_raises(db: Engine, frozen_clock: datetime) -> None:
+    with pytest.raises(NotFoundError, match=r"alias_domain ghost\.it does not exist"):
+        _service(db, frozen_clock).delete("ghost.it")
+
+
+def test_set_status_disable_then_enable(db: Engine, frozen_clock: datetime) -> None:
+    _seed_domain(db, "src.it")
+    _seed_domain(db, "tgt.it")
+    _seed_alias_domain(db, "src.it", "tgt.it")
+    svc = _service(db, frozen_clock)
+    svc.set_status("src.it", MailboxStatus.DISABLED)
+    assert svc.list() == []  # default list filters disabled out
+    assert svc.list(include_disabled=True)[0].status is MailboxStatus.DISABLED
+    svc.set_status("src.it", MailboxStatus.ACTIVE)
+    assert svc.list()[0].status is MailboxStatus.ACTIVE
+
+
+def test_set_status_missing_raises(db: Engine, frozen_clock: datetime) -> None:
+    with pytest.raises(NotFoundError, match=r"alias_domain ghost\.it does not exist"):
+        _service(db, frozen_clock).set_status("ghost.it", MailboxStatus.DISABLED)
+
+
+def test_retarget_happy(db: Engine, frozen_clock: datetime) -> None:
+    _seed_domain(db, "src.it")
+    _seed_domain(db, "tgt1.it")
+    _seed_domain(db, "tgt2.it")
+    _seed_alias_domain(db, "src.it", "tgt1.it")
+    svc = _service(db, frozen_clock)
+    row = svc.retarget("src.it", target="tgt2.it")
+    assert row.target_domain == "tgt2.it"
+    assert svc.get("src.it").target_domain == "tgt2.it"
+
+
+def test_retarget_missing_row_raises(db: Engine, frozen_clock: datetime) -> None:
+    _seed_domain(db, "tgt.it")
+    with pytest.raises(NotFoundError, match=r"alias_domain ghost\.it does not exist"):
+        _service(db, frozen_clock).retarget("ghost.it", target="tgt.it")
+
+
+def test_retarget_to_self_raises(db: Engine, frozen_clock: datetime) -> None:
+    _seed_domain(db, "src.it")
+    _seed_domain(db, "tgt.it")
+    _seed_alias_domain(db, "src.it", "tgt.it")
+    with pytest.raises(RuleViolationError, match=r"self-alias"):
+        _service(db, frozen_clock).retarget("src.it", target="src.it")
+
+
+def test_retarget_to_missing_domain_raises(db: Engine, frozen_clock: datetime) -> None:
+    _seed_domain(db, "src.it")
+    _seed_domain(db, "tgt.it")
+    _seed_alias_domain(db, "src.it", "tgt.it")
+    with pytest.raises(NotFoundError, match=r"domain ghost\.it does not exist"):
+        _service(db, frozen_clock).retarget("src.it", target="ghost.it")
+
+
+def test_retarget_to_a_source_raises(db: Engine, frozen_clock: datetime) -> None:
+    """Rule 5 on retarget: target cannot itself be a source of another alias_domain row."""
+    _seed_domain(db, "a.it")
+    _seed_domain(db, "b.it")
+    _seed_domain(db, "c.it")
+    _seed_domain(db, "d.it")
+    _seed_alias_domain(db, "a.it", "b.it")
+    _seed_alias_domain(db, "c.it", "d.it")
+    # c.it is a source → cannot retarget a.it to c.it
+    with pytest.raises(RuleViolationError, match=r"would chain"):
+        _service(db, frozen_clock).retarget("a.it", target="c.it")

@@ -142,6 +142,77 @@ class AliasDomainService:
             )
         return self.get(alias_domain)
 
+    def delete(self, alias_domain: str) -> None:
+        t = self._md.tables["alias_domain"]
+        with translate_db_errors(), self._engine.begin() as conn:
+            result = conn.execute(t.delete().where(t.c.alias_domain == alias_domain))
+            if result.rowcount == 0:
+                raise NotFoundError(f"alias_domain {alias_domain} does not exist")
+            self._audit.write(
+                conn,
+                action=mk_action("alias_domain", "delete"),
+                domain=alias_domain,
+                data=alias_domain,
+            )
+
+    def set_status(self, alias_domain: str, status: MailboxStatus) -> None:
+        t = self._md.tables["alias_domain"]
+        now = self._clock()
+        with translate_db_errors(), self._engine.begin() as conn:
+            result = conn.execute(
+                t.update()
+                .where(t.c.alias_domain == alias_domain)
+                .values(active=int(status), modified=now)
+            )
+            if result.rowcount == 0:
+                raise NotFoundError(f"alias_domain {alias_domain} does not exist")
+            self._audit.write(
+                conn,
+                action=mk_action("alias_domain", "set_status"),
+                domain=alias_domain,
+                data=f"{alias_domain}={status.name}",
+            )
+
+    def retarget(self, alias_domain: str, *, target: str) -> AliasDomain:
+        self._validate_pair(alias_domain, target)
+        now = self._clock()
+        t = self._md.tables["alias_domain"]
+        domains = self._md.tables["domain"]
+        with translate_db_errors(), self._engine.begin() as conn:
+            # Row must exist.
+            existing = conn.execute(
+                select(t.c.alias_domain).where(t.c.alias_domain == alias_domain).with_for_update()
+            ).first()
+            if existing is None:
+                raise NotFoundError(f"alias_domain {alias_domain} does not exist")
+            # Target domain must exist.
+            tgt_hit = conn.execute(
+                select(domains.c.domain).where(domains.c.domain == target)
+            ).first()
+            if tgt_hit is None:
+                raise NotFoundError(f"domain {target} does not exist")
+            # Rule 5: target must not itself be an alias_domain source.
+            chain = conn.execute(
+                select(t.c.alias_domain).where(t.c.alias_domain == target).with_for_update()
+            ).first()
+            if chain is not None:
+                raise RuleViolationError(
+                    f"retargeting {alias_domain} to {target} would chain "
+                    "with an existing alias_domain row"
+                )
+            conn.execute(
+                t.update()
+                .where(t.c.alias_domain == alias_domain)
+                .values(target_domain=target, modified=now)
+            )
+            self._audit.write(
+                conn,
+                action=mk_action("alias_domain", "retarget"),
+                domain=alias_domain,
+                data=f"{alias_domain}->{target}",
+            )
+        return self.get(alias_domain)
+
     @staticmethod
     def _validate_pair(alias_domain: str, target: str) -> None:
         # Rule 1: no self-alias.
