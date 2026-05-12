@@ -1,0 +1,12 @@
+# .pre-commit-config.yaml — opt-in hook that runs ./scripts/check.sh.
+# Contributors install with: pip install pre-commit && pre-commit install
+repos:
+  - repo: local
+    hooks:
+      - id: postino-check
+        name: ./scripts/check.sh
+        entry: ./scripts/check.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+        verbose: true
