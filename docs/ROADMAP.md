@@ -65,7 +65,45 @@ binaries against a `lists.<domain>` PA subdomain with `transport='mlmmj'`.
 Operator notes: `docs/postino-mlmmj.md`. Design spec:
 `docs/superpowers/specs/2026-05-10-postino-v0.3-mlmmj-design.md`.
 
-## v0.6 — alias_domain + enable/disable parity (v0.6.0)
+## v0.4 — hardening cluster 1 (shipped 2026-05-11)
+
+Six-task hardening pass:
+1. HMAC + JWKS hardening — env-only secret, entropy floor, rotation
+   overlap, replay window, unknown-kid cooldown, stale-serve max age.
+2. Audit transaction contract — `AuditWriter` Protocol, atomic
+   postino + postinod dual-row writer, injected actor callable.
+3. `domain.delete --force` privacy fix — FS-before-DB ordering,
+   `keep_maildir` flag, orphan check in `check --deep`.
+4. SCIM `meta` block (RFC 7643 §3.1), `/Schemas` derived from
+   pydantic introspection, scim2-models e2e validation.
+5. NoAuth provider safety — `build_app` startup ConfigError when
+   `identity_backend != noauth`, dovecot passdb chain probe in
+   `check --deep`, real conformance tests across Local + NoAuth.
+
+Breaking: `POSTINOD_ZITADEL_HMAC_SECRET` is env-only (no TOML);
+minimum 32 bytes. Spec: `docs/superpowers/specs/2026-05-10-postino-v0.4-hardening.md`.
+
+## v0.5 — mlmmj e2e + post-review hardening (shipped 2026-05-11)
+
+Filesystem & mlmmj adapters hardened against symlink/race attacks:
+component-wise lstat walk, `Path.is_relative_to` containment,
+`os.chown(follow_symlinks=False)`, `os.setgroups([])` before setgid
+in mlmmj preexec, `MlmmjError` on missing binaries, no
+`ignore_errors=True` in rollback. CI 0-skip enforcement. Spec:
+`docs/superpowers/specs/2026-05-11-postino-v0.5-mlmmj-e2e.md`.
+
+## v0.6 — hybrid identity backend (shipped 2026-05-12)
+
+Three identity providers: `local` (every row carries bcrypt),
+`noauth` (every row `{NOAUTH}`, IdP owns identity), `hybrid`
+(per-row credential ownership — rows with hash auth via passdb-sql,
+rows with `{NOAUTH}` defer to chained non-SQL passdb). SCIM POST +
+PATCH support both setting and releasing the credential.
+CLI `user passwd --claim` / `user release` for local control. Domain
+freedom: any subset of rows can be IdP-managed. Two patch releases
+(v0.6.1 review-fixes cluster, v0.6.2 cf-mode mask).
+
+## v0.7 — alias_domain CRUD + post-review hardening (shipped 2026-05-12)
 
 `postino domain alias add/list/show/retarget/enable/disable/del` for
 PostfixAdmin's `alias_domain` table (whole-domain rewrites via
@@ -73,10 +111,34 @@ postfix's `virtual_alias_domain_maps`). Six validation rules enforce
 PA parity: no self-alias, no chains, both endpoints must exist, no
 duplicates. SCIM PATCH /Aliases/{id} active toggle. CLI
 enable/disable for domains and aliases (mailbox enable/disable
-already shipped in v0.5). `postino check` now validates the two
+already shipped earlier). `postino check` now validates the two
 `*_alias_domain_maps.cf` files conditionally on `alias_domain` row
 count. Design spec:
 `docs/superpowers/specs/2026-05-12-postino-v0.6-alias-domain-design.md`.
+
+Bundled post-review hardening (5 HIGH + 9 MED findings from
+2026-05-12 review):
+- Atomic maildir delete — two-phase rename inside DB tx +
+  post-commit rmtree; `.deleting.*` graveyard surfaced by
+  `check --deep` (`maildir_artefacts` / `maildir_symlinks`).
+- Hook + FS compensation ordering — DB rolls back first, FS comp
+  second; eliminates phantom-row-pointing-at-deleted-maildir window.
+- `.cf` priv-esc: `_CF_FORBIDDEN_BITS=0o037`; non-root cf owner
+  promoted warn → error.
+- postinod SCIM + Zitadel handlers wrapped in
+  `anyio.to_thread.run_sync` — uvicorn event loop stays responsive.
+- HMAC hex-decode entropy check — rejects half-entropy
+  `openssl rand -hex 16` paste accidents.
+- JWT defence-in-depth — require `iat`, configurable
+  `scim_max_token_age_seconds` (default 3600s).
+- Mailing-list cap TOCTOU — `MailingListService.add` runs
+  validation + spool create inside one tx with `FOR UPDATE` on the
+  domain row.
+- `is_idp_managed` semantics uniform across all three providers.
+
+Breaking: JWT tokens missing `iat` are rejected. Tokens older than
+`scim_max_token_age_seconds` (default 1h) are rejected even when
+`exp` is further out.
 
 ## Production hardening (anytime)
 
