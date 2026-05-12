@@ -21,6 +21,7 @@ from postino_core.fs import FilesystemAdapter
 from postino_core.hooks import HookRunner
 from postino_core.providers import HybridProvider, IdentityProvider, LocalProvider, NoAuthProvider
 from postino_core.services.alias import AliasService
+from postino_core.services.alias_domain import AliasDomainService
 from postino_core.services.domain import DomainService
 from postino_core.services.mailbox import MailboxService
 from postino_core.services.mailing_list import MailingListService
@@ -37,6 +38,7 @@ class ServicesBundle:
         identity: IdentityProvider,
         mailbox: MailboxService,
         alias: AliasService,
+        alias_domain: AliasDomainService,
         domain: DomainService,
         quota: QuotaService,
         status: StatusService,
@@ -48,6 +50,7 @@ class ServicesBundle:
         self.identity = identity
         self.mailbox = mailbox
         self.alias = alias
+        self.alias_domain = alias_domain
         self.domain = domain
         self.quota = quota
         self.status = status
@@ -127,6 +130,12 @@ def build_services(
             audit_writer=writer,
         ),
         alias=AliasService(engine=engine, metadata=metadata, clock=clock, audit_writer=writer),
+        alias_domain=AliasDomainService(
+            engine=engine,
+            metadata=metadata,
+            clock=clock,
+            audit_writer=writer,
+        ),
         domain=DomainService(
             engine=engine,
             metadata=metadata,
