@@ -92,6 +92,24 @@ def list_(ctx: typer.Context) -> None:
     Renderer(json=is_json(ctx)).render(items)
 
 
+@app.command("enable")
+def enable(ctx: typer.Context, name: str) -> None:
+    """Set domain.active = 1."""
+    try:
+        get_services(ctx).domain.set_status(name, MailboxStatus.ACTIVE)
+    except MailctlError as e:
+        exit_with_error(e)
+
+
+@app.command("disable")
+def disable(ctx: typer.Context, name: str) -> None:
+    """Set domain.active = 0."""
+    try:
+        get_services(ctx).domain.set_status(name, MailboxStatus.DISABLED)
+    except MailctlError as e:
+        exit_with_error(e)
+
+
 alias_app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
