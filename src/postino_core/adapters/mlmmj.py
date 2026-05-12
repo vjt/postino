@@ -24,12 +24,14 @@ The ``shutil.rmtree.avoids_symlink_attacks`` invariant is asserted in
 
 from __future__ import annotations
 
+import contextlib
 import fcntl
 import os
+import secrets
 import shutil
 import stat
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 from pydantic import EmailStr
@@ -39,6 +41,8 @@ from postino_core.models import MailingList
 
 _DEFAULT_TIMEOUT = 30.0
 _STDERR_MAX = 512  # truncate noisy mlmmj stderr in error messages
+_CREATE_LOCK_NAME = ".create.lock"
+_DELETING_PREFIX = ".deleting."
 
 # Spool subdirs created for every list — the mlmmj 1.0+ contract.
 # Matches the layout produced by upstream `mlmmj-make-ml`.
@@ -178,6 +182,29 @@ class MlmmjAdapter:
 
     # -- create -------------------------------------------------------------
 
+    @contextlib.contextmanager
+    def _create_lock(self) -> Generator[None]:
+        """Serialize concurrent ``create`` / ``delete`` calls under a
+        single OS-level flock on ``<spool_root>/.create.lock``.
+
+        Eliminates the two-process race where both pass the
+        ``listdir.exists()`` check and one's compensation ``rmtree``
+        deletes the other's freshly-created spool tree."""
+        self._spool_root.mkdir(parents=True, exist_ok=True)
+        lock_path = self._spool_root / _CREATE_LOCK_NAME
+        # `os.open` with O_CREAT|O_RDWR is race-safe; mode 0o600 because
+        # this file lives at spool root and we want to restrict it to
+        # mlmmj's uid (chown done lazily below when uid/gid configured).
+        fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
     def create(self, *, address: EmailStr, primary_owner: EmailStr) -> None:
         """Lay out the mlmmj spool dir for ``address``.
 
@@ -196,39 +223,65 @@ class MlmmjAdapter:
         Then chowns the whole tree to ``(mlmmj_uid, mlmmj_gid)`` when both
         are non-negative.
 
+        The whole sequence runs under ``_create_lock`` so concurrent
+        creators serialize and the loser-deletes-winner race window
+        documented in the v0.6 codebase review (A3.2) closes.
+
         Raises:
             AlreadyExistsError: spool dir already present.
             FilesystemError: mkdir/write/chown failed; partial state is
                 rolled back via ``shutil.rmtree``.
         """
-        listdir = self._listdir(address)
-        if listdir.exists():
-            raise AlreadyExistsError(f"mlmmj list already exists at {listdir}")
+        with self._create_lock():
+            listdir = self._listdir(address)
+            if listdir.exists():
+                raise AlreadyExistsError(f"mlmmj list already exists at {listdir}")
 
-        try:
-            listdir.mkdir(parents=True)
-            for sub in _SPOOL_SUBDIRS:
-                (listdir / sub).mkdir(parents=True)
-            (listdir / "index").touch()
-            (listdir / "control" / "owner").write_text(f"{primary_owner}\n", encoding="utf-8")
-            (listdir / "control" / "listaddress").write_text(f"{address}\n", encoding="utf-8")
-            self._copy_text_skel(listdir / "text")
-            self._chown_tree(listdir)
-        except Exception as e:
-            # Catch broader than OSError so KeyboardInterrupt / MlmmjError /
-            # any unexpected exception still rolls the partial tree back.
-            # Rollback errors are surfaced (no ``ignore_errors=True``): a
-            # silent rollback failure on a read-only mount or quota-exhausted
-            # FS would leak a half-built spool dir and block retries with
-            # AlreadyExistsError.
             try:
-                shutil.rmtree(listdir)
-            except OSError as rollback_err:
-                raise FilesystemError(
-                    f"mlmmj create {address} failed: {e}; AND rollback failed: {rollback_err}"
-                ) from e
-            if isinstance(e, OSError):
-                raise FilesystemError(f"mlmmj create {address} failed: {e}") from e
+                listdir.mkdir(parents=True)
+                for sub in _SPOOL_SUBDIRS:
+                    (listdir / sub).mkdir(parents=True)
+                (listdir / "index").touch()
+                self._atomic_write_text(listdir / "control" / "owner", f"{primary_owner}\n")
+                self._atomic_write_text(listdir / "control" / "listaddress", f"{address}\n")
+                self._copy_text_skel(listdir / "text")
+                self._chown_tree(listdir)
+            except Exception as e:
+                # Catch broader than OSError so KeyboardInterrupt / MlmmjError /
+                # any unexpected exception still rolls the partial tree back.
+                # Rollback errors are surfaced (no ``ignore_errors=True``): a
+                # silent rollback failure on a read-only mount or quota-exhausted
+                # FS would leak a half-built spool dir and block retries with
+                # AlreadyExistsError.
+                try:
+                    shutil.rmtree(listdir)
+                except OSError as rollback_err:
+                    raise FilesystemError(
+                        f"mlmmj create {address} failed: {e}; AND rollback failed: {rollback_err}"
+                    ) from e
+                if isinstance(e, OSError):
+                    raise FilesystemError(f"mlmmj create {address} failed: {e}") from e
+                raise
+
+    def _atomic_write_text(self, target: Path, content: str) -> None:
+        """Write ``content`` to ``target`` via tempfile + fsync + rename.
+
+        Avoids the half-written ``control/owner`` corruption the
+        consistency checker flags at ``check/consistency.py:397``: a
+        truncating ``open(target, 'w')`` is interrupted between
+        ``O_TRUNC`` and the final write, leaving an empty file."""
+        tmp = target.with_name(f"{target.name}.tmp.{os.getpid()}.{secrets.token_hex(4)}")
+        try:
+            with tmp.open("w", encoding="utf-8") as fh:
+                fh.write(content)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, target)
+        except OSError:
+            # Best-effort cleanup of the partial tempfile; let the
+            # original error propagate.
+            with contextlib.suppress(OSError):
+                tmp.unlink()
             raise
 
     def _copy_text_skel(self, dest: Path) -> None:
@@ -268,17 +321,36 @@ class MlmmjAdapter:
     def delete(self, *, address: EmailStr) -> None:
         """Remove the list spool dir.
 
+        Two-phase delete: rename the spool dir to a ``.deleting.*``
+        sentinel name first (atomic), then ``rmtree``. A partial
+        ``rmtree`` failure leaves the ``.deleting.*`` artefact —
+        ``check/consistency.py:392`` already anticipates this prefix
+        and surfaces it for operator cleanup — rather than a
+        half-removed list with the original name (which the
+        consistency check would flag as ``corrupt`` mailing list).
+
+        The rename happens under ``_create_lock`` to serialize against
+        concurrent ``create`` calls for the same address.
+
         Raises:
             NotFoundError: spool dir does not exist.
-            FilesystemError: rmtree failed (perm or partial-removal race).
+            FilesystemError: rename or rmtree failed.
         """
-        listdir = self._listdir(address)
-        if not listdir.exists():
-            raise NotFoundError(f"mlmmj list {address} does not exist")
+        with self._create_lock():
+            listdir = self._listdir(address)
+            if not listdir.exists():
+                raise NotFoundError(f"mlmmj list {address} does not exist")
+            graveyard = listdir.with_name(
+                f"{_DELETING_PREFIX}{listdir.name}.{os.getpid()}.{secrets.token_hex(4)}"
+            )
+            try:
+                os.rename(listdir, graveyard)
+            except OSError as e:
+                raise FilesystemError(f"rename {listdir} → {graveyard} failed: {e}") from e
         try:
-            shutil.rmtree(listdir)
+            shutil.rmtree(graveyard)
         except OSError as e:
-            raise FilesystemError(f"rmtree {listdir} failed: {e}") from e
+            raise FilesystemError(f"rmtree {graveyard} failed: {e}") from e
 
     # -- subscriber management ----------------------------------------------
 
@@ -351,6 +423,12 @@ class MlmmjAdapter:
         out: list[MailingList] = []
         for child in sorted(self._spool_root.iterdir()):
             if not child.is_dir():
+                continue
+            # Skip dot-prefixed sentinels: ``.deleting.*`` rename graveyard
+            # from a partial delete, ``.create.lock`` directory if ever
+            # created in error. The consistency checker handles surfacing
+            # these to the operator.
+            if child.name.startswith("."):
                 continue
             if not (child / "control" / "owner").exists():
                 continue

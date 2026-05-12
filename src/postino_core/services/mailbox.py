@@ -1,20 +1,23 @@
 """MailboxService — creates, reads, updates, deletes mailbox rows.
 
-The `add` method orders the steps so a process crash never leaves a
-committed DB row pointing at a missing maildir:
+`add` ordering: the per-domain row is locked FOR UPDATE first so a
+concurrent ``domain delete --force`` blocks on the lock; the maildir
+is then created on disk *inside* the same transaction so a DB
+rollback wipes it deterministically. The postcreation hook runs
+after commit because it may produce side effects outside the maildir
+that postino cannot atomicize; on hook failure the row is deleted
+(with bounded retry on deadlock) and the maildir is removed.
 
-1. Create the maildir on disk first.
-2. Open the DB transaction (capacity checks, mailbox row, quota row,
-   identity provider). On any failure here, the freshly-created
-   maildir is removed; a pre-existing maildir is left alone (its
-   owning row predates this call).
-3. Run the postcreation hook. On hook failure: delete the row first,
-   then attempt maildir cleanup. Each compensation step is wrapped so
-   a secondary failure cannot mask the original HookError."""
+`delete` ordering: the maildir is removed *inside* the DB tx after
+the row delete (same pattern as ``DomainService.delete force=True``).
+A filesystem failure rolls the row delete back so a future
+provisioning of the same address cannot adopt the prior tenant's
+maildir."""
 
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -33,6 +36,7 @@ from postino_core.errors import (
     AlreadyExistsError,
     CapacityError,
     DBError,
+    DeadlockError,
     NotFoundError,
 )
 from postino_core.fs import FilesystemAdapter
@@ -41,6 +45,9 @@ from postino_core.models import Mailbox, MailboxCreate
 from postino_core.providers import SENTINEL_NOAUTH, IdentityProvider
 
 _logger = logging.getLogger(__name__)
+
+_ROW_DELETE_RETRY_ATTEMPTS = 3
+_ROW_DELETE_RETRY_DELAY_SECONDS = 0.2
 
 
 class MailboxService:
@@ -85,14 +92,29 @@ class MailboxService:
         local_part, _, domain = str(create.username).partition("@")
         relative_maildir = Path(domain) / local_part / ""
 
-        # Track whether the maildir already existed so a DB-tx failure
-        # does not delete a maildir owned by another (pre-existing) row.
+        # Pre-existence flag: a pre-existing maildir survives a failed
+        # add (legitimate when an operator pre-created the tree via
+        # backup restore). A WARNING surfaces the orphan-suspect case
+        # so it can be investigated even when the add succeeds.
         maildir_existed = self._fs.maildir_exists(relative_maildir)
-        self._fs.create_maildir(relative_maildir)
+        if maildir_existed:
+            _logger.warning(
+                "mailbox %s: maildir %s already exists; provisioning over "
+                "existing tree — investigate prior tenant residue",
+                create.username,
+                relative_maildir,
+            )
 
-        try:
-            with translate_db_errors(), self._engine.begin() as conn:
-                self._assert_domain_capacity(conn, domain)
+        with translate_db_errors(), self._engine.begin() as conn:
+            # Capacity check first: locks the domain row FOR UPDATE so a
+            # concurrent ``domain delete --force`` blocks here and cannot
+            # race the maildir create on disk.
+            self._assert_domain_capacity(conn, domain)
+            # Maildir create inside the tx: if any later step fails we
+            # rollback the FS op alongside the DB op (skip rollback when
+            # the maildir pre-existed — it isn't ours to delete).
+            self._fs.create_maildir(relative_maildir)
+            try:
                 self._insert_mailbox_row(conn, create, local_part, domain, relative_maildir)
                 self._insert_quota_row(conn, str(create.username))
                 self._identity.create_identity(
@@ -108,10 +130,10 @@ class MailboxService:
                     domain=domain,
                     data=str(create.username),
                 )
-        except Exception:
-            if not maildir_existed:
-                self._compensate_remove_maildir(relative_maildir)
-            raise
+            except Exception:
+                if not maildir_existed:
+                    self._compensate_remove_maildir(relative_maildir)
+                raise
 
         try:
             self._hooks.run_postcreation(
@@ -162,18 +184,39 @@ class MailboxService:
         return None
 
     def _compensate_delete_mailbox_row(self, username: str) -> str | None:
-        """Best-effort delete_mailbox_row. Returns the error message on
-        failure (compensation continues), None on success."""
-        try:
-            self._delete_mailbox_row(username)
-        except Exception as compensation_err:
-            _logger.error(
-                "compensation: delete mailbox row %s failed: %s",
-                username,
-                compensation_err,
-            )
-            return str(compensation_err)
-        return None
+        """Best-effort delete_mailbox_row with bounded retry on
+        DeadlockError. Returns the error message on final failure
+        (compensation continues), None on success."""
+        last_err: Exception | None = None
+        for attempt in range(_ROW_DELETE_RETRY_ATTEMPTS):
+            try:
+                self._delete_mailbox_row(username)
+                return None
+            except DeadlockError as deadlock_err:
+                last_err = deadlock_err
+                _logger.warning(
+                    "compensation: delete mailbox row %s deadlocked (attempt %d/%d): %s",
+                    username,
+                    attempt + 1,
+                    _ROW_DELETE_RETRY_ATTEMPTS,
+                    deadlock_err,
+                )
+                time.sleep(_ROW_DELETE_RETRY_DELAY_SECONDS)
+            except Exception as compensation_err:
+                _logger.error(
+                    "compensation: delete mailbox row %s failed: %s",
+                    username,
+                    compensation_err,
+                )
+                return str(compensation_err)
+        assert last_err is not None
+        _logger.error(
+            "compensation: delete mailbox row %s failed after %d retries: %s",
+            username,
+            _ROW_DELETE_RETRY_ATTEMPTS,
+            last_err,
+        )
+        return str(last_err)
 
     def _write_rollback_failed_audit(
         self, *, username: str, domain: str, orphans: list[str]
@@ -309,11 +352,18 @@ class MailboxService:
     def delete(self, username: EmailStr, *, keep_maildir: bool) -> None:
         """Delete the mailbox row + quota row + (optionally) maildir.
 
-        Idempotent on FS removal but DB row absence raises NotFoundError.
+        Maildir removal runs **inside** the DB transaction so a FS
+        failure (NFS hung, EBUSY) rolls the row delete back. Without
+        this, a partial-delete state lets a future provisioning of
+        the same address adopt the previous tenant's maildir
+        contents — a privacy bug.
 
         Logs a WARNING for every alias whose `goto` references this
         username — the alias survives but now has a dead recipient. The
-        admin chooses whether to clean up; spec policy is non-blocking."""
+        admin chooses whether to clean up; spec policy is non-blocking.
+
+        Raises ``NotFoundError`` if the mailbox row does not exist,
+        ``FilesystemError`` if maildir removal fails."""
         mailbox = self._md.tables["mailbox"]
         existing = self.get(username)
         if existing is None:
@@ -331,6 +381,12 @@ class MailboxService:
                 domain=existing.domain,
                 data=str(username),
             )
+            if not keep_maildir:
+                # FS-inside-tx: matches DomainService.delete(force=True)
+                # (services/domain.py:220). On rmtree failure the DB
+                # cascade rolls back so the maildir + row survive
+                # together rather than splitting.
+                self._fs.remove_maildir(relative)
         if orphan_aliases:
             _logger.warning(
                 "deleted %s; %d alias(es) still target it: %s",
@@ -338,8 +394,6 @@ class MailboxService:
                 len(orphan_aliases),
                 ", ".join(sorted(orphan_aliases)),
             )
-        if not keep_maildir:
-            self._fs.remove_maildir(relative)
 
     def _aliases_targeting(self, username: str) -> list[str]:
         """Aliases whose `goto` contains an exact (comma-split, trimmed)
