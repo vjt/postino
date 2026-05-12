@@ -111,6 +111,21 @@ class Domain(BaseModel):
     modified: datetime
 
 
+class AliasDomain(BaseModel):
+    """An alias_domain row from the PostfixAdmin alias_domain table.
+
+    Maps domain A → domain B so that mail to user@A is delivered as
+    user@B by postfix's virtual_alias_domain_maps."""
+
+    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
+
+    alias_domain: str
+    target_domain: str
+    status: MailboxStatus
+    created: datetime
+    modified: datetime
+
+
 class MailingListCreate(BaseModel):
     """Inputs for `postino list add`. Multi-owner: the first owner is
     handed to ``mlmmj-make-ml -o``; the rest are appended to the spool's

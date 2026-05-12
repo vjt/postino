@@ -1,8 +1,11 @@
-from datetime import datetime
+from __future__ import annotations
+
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from pydantic import SecretStr, ValidationError
+from pydantic import ValidationError as PydValidationError
 
 from postino_core.enums import (
     DomainTransport,
@@ -11,6 +14,7 @@ from postino_core.enums import (
 )
 from postino_core.models import (
     Alias,
+    AliasDomain,
     Domain,
     Mailbox,
     MailboxCreate,
@@ -182,3 +186,44 @@ def test_mailing_list_create_rejects_extra_fields() -> None:
             owners=["alice@example.org"],
             subscriber_count=0,  # type: ignore[call-arg]  # WHY: testing extra="forbid"
         )
+
+
+def _ts() -> datetime:
+    return datetime(2026, 5, 12, 12, 0, 0, tzinfo=UTC)
+
+
+def test_alias_domain_model_constructs() -> None:
+    row = AliasDomain(
+        alias_domain="aliasdom.it",
+        target_domain="target.com",
+        status=MailboxStatus.ACTIVE,
+        created=_ts(),
+        modified=_ts(),
+    )
+    assert row.alias_domain == "aliasdom.it"
+    assert row.target_domain == "target.com"
+    assert row.status is MailboxStatus.ACTIVE
+
+
+def test_alias_domain_model_is_frozen() -> None:
+    row = AliasDomain(
+        alias_domain="aliasdom.it",
+        target_domain="target.com",
+        status=MailboxStatus.ACTIVE,
+        created=_ts(),
+        modified=_ts(),
+    )
+    with pytest.raises(PydValidationError):
+        row.alias_domain = "other.com"  # type: ignore[misc]  # WHY: frozen model rejects mutation; test asserts that.
+
+
+def test_alias_domain_model_rejects_extras() -> None:
+    with pytest.raises(PydValidationError):
+        AliasDomain.model_validate({
+            "alias_domain": "x.it",
+            "target_domain": "y.it",
+            "status": 1,
+            "created": _ts(),
+            "modified": _ts(),
+            "stray": "field",
+        })
