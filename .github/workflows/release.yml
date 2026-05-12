@@ -6,7 +6,15 @@ on:
       - "v*"
 
 jobs:
+  # Re-run the full verify pipeline (lint, typecheck, unit+integration,
+  # postinod e2e) on the tagged SHA. Without this gate a tag push would
+  # ship to PyPI even when ci.yml on the same SHA is red — happened on
+  # v0.7.0 (release-yml-no-test-gate gotcha).
+  verify:
+    uses: ./.github/workflows/verify.yml
+
   build-and-publish:
+    needs: verify
     runs-on: ubuntu-latest
     environment:
       name: pypi
