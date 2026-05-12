@@ -14,9 +14,19 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 
 from postino_core.config import PostfixSqlCredentials
-from postino_core.errors import DeadlockError
+from postino_core.errors import DBError, DeadlockError
 
 _MYSQL_DEADLOCK_CODES = frozenset({1213, 1205})
+
+_REQUIRED_TABLES: tuple[str, ...] = (
+    "mailbox",
+    "alias",
+    "alias_domain",
+    "domain",
+    "domain_admins",
+    "quota2",
+    "log",
+)
 
 
 def _is_mysql_deadlock(exc: OperationalError) -> bool:
@@ -68,19 +78,24 @@ def make_engine(creds: PostfixSqlCredentials, *, echo: bool) -> Engine:
 def reflect_schema(engine: Engine) -> MetaData:
     """Reflect all PostfixAdmin tables we touch into MetaData.
 
+    Verifies every required table actually landed in the MetaData;
+    ``metadata.reflect(only=...)`` silently succeeds when one of the
+    listed tables is missing from the DB (e.g. after a PA upgrade that
+    renamed something), and downstream ``metadata.tables["mailbox"]``
+    accesses then raise ``KeyError`` — bypassing ``translate_db_errors``
+    and exiting 99 (bug) instead of 5 (DB-shape mismatch). Raise
+    ``DBError`` here so the CLI maps it to exit 5 with a clear
+    operator-facing message. (L1-S6)
+
     Returns: a populated MetaData instance.
     """
     metadata = MetaData()
-    metadata.reflect(
-        bind=engine,
-        only=(
-            "mailbox",
-            "alias",
-            "alias_domain",
-            "domain",
-            "domain_admins",
-            "quota2",
-            "log",
-        ),
-    )
+    metadata.reflect(bind=engine, only=_REQUIRED_TABLES)
+    missing = [t for t in _REQUIRED_TABLES if t not in metadata.tables]
+    if missing:
+        raise DBError(
+            f"reflect_schema: PostfixAdmin tables missing in target DB: "
+            f"{', '.join(missing)} — check the schema (`postino check`) "
+            "or recover the DB"
+        )
     return metadata

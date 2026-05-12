@@ -31,7 +31,7 @@ import secrets
 import shutil
 import stat
 import subprocess
-from collections.abc import Callable, Generator
+from collections.abc import Generator
 from pathlib import Path
 
 from pydantic import EmailStr
@@ -113,32 +113,31 @@ class MlmmjAdapter:
 
     # -- subprocess plumbing ------------------------------------------------
 
-    def _preexec(self) -> Callable[[], None] | None:
-        if self._uid < 0 or self._gid < 0:
-            return None
-        uid, gid = self._uid, self._gid
-
-        def _drop() -> None:
-            # Drop supplementary groups first; without this the child
-            # inherits root's groups (wheel, mail, ...) while running as
-            # mlmmj:mlmmj — partial privilege drop.
-            os.setgroups([])
-            os.setgid(gid)
-            os.setuid(uid)
-
-        return _drop
-
     def _run(self, cmd: list[str]) -> subprocess.CompletedProcess[str]:
+        # L2-S11: prefer subprocess.run's ``user=`` / ``group=`` /
+        # ``extra_groups=`` over ``preexec_fn`` for the uid/gid drop.
+        # ``preexec_fn`` runs arbitrary Python in the child between
+        # fork() and exec() — unsafe in multi-threaded apps (postinod
+        # is one via Litestar/uvicorn). ``user=``/``group=`` perform
+        # the drop in the C-level fork helper before any Python code
+        # runs in the child. ``extra_groups=[]`` mirrors the previous
+        # ``setgroups([])`` so the child does not inherit root's
+        # supplementary groups (wheel, mail, …).
+        drop_kwargs: dict[str, object] = {}
+        if self._uid >= 0 and self._gid >= 0:
+            drop_kwargs["user"] = self._uid
+            drop_kwargs["group"] = self._gid
+            drop_kwargs["extra_groups"] = []
         try:
             return subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 timeout=self._timeout,
-                preexec_fn=self._preexec(),
                 check=False,
                 env=_MLMMJ_ENV,
                 cwd="/",
+                **drop_kwargs,  # type: ignore[arg-type]  # WHY: subprocess.run typing rejects a dict[str, object] splat; values are str|int per drop_kwargs construction above
             )
         except subprocess.TimeoutExpired as e:
             raise MlmmjError(f"{cmd[0]}: timeout after {self._timeout}s") from e

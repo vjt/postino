@@ -9,7 +9,7 @@ import typer
 from postino.exit import exit_with_error, get_services, is_json
 from postino.output import Renderer
 from postino_core.enums import DomainTransport
-from postino_core.errors import MailctlError
+from postino_core.errors import ConfigError, MailctlError
 from postino_core.quota import parse_quota
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
@@ -28,7 +28,19 @@ def add(
     backupmx: Annotated[bool, typer.Option("--backupmx/--no-backupmx")] = False,
 ) -> None:
     try:
-        d = get_services(ctx).domain.add(
+        services = get_services(ctx)
+        # L1-S39: refuse `--transport mlmmj` when mlmmj_spool_dir is
+        # not configured. Without this guard the domain row is created
+        # successfully but every subsequent `postino list add` raises
+        # ConfigError ("mlmmj not configured") — a misleading
+        # "domain created" success path.
+        if transport is DomainTransport.MLMMJ and services.settings.mlmmj_spool_dir is None:
+            raise ConfigError(
+                "--transport mlmmj requires postino.toml to set mlmmj_spool_dir "
+                "(and mlmmj_uid / mlmmj_gid); add the [postino] mlmmj_* settings "
+                "before provisioning an mlmmj-transport domain"
+            )
+        d = services.domain.add(
             domain=domain,
             description=description,
             max_aliases=max_aliases,
