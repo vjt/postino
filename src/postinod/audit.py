@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import contextvars
 import json
+import logging
 from collections.abc import Callable, Generator
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -33,12 +34,15 @@ from sqlalchemy import MetaData
 from sqlalchemy.engine import Connection
 
 from postino_core.audit import (
+    ACTION_PREFIX,
     POSTINOD_ACTION_PREFIX,
     DefaultAuditWriter,
     default_actor,
     mk_postinod_action,
     write_audit,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -129,6 +133,23 @@ class PostinodAuditWriter:
         data: str,
     ) -> None:
         extra = _extra_var.get()
+        if extra is None and action.startswith(f"{ACTION_PREFIX}."):
+            # A2-A5: the contextvar is the only path that supplies the
+            # surface metadata the postinod.* mirror row needs. A
+            # missing context for a postino.* mutation means a SCIM /
+            # Zitadel handler forgot to wrap the mutator call in
+            # ``audit_context(...)``; the resulting mirror row will be
+            # ``surface="unknown"`` with an empty ``external_id`` and
+            # untraceable to a request. Log loudly so the regression
+            # surfaces in test output and operator logs instead of
+            # silently producing degraded audit rows.
+            _logger.error(
+                "postinod audit context missing for action %s — "
+                "handler forgot `with audit_context(...)`. "
+                "Mirror row will be tagged surface=%s.",
+                action,
+                self.fallback_surface,
+            )
         actor: Callable[[], str] = extra.actor_resolver if extra is not None else default_actor
 
         # 1) postino.<r>.<v> row — mirrors the CLI's audit so PA web UI
