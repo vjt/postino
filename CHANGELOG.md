@@ -4,10 +4,17 @@ All notable changes to `il-postino` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and is generated automatically by [git-cliff](https://git-cliff.org) from
 commit subjects on every tag.
+## [0.8.5] — 2026-05-13
+
+### CI
+- Pin deb daemon-extras via requirements; force txz format; smoke -x
 ## [0.8.4] — 2026-05-13
 
 ### Fixed
 - Add postinod console_script entry; drop broken staged smoke
+
+### Release
+- 0.8.4
 ## [0.8.3] — 2026-05-13
 
 ### Packaging
