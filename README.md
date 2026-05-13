@@ -180,7 +180,7 @@ echo "$NEW_PASSWORD" | postino --json --no-color \
 
 Global flags:
 - `--json`  — machine-readable output (stdout) on every command
-- `--quiet` — drop banners and confirmation echoes
+- `--quiet` — suppress banner output (currently no-op; reserved for future banner-emitting commands)
 - `--no-color` — strip ANSI; honored automatically when `NO_COLOR`
   or `CI` is set in the environment
 

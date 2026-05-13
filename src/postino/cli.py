@@ -108,7 +108,11 @@ def _version_callback(value: bool) -> None:
 def _entry(  # pyright: ignore[reportUnusedFunction]
     ctx: typer.Context,
     json: bool = typer.Option(False, "--json", help="Output JSON."),
-    quiet: bool = typer.Option(False, "--quiet", help="Suppress banners; data still printed."),
+    quiet: bool = typer.Option(
+        False,
+        "--quiet",
+        help="Suppress banner output. Currently a no-op; reserved for future use.",
+    ),
     no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors."),
     _version: bool = typer.Option(
         False,

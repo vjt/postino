@@ -65,7 +65,8 @@ echo "$NEW_PASSWORD" | postino --json --no-color \\
 Machine-readable output (stdout) on every command.
 .TP
 .B --quiet
-Drop banners and confirmation echoes.
+Suppress banner output. Currently a no-op; reserved for future
+banner-emitting commands.
 .TP
 .B --no-color
 Strip ANSI; honored automatically when
