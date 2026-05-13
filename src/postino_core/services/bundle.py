@@ -146,7 +146,6 @@ def build_services(
             clock=clock,
             fs=fs,
             lmtp_destination=settings.lmtp_destination,
-            mlmmj_enabled=settings.mlmmj_spool_dir is not None,
             audit_writer=writer,
         ),
         quota=QuotaService(engine=engine, metadata=metadata),

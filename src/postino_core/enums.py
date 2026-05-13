@@ -39,12 +39,16 @@ class DomainTransport(StrEnum):
     dovecot-lmtp``) is configured on PostinoSettings, not baked into
     the enum, so a stack with a TCP-listening dovecot can pick a
     different destination without code change.
+
+    v0.10 BREAKING: the ``MLMMJ`` member was removed. Mailing lists no
+    longer use domain-level transport; routing is per-list via the
+    ``routes`` table. The ``domain.transport`` column still drives
+    non-list mail (mailboxes, aliases).
     """
 
     VIRTUAL = "virtual"
     LMTP = "lmtp"
     RELAY = "relay"
-    MLMMJ = "mlmmj"
 
 
 class IdentityBackend(StrEnum):

@@ -51,7 +51,7 @@ def test_agent_can_create_list_and_mta_sees_spool(lists_stack: Path) -> None:
         "--description",
         "e2e mlmmj domain",
         "--transport",
-        "mlmmj",
+        "virtual",
     )
     assert r.returncode == 0, r.stderr
 

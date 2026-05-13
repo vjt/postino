@@ -50,7 +50,7 @@ def list_env(e2e_write_env: WriteEnv, tmp_path: Path) -> WriteEnv:
     env["POSTINO_MLMMJ_UID"] = "-1"
     env["POSTINO_MLMMJ_GID"] = "-1"
 
-    # Seed the lists.example.org domain with transport=mlmmj.
+    # Seed the lists.example.org domain (virtual transport; v0.10 no longer uses mlmmj transport).
     md = e2e_write_env.metadata
     with e2e_write_env.engine.begin() as conn:
         conn.execute(
@@ -63,7 +63,7 @@ def list_env(e2e_write_env: WriteEnv, tmp_path: Path) -> WriteEnv:
                 mailboxes=0,
                 maxquota=0,
                 quota=0,
-                transport="mlmmj",
+                transport="virtual",
                 backupmx=0,
                 created="2026-05-09 12:00:00",
                 modified="2026-05-09 12:00:00",

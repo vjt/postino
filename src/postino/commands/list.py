@@ -32,7 +32,7 @@ def _ml_service(ctx: typer.Context) -> MailingListService:
     return svc
 
 
-@app.command("add", help="Create a new mlmmj mailing list. Domain must have transport=mlmmj.")
+@app.command("add", help="Create a new mlmmj mailing list.")
 def add(
     ctx: typer.Context,
     address: str,

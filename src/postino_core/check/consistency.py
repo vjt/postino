@@ -415,22 +415,25 @@ def _check_deep(s: PostinoSettings, engine: Engine, md: MetaData) -> list[Findin
 
 
 def _check_mailing_lists(s: PostinoSettings, engine: Engine, md: MetaData) -> list[Finding]:
-    """Reconcile mlmmj spool tree against ``domain.transport='mlmmj'`` rows.
+    """Reconcile mlmmj spool tree against known ``domain`` rows.
 
     Surfaces three drift conditions invisible to the rest of the deep
     check:
 
-    1. ``domain`` rows with ``transport='mlmmj'`` but missing a spool
-       dir (failed list-create that left no FS trace; mail for that
-       domain currently bounces).
-    2. Spool dirs under ``mlmmj_spool_dir`` whose ``@<domain>`` portion
-       does not match any ``domain`` row, or whose ``control/owner``
-       file is missing/empty (corrupt list state).
+    1. Spool dirs under ``mlmmj_spool_dir`` whose ``@<domain>`` portion
+       does not match any ``domain`` row (orphan spool — domain was
+       deleted but the spool was not cleaned up).
+    2. Spool dirs whose ``control/owner`` file is missing/empty
+       (corrupt list state).
     3. ``.deleting.*`` / ``.tmp-*`` artefact dirs left behind by a
        partial-delete or partial-create rollback. The current
        MailingListService.delete is FS-first and uses no rename
        sentinel, but operators can move spool dirs aside by hand —
        and a future delete refactor may adopt the rename pattern.
+
+    v0.10: ``domain.transport`` is no longer used for list routing.
+    The check matches spool dirs against all ``domain`` rows instead of
+    only rows with ``transport='mlmmj'``.
 
     Skipped silently when ``mlmmj_spool_dir`` is not configured.
     """
@@ -444,9 +447,7 @@ def _check_mailing_lists(s: PostinoSettings, engine: Engine, md: MetaData) -> li
     with engine.connect() as conn:
         mlmmj_domains = {
             str(r._mapping["domain"])  # type: ignore[index]  # WHY: SQLAlchemy RowMapping[str, Any] indexing.
-            for r in conn.execute(
-                select(domain_t.c.domain).where(domain_t.c.transport == "mlmmj")
-            ).fetchall()
+            for r in conn.execute(select(domain_t.c.domain)).fetchall()
         }
 
     out: list[Finding] = []
@@ -499,11 +500,11 @@ def _check_mailing_lists(s: PostinoSettings, engine: Engine, md: MetaData) -> li
             _err(
                 "mlmmj_lists_orphan_domain",
                 f"{len(orphan_address)} spool dir(s) without a matching "
-                f"transport=mlmmj domain row: {orphan_address[:5]}",
+                f"domain row: {orphan_address[:5]}",
             )
         )
     else:
-        out.append(_ok("mlmmj_lists_orphan_domain", "all spool dirs map to mlmmj domains"))
+        out.append(_ok("mlmmj_lists_orphan_domain", "all spool dirs map to a known domain"))
 
     if artefacts:
         out.append(

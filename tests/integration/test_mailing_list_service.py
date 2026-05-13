@@ -45,7 +45,6 @@ def _seed_mlmmj_domain(db: Engine, frozen_clock: datetime, fqdn: str) -> None:
         clock=lambda: frozen_clock,
         fs=_noop_fs(),
         lmtp_destination="unix:private/dovecot-lmtp",
-        mlmmj_enabled=True,
     ).add(
         domain=fqdn,
         description=f"mlmmj test {fqdn}",
@@ -53,7 +52,7 @@ def _seed_mlmmj_domain(db: Engine, frozen_clock: datetime, fqdn: str) -> None:
         max_mailboxes=0,
         max_quota_bytes=0,
         default_quota_bytes=0,
-        transport=DomainTransport.MLMMJ,
+        transport=DomainTransport.VIRTUAL,
         backupmx=False,
     )
 

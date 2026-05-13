@@ -51,7 +51,6 @@ class DomainService:
         clock: Callable[[], datetime],
         fs: FilesystemAdapter,
         lmtp_destination: str,
-        mlmmj_enabled: bool = False,
         audit_writer: AuditWriter | None = None,
     ) -> None:
         self._engine = engine
@@ -59,7 +58,6 @@ class DomainService:
         self._clock = clock
         self._fs = fs
         self._lmtp_destination = lmtp_destination
-        self._mlmmj_enabled = mlmmj_enabled
         self._audit: AuditWriter = audit_writer or DefaultAuditWriter(
             metadata=metadata, clock=clock
         )
@@ -99,20 +97,6 @@ class DomainService:
             raise ConfigError(
                 f"'{_PA_PERMISSION_PSEUDO_DOMAIN}' is reserved by PostfixAdmin "
                 "and cannot be used as a domain name"
-            )
-        # L3-S26: refuse mlmmj transport when the spool was not
-        # configured. Pushed down from the CLI so non-CLI consumers
-        # (SCIM, future scripts) inherit the same guarantee — without
-        # this the domain row inserts cleanly but every subsequent
-        # `postino list add` ConfigErrors with a misleading "mlmmj not
-        # configured" message after the operator believes provisioning
-        # succeeded.
-        if transport is DomainTransport.MLMMJ and not self._mlmmj_enabled:
-            raise ConfigError(
-                "domain transport=mlmmj requires postino.toml to set "
-                "mlmmj_spool_dir (and mlmmj_uid / mlmmj_gid); add the "
-                "[postino] mlmmj_* settings before provisioning an "
-                "mlmmj-transport domain"
             )
         d = self._md.tables["domain"]
         now = self._clock()

@@ -33,9 +33,6 @@ def add(
 ) -> None:
     try:
         services = get_services(ctx)
-        # The mlmmj-transport-vs-spool guard now lives in
-        # DomainService.add (L3-S26) so SCIM and future consumers
-        # inherit it without re-implementing the check.
         d = services.domain.add(
             domain=domain,
             description=description,
