@@ -130,8 +130,13 @@ jobs:
           ls -la dist/
       - name: Smoke install
         run: |
+          set -x
           apt-get install -y --no-install-recommends mlmmj adduser
           apt-get install -y --no-install-recommends ./dist/il-postino_*_${{ matrix.dist }}_${{ matrix.arch }}.deb
+          ls -la /usr/bin/postino* || true
+          ls -la /lib/systemd/system/postino* || true
+          ls -la /usr/share/man/man*/postino* || true
+          ls -la /usr/share/postino/venv/bin/postino* || true
           postino --version
           test -x /usr/bin/postinod
           test -f /lib/systemd/system/postinod.service

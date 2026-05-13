@@ -96,7 +96,7 @@ install -m 0644 pkg/postino.toml.sample "$STAGE/usr/local/etc/postino/postino.to
 sed "s/@VERSION@/$VERSION/" pkg/manifest.json.in > "$WORK/manifest.json"
 
 # Build the .txz.
-pkg create -M "$WORK/manifest.json" -r "$STAGE" -o "$DIST"
+pkg create -f txz -M "$WORK/manifest.json" -r "$STAGE" -o "$DIST"
 
 echo "Built:"
 ls -la "$DIST"/*.txz

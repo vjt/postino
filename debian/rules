@@ -9,6 +9,6 @@ override_dh_virtualenv:
 	  --python /usr/bin/python3 \
 	  --install-suffix postino/venv \
 	  --builtin-venv \
-	  --extras daemon \
+	  --requirements debian/requirements-deb.txt \
 	  --extra-pip-arg --no-cache-dir \
 	  --extra-pip-arg --upgrade-strategy=only-if-needed
