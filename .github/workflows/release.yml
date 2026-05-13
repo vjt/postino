@@ -131,6 +131,15 @@ jobs:
       - name: Smoke install
         run: |
           set -x
+          # debian:*-slim images carry /etc/dpkg/dpkg.cfg.d/docker which
+          # path-excludes /usr/share/man/* and /usr/share/doc/* at install
+          # time. The .deb DOES contain the manpages (verified below with
+          # dpkg-deb -c) but dpkg drops them on disk. Strip the excludes
+          # so the smoke test actually checks our packaged files.
+          rm -f /etc/dpkg/dpkg.cfg.d/docker \
+                /etc/dpkg/dpkg.cfg.d/docker-clean \
+                /etc/dpkg/dpkg.cfg.d/excludes \
+                /etc/dpkg/dpkg.cfg.d/path-exclude || true
           apt-get install -y --no-install-recommends mlmmj adduser
           echo "=== dpkg-deb -c (contents of built deb) ==="
           dpkg-deb -c ./dist/il-postino_*_${{ matrix.dist }}_${{ matrix.arch }}.deb | grep -E "man/|systemd/" || true

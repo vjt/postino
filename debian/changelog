@@ -1,3 +1,8 @@
+il-postino (0.8.10-1) unstable; urgency=medium
+
+  * Release 0.8.10. See CHANGELOG.md for details.
+
+ -- Marcello Barnaba <vjt@openssl.it>  Wed, 13 May 2026 10:13:20 +0200
 il-postino (0.8.9-1) unstable; urgency=medium
 
   * Release 0.8.9. See CHANGELOG.md for details.

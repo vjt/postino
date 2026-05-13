@@ -1,16 +1,11 @@
 #!/usr/bin/make -f
 export DH_VIRTUALENV_INSTALL_ROOT=/usr/share
-export DH_VERBOSE=1
 
-# dh-virtualenv 1.2.x on bookworm/trixie only ships python-virtualenv.
-# We've observed:
-# - With --with python-virtualenv: dh_installman runs but doesn't actually
-#   stage manpages from debian/<pkg>.manpages, and dh_installsystemd only
-#   runs if a .service file is pre-staged in debian/<pkg>/lib/systemd/.
-# - With bare dh $@: dh_installsystemd is silently absent from the binary
-#   sequence and dh_installman still doesn't stage manpages.
-# Work around BOTH by manually staging the systemd unit and manpages from
-# execute_after_dh_virtualenv. Diagnostic ls afterwards confirms staging.
+# dh-virtualenv 1.2.x ships only the python-virtualenv addon. That addon
+# runs dh_installman (so debian/il-postino.manpages is honored) but does
+# NOT run dh_installsystemd on its own — it only fires if a .service file
+# is already staged in debian/<pkg>/lib/systemd/system/. We manually copy
+# the unit from execute_after_dh_virtualenv to trigger that path.
 %:
 	dh $@ --with python-virtualenv
 
@@ -24,14 +19,6 @@ override_dh_virtualenv:
 	  --extra-pip-arg --upgrade-strategy=only-if-needed
 
 execute_after_dh_virtualenv:
-	@echo "=== execute_after_dh_virtualenv: pre-stage ==="
-	ls -la man/postino.1 man/postinod.8
 	install -d debian/il-postino/lib/systemd/system
 	install -m 0644 debian/il-postino.postinod.service \
 	  debian/il-postino/lib/systemd/system/postinod.service
-	install -d debian/il-postino/usr/share/man/man1
-	install -d debian/il-postino/usr/share/man/man8
-	install -m 0644 man/postino.1  debian/il-postino/usr/share/man/man1/postino.1
-	install -m 0644 man/postinod.8 debian/il-postino/usr/share/man/man8/postinod.8
-	@echo "=== execute_after_dh_virtualenv: staged files ==="
-	find debian/il-postino/usr/share/man debian/il-postino/lib/systemd -type f
