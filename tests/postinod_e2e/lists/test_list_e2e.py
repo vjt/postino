@@ -146,6 +146,53 @@ def test_mail_to_list_is_fanned_out_to_subscribers(lists_stack: Path) -> None:
     assert "Hello from the e2e suite." in body
 
 
+def test_list_add_writes_routes_and_owner_alias(lists_stack: Path) -> None:
+    r = docker_exec(
+        lists_stack,
+        "agent",
+        "postino",
+        "list",
+        "add",
+        "team@lists.example.org",
+        "--owner",
+        "alice@example.org",
+        "--owner",
+        "bob@example.org",
+    )
+    assert r.returncode == 0, r.stderr
+
+    # routes table has 5 rows for this list
+    r = docker_exec(
+        lists_stack,
+        "mariadb",
+        "mysql",
+        "-u",
+        "postfix",
+        "-ppostfix",
+        "postfix",
+        "-Be",
+        "SELECT COUNT(*) FROM routes WHERE list_address='team@lists.example.org'",
+    )
+    assert r.returncode == 0, r.stderr
+    assert "5" in r.stdout
+
+    # alias table has the -owner row with both owners
+    r = docker_exec(
+        lists_stack,
+        "mariadb",
+        "mysql",
+        "-u",
+        "postfix",
+        "-ppostfix",
+        "postfix",
+        "-Be",
+        "SELECT goto FROM alias WHERE address='team-owner@lists.example.org'",
+    )
+    assert r.returncode == 0, r.stderr
+    assert "alice@example.org" in r.stdout
+    assert "bob@example.org" in r.stdout
+
+
 def test_agent_can_remove_list_and_spool_vanishes_for_mta(lists_stack: Path) -> None:
     r = docker_exec(
         lists_stack,
