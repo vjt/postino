@@ -167,13 +167,23 @@ def passwd(
             ),
         ),
     ] = False,
+    password_stdin: Annotated[
+        bool,
+        typer.Option(
+            "--password-stdin",
+            help="Read password from stdin (one line). Refuses TTY input.",
+        ),
+    ] = False,
 ) -> None:
     """Change password.
 
-    Prompts for the new password twice. As with `user add`, the password
-    is never accepted on the command line. Under identity_backend=hybrid,
-    rotating the password on a mailbox currently holding {NOAUTH}
-    requires --claim (the row transitions from IdP-auth to SQL-auth).
+    Prompts for the new password twice. Pass ``--password-stdin`` to read
+    one line from stdin (for scripting / config-management drivers); the
+    flag refuses an interactive TTY so a typo cannot end up echoed to the
+    terminal. As with `user add`, the password is never accepted on the
+    command line. Under identity_backend=hybrid, rotating the password on
+    a mailbox currently holding {NOAUTH} requires --claim (the row
+    transitions from IdP-auth to SQL-auth).
     """
     try:
         s = get_services(ctx)
@@ -190,7 +200,9 @@ def passwd(
                 err=True,
             )
             raise typer.Exit(code=2)
-        password = _prompt_new_password("New password")
+        password = (
+            _read_password_from_stdin() if password_stdin else _prompt_new_password("New password")
+        )
         s.mailbox.set_password(username, password, scheme)
         if is_sentinel:
             typer.echo(f"{username} claimed into SQL auth.", err=True)
