@@ -1,7 +1,8 @@
 #!/bin/sh
-# scripts/build-txz.sh — build il-postino-<version>.txz inside a FreeBSD 14
-# environment. Designed to run inside vmactions/freebsd-vm@v1 in CI; can
-# also run on a FreeBSD dev box.
+# scripts/build-txz.sh — build il-postino-<version>.txz inside FreeBSD 14.
+# Uses FreeBSD's binary py311-* ports for C-extension deps so pip doesn't
+# try to rebuild pydantic-core / bcrypt / cryptography (which fails on
+# FreeBSD because setuptools/wheel misparses SOABI "cpython-311").
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -19,8 +20,27 @@ DIST=$(pwd)/dist
 rm -rf "$WORK"
 mkdir -p "$STAGE" "$DIST"
 
-# FreeBSD prereqs.
-pkg install -y python311 py311-pip py311-virtualenv mlmmj || true
+# FreeBSD prereqs: Python, all C-ext deps from binary ports, plus rust
+# as a fallback for any pure-pip deps that need compilation.
+pkg install -y \
+  python311 py311-pip py311-virtualenv \
+  py311-pydantic py311-pydantic-settings \
+  py311-bcrypt py311-cryptography py311-cffi \
+  py311-typer py311-rich py311-sqlalchemy20 py311-pymysql \
+  py311-passlib py311-pyjwt py311-httpx py311-uvicorn py311-anyio \
+  py311-email-validator \
+  rust llvm \
+  mlmmj git
+
+# Diagnostic: confirm system-site C-ext deps are visible.
+/usr/local/bin/python3.11 -c "
+import sys
+print('Python:', sys.version)
+import pydantic_core, bcrypt, cryptography
+print('pydantic_core:', pydantic_core.__file__)
+print('bcrypt:', bcrypt.__file__)
+print('cryptography:', cryptography.__file__)
+"
 
 # Stage tree.
 install -d "$STAGE/usr/local/share/postino/venv"
@@ -30,11 +50,18 @@ install -d "$STAGE/usr/local/man/man8"
 install -d "$STAGE/usr/local/etc/rc.d"
 install -d "$STAGE/usr/local/etc/postino"
 
-# Build venv inside the staging dir.
-/usr/local/bin/python3.11 -m venv "$STAGE/usr/local/share/postino/venv"
-"$STAGE/usr/local/share/postino/venv/bin/pip" install --no-cache-dir .
+# Build venv with --system-site-packages so it inherits the ports-installed
+# C extensions. pip will not rebuild them since they're already importable.
+/usr/local/bin/python3.11 -m venv --system-site-packages "$STAGE/usr/local/share/postino/venv"
+"$STAGE/usr/local/share/postino/venv/bin/pip" install --upgrade pip setuptools wheel
 
-# Replace absolute shebangs with /usr/local prefix (BSD sed -i needs the empty extension).
+# Install postino itself. pip resolves deps against system-site-packages
+# FIRST, so any pydantic/bcrypt/cryptography already there are accepted
+# (modulo version constraints). Daemon deps (litestar) are NOT in
+# FreeBSD ports, so pip will fetch them from PyPI as pure-Python wheels.
+"$STAGE/usr/local/share/postino/venv/bin/pip" install --no-cache-dir '.[daemon]'
+
+# Replace absolute shebangs with /usr/local prefix (BSD sed -i needs empty extension).
 find "$STAGE/usr/local/share/postino/venv/bin" -type f -exec \
   sed -i '' "s|$STAGE/usr/local|/usr/local|g" {} +
 
@@ -53,6 +80,11 @@ install -m 0755 pkg/postinod.rc "$STAGE/usr/local/etc/rc.d/postinod"
 
 # Sample config.
 install -m 0644 pkg/postino.toml.sample "$STAGE/usr/local/etc/postino/postino.toml.sample"
+
+# Smoke-test the staged install before packaging.
+echo "=== Staged install smoke ==="
+"$STAGE/usr/local/share/postino/venv/bin/postino" --version
+"$STAGE/usr/local/share/postino/venv/bin/postino" --help > /dev/null
 
 # Manifest with version substituted.
 sed "s/@VERSION@/$VERSION/" pkg/manifest.json.in > "$WORK/manifest.json"

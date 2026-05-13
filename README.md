@@ -114,12 +114,19 @@ curl -fLo /tmp/il-postino.deb "$url"
 sudo apt install -y /tmp/il-postino.deb
 ```
 
-### FreeBSD
+### FreeBSD (.txz)
 
-`pip install il-postino` is the supported path on FreeBSD. A native
-`.txz` is on the v0.9 roadmap — `pkg create` blocked on maturin's
-SOABI detection for `pydantic-core` (see `docs/superpowers/specs/`
-or the README § FreeBSD notes for the pip-cached-wheels workaround).
+FreeBSD 14, amd64. Brings `pkg`-installed `py311-pydantic`,
+`py311-bcrypt`, `py311-cryptography` etc. as runtime deps so the venv
+doesn't carry duplicate C extensions. Ships an `rc(8)` script disabled
+by default; enable with `postinod_enable=YES` in `/etc/rc.conf`.
+
+```sh
+v=0.8.2
+fetch -o /tmp/il-postino.txz \
+  "https://github.com/vjt/postino/releases/download/v${v}/il-postino-${v}.txz"
+sudo pkg add /tmp/il-postino.txz
+```
 
 ## Configuration
 

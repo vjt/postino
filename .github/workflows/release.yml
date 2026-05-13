@@ -142,14 +142,30 @@ jobs:
           name: deb-${{ matrix.dist }}-${{ matrix.arch }}
           path: dist/*.deb
 
-  # FreeBSD .txz disabled in v0.8.1: maturin on FreeBSD fails SOABI
-  # platform detection ("Unsupported platform: 311") when pip rebuilds
-  # pydantic-core. Needs either pkg install py311-pydantic with
-  # --system-site-packages venv, or a rust toolchain + maturin pin.
-  # Defer to v0.9 with a dedicated FreeBSD build path.
+  txz:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build .txz inside FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "14.2"
+          usesh: true
+          run: |
+            ./scripts/build-txz.sh
+            # Smoke-install the produced .txz to verify the artefact is sane.
+            pkg add dist/il-postino-*.txz
+            postino --version
+            test -x /usr/local/bin/postinod
+            test -f /usr/local/etc/rc.d/postinod
+      - uses: actions/upload-artifact@v4
+        with:
+          name: txz-freebsd14-amd64
+          path: dist/*.txz
 
   github-release:
-    needs: [verify, deb, changelog, manpages-check]
+    needs: [verify, deb, txz, changelog, manpages-check]
     runs-on: ubuntu-latest
     permissions:
       contents: write
