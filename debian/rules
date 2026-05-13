@@ -1,12 +1,14 @@
 #!/usr/bin/make -f
 export DH_VIRTUALENV_INSTALL_ROOT=/usr/share
 
-# Use the dh-virtualenv addon (inserts dh_virtualenv into the normal dh
-# sequence) rather than the python-virtualenv addon (which REPLACES the
-# sequence and excludes dh_installsystemd / dh_installman runtime install
-# of debian/<pkg>.<unit>.service + debian/<pkg>.manpages).
+# dh-virtualenv 1.2.x on bookworm/trixie only ships the python-virtualenv
+# addon. That addon REPLACES the dh sequence and drops a bunch of helpers
+# (dh_installsystemd, dh_installinit, …). dh_installman is in its
+# sequence but didn't actually stage the manpages on our v0.8.5 build,
+# so we stop relying on either of those helpers and copy the unit +
+# manpages into the package tree by hand after dh_virtualenv runs.
 %:
-	dh $@ --with dh-virtualenv
+	dh $@ --with python-virtualenv
 
 override_dh_virtualenv:
 	dh_virtualenv \
@@ -16,3 +18,12 @@ override_dh_virtualenv:
 	  --requirements debian/requirements-deb.txt \
 	  --extra-pip-arg --no-cache-dir \
 	  --extra-pip-arg --upgrade-strategy=only-if-needed
+
+execute_after_dh_virtualenv:
+	install -d debian/il-postino/lib/systemd/system
+	install -m 0644 debian/il-postino.postinod.service \
+	  debian/il-postino/lib/systemd/system/postinod.service
+	install -d debian/il-postino/usr/share/man/man1
+	install -d debian/il-postino/usr/share/man/man8
+	install -m 0644 man/postino.1  debian/il-postino/usr/share/man/man1/postino.1
+	install -m 0644 man/postinod.8 debian/il-postino/usr/share/man/man8/postinod.8

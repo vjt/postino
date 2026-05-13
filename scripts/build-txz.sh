@@ -1,8 +1,8 @@
 #!/bin/sh
-# scripts/build-txz.sh — build il-postino-<version>.txz inside FreeBSD 14.
-# Uses FreeBSD's binary py311-* ports for C-extension deps so pip doesn't
-# try to rebuild pydantic-core / bcrypt / cryptography (which fails on
-# FreeBSD because setuptools/wheel misparses SOABI "cpython-311").
+# scripts/build-txz.sh — build il-postino-<version>.pkg inside FreeBSD 14.
+# Hermetic venv + Rust toolchain: pip builds pydantic-core, bcrypt and
+# cryptography from sdist into the venv. Only python311 + mlmmj remain
+# external runtime deps.
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -20,27 +20,20 @@ DIST=$(pwd)/dist
 rm -rf "$WORK"
 mkdir -p "$STAGE" "$DIST"
 
-# FreeBSD prereqs: Python, all C-ext deps from binary ports, plus rust
-# as a fallback for any pure-pip deps that need compilation.
+# FreeBSD prereqs: Python + Rust toolchain + headers needed by pip to
+# build pydantic-core, bcrypt, cryptography wheels inside the venv.
+# We do NOT install py311-pydantic / py311-pydantic-settings because the
+# 1.x line in ports conflicts with the 2.x line (py311-pydantic2), and
+# pip+rust rebuilds the 2.x stack into the venv anyway.
 pkg install -y \
   python311 py311-pip py311-virtualenv \
-  py311-pydantic py311-pydantic-settings \
-  py311-bcrypt py311-cryptography py311-cffi \
-  py311-typer py311-rich py311-sqlalchemy20 py311-pymysql \
-  py311-passlib py311-pyjwt py311-httpx py311-uvicorn py311-anyio \
-  py311-email-validator \
   rust llvm \
+  pkgconf libffi openssl \
   mlmmj git
 
-# Diagnostic: confirm system-site C-ext deps are visible.
-/usr/local/bin/python3.11 -c "
-import sys
-print('Python:', sys.version)
-import pydantic_core, bcrypt, cryptography
-print('pydantic_core:', pydantic_core.__file__)
-print('bcrypt:', bcrypt.__file__)
-print('cryptography:', cryptography.__file__)
-"
+# Diagnostic: confirm Python + Rust are available.
+/usr/local/bin/python3.11 --version
+/usr/local/bin/cargo --version || true
 
 # Stage tree.
 install -d "$STAGE/usr/local/share/postino/venv"
@@ -50,19 +43,18 @@ install -d "$STAGE/usr/local/man/man8"
 install -d "$STAGE/usr/local/etc/rc.d"
 install -d "$STAGE/usr/local/etc/postino"
 
-# Build venv with --system-site-packages so it inherits the ports-installed
-# C extensions. pip will not rebuild them since they're already importable.
+# Build a hermetic venv (no --system-site-packages). All Python deps,
+# including the Rust-compiled pydantic-core / bcrypt / cryptography, get
+# bundled into the venv by pip below.
 VENV="$STAGE/usr/local/share/postino/venv"
-/usr/local/bin/python3.11 -m venv --system-site-packages "$VENV"
+/usr/local/bin/python3.11 -m venv "$VENV"
 
 # Use venv's python -m pip explicitly so scripts always land in $VENV/bin/,
 # not in the system bin/ (the pip shim can misbehave with --system-site-packages).
 "$VENV/bin/python3.11" -m pip install --upgrade pip setuptools wheel
 
-# Install postino itself. pip resolves deps against system-site-packages
-# FIRST, so any pydantic/bcrypt/cryptography already there are accepted
-# (modulo version constraints). Daemon deps (litestar) are NOT in
-# FreeBSD ports, so pip will fetch them from PyPI as pure-Python wheels.
+# Install postino + daemon extras. pip builds pydantic-core, bcrypt,
+# cryptography from sdists via the Rust toolchain installed above.
 "$VENV/bin/python3.11" -m pip install --no-cache-dir '.[daemon]'
 
 # Diagnostics: list what got installed where.
@@ -95,8 +87,18 @@ install -m 0644 pkg/postino.toml.sample "$STAGE/usr/local/etc/postino/postino.to
 # Manifest with version substituted.
 sed "s/@VERSION@/$VERSION/" pkg/manifest.json.in > "$WORK/manifest.json"
 
+# pkg create with -M alone does NOT scan the staged tree for files; it
+# only packages what's listed in the manifest's "files" array or in -p
+# plist. Generate the plist from the staged tree so every file under
+# $STAGE ends up in the package.
+(cd "$STAGE" && find . \( -type f -o -type l \) -print | sed 's|^\.||') > "$WORK/plist"
+echo "=== plist (first 20 entries) ==="
+head -20 "$WORK/plist"
+echo "=== plist line count ==="
+wc -l "$WORK/plist"
+
 # Build the package (FreeBSD 14 default = .pkg / zstd).
-pkg create -M "$WORK/manifest.json" -r "$STAGE" -o "$DIST"
+pkg create -M "$WORK/manifest.json" -p "$WORK/plist" -r "$STAGE" -o "$DIST"
 
 echo "Built:"
 ls -la "$DIST"/il-postino-*.pkg
