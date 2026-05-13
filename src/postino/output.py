@@ -30,8 +30,8 @@ class Renderer:
         console: Console | None = None,
     ) -> None:
         self._json = json
+        # WHY: plumbed for future banner-suppression hook; render() will gate on self._quiet.
         self._quiet = quiet
-        self._no_color = no_color
         if console is not None:
             self._console = console
         else:
@@ -47,22 +47,14 @@ class Renderer:
 
     @classmethod
     def from_ctx(cls, ctx: typer.Context) -> Renderer:
-        """Build a Renderer reading json/quiet/no_color from CliState.
-
-        Sweep target: replaces ``Renderer(json=is_json(ctx))`` at command
-        sites so the three flags arrive at the renderer without three
-        ``is_X(ctx)`` calls at every callsite.
-        """
+        """Construct a Renderer from the active CliState (json/quiet/no_color)."""
         # Local import to avoid an output.py → typer/exit.py runtime cycle
         # (output.py is otherwise typer-free; TYPE_CHECKING import handles
         # the ctx type annotation).
-        from postino.exit import is_json, is_no_color, is_quiet
+        from postino.exit import get_state
 
-        return cls(
-            json=is_json(ctx),
-            quiet=is_quiet(ctx),
-            no_color=is_no_color(ctx),
-        )
+        s = get_state(ctx)
+        return cls(json=s["json"], quiet=s["quiet"], no_color=s["no_color"])
 
     def render(self, payload: BaseModel | Sequence[BaseModel]) -> None:
         if self._json:

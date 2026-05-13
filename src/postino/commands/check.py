@@ -17,7 +17,7 @@ import sys
 import typer
 from rich.console import Console
 
-from postino.exit import exit_with_error, get_services, is_json
+from postino.exit import exit_with_error, get_services, is_json, is_no_color
 from postino_core.check.consistency import CheckResult, run_consistency_check
 from postino_core.errors import ConfigError
 
@@ -40,13 +40,18 @@ def run(
     if is_json(ctx):
         _render_json(result)
     else:
-        _render_human(result)
+        _render_human(result, no_color=is_no_color(ctx))
     if not result.ok:
         exit_with_error(ConfigError("one or more checks failed"))
 
 
-def _render_human(result: CheckResult) -> None:
-    console = Console()
+def _render_human(result: CheckResult, *, no_color: bool) -> None:
+    # Mirror Renderer's dual-arg pattern: color_system=None fully
+    # suppresses ANSI (including bold) for script-pipe-safe output.
+    console = Console(
+        color_system=None if no_color else "auto",
+        no_color=no_color,
+    )
     marks = {
         "info": "[green]✓[/green]",
         "warn": "[yellow]![/yellow]",

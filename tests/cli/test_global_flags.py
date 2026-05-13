@@ -62,6 +62,28 @@ def _capture_render(*, no_color: bool) -> str:
     return buf.getvalue()
 
 
+def test_exit_with_error_honors_no_color_env(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``exit_with_error`` suppresses ANSI when ``NO_COLOR`` is set.
+
+    Reads ``NO_COLOR`` directly because ``ctx.obj`` may not be initialised
+    when called from the root-callback's exception handler. The Rich
+    Console it builds must respect that env-derived flag — otherwise the
+    ``[red]error:[/red]`` markup leaks ``\\x1b[`` into piped error output.
+    """
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.delenv("CI", raising=False)
+    from postino.exit import exit_with_error
+    from postino_core.errors import NotFoundError
+
+    with pytest.raises(SystemExit):
+        exit_with_error(NotFoundError("boom"))
+    captured = capsys.readouterr()
+    assert "boom" in captured.err
+    assert "\x1b[" not in captured.err
+
+
 def test_renderer_no_color_strips_ansi_unit() -> None:
     """Unit-level proof: Renderer's no_color path suppresses ALL ANSI.
 

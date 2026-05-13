@@ -9,6 +9,7 @@ each command body has a single typed accessor instead of casting from
 
 from __future__ import annotations
 
+import os
 import sys
 from typing import NoReturn, TypedDict
 
@@ -54,9 +55,33 @@ _EXIT_CODES: dict[type[MailctlError], int] = {
 }
 
 
+def _env_no_color() -> bool:
+    """Whether NO_COLOR or CI env disables color.
+
+    Used by ``exit_with_error`` because it may run before ``ctx.obj`` is
+    initialised (e.g. if ``_load_settings()`` raises during the root
+    callback) — so reading from ``CliState`` is not safe. The two env
+    vars are the documented escape hatch (no-color.org + CI convention);
+    users who want guaranteed monochrome error output set ``NO_COLOR=1``
+    in their environment and it works everywhere, including this path.
+    """
+    return bool(os.environ.get("NO_COLOR")) or os.environ.get("CI", "").lower() == "true"
+
+
 def exit_with_error(err: MailctlError) -> NoReturn:
-    """Print ``err`` to stderr and ``sys.exit`` with the documented code."""
-    console = Console(stderr=True)
+    """Print ``err`` to stderr and ``sys.exit`` with the documented code.
+
+    Honors ``NO_COLOR`` / ``CI`` env vars for color suppression. The
+    ``--no-color`` flag itself is NOT consulted here because this
+    function is called from contexts where ``ctx.obj`` may not exist
+    (root-callback exception handler) — see ``_env_no_color`` docstring.
+    """
+    no_color = _env_no_color()
+    console = Console(
+        stderr=True,
+        color_system=None if no_color else "auto",
+        no_color=no_color,
+    )
     console.print(f"[red]error:[/red] {err}")
     code = next(
         (c for cls, c in _EXIT_CODES.items() if isinstance(err, cls)),
