@@ -247,3 +247,73 @@ def test_delete_owner_alias_removes_row() -> None:
             sa_select(alias).where(alias.c.address == "team-owner@lists.example.org")
         ).fetchone()
     assert row is None
+
+
+# ---------------------------------------------------------------------------
+# Task 17: delete() clears routes + owner alias rows
+# ---------------------------------------------------------------------------
+
+
+def test_delete_clears_routes_and_owner_alias() -> None:
+    """After delete(), routes for the list AND its owner alias are gone."""
+    from sqlalchemy import select as sa_select
+
+    md = _fake_metadata()
+    adapter = _fake_adapter(exists=True)
+    adapter.get.return_value = None  # force=True path skips get()
+    adapter.delete.return_value = None
+    # Use a no-op audit writer so that multiple audit writes in the test
+    # don't collide on the empty-string PK of the in-memory log table.
+    noop_audit = MagicMock()
+    noop_audit.write.return_value = None
+    engine = create_engine("sqlite:///:memory:")
+    md.create_all(engine)
+    svc = MailingListService(
+        engine=engine,
+        metadata=md,
+        adapter=adapter,  # type: ignore[arg-type]  # WHY: MagicMock satisfies MlmmjAdapter protocol for these unit tests
+        routes=RoutesRepository(engine=engine, metadata=md),
+        clock=lambda: datetime(2026, 1, 1),
+        audit_writer=noop_audit,
+    )
+
+    alias = md.tables["alias"]
+    routes = md.tables["routes"]
+
+    # Seed: 5 routes rows + owner alias
+    with engine.begin() as conn:
+        svc._routes.insert_mlmmj_list(conn, "team@lists.example.org")  # pyright: ignore[reportPrivateUsage]  # WHY: seeding via repo directly for test isolation
+        svc._write_owner_alias(  # pyright: ignore[reportPrivateUsage]  # WHY: seeding via helper directly for test isolation
+            conn,
+            "team@lists.example.org",
+            ["alice@example.org"],
+        )
+
+    # Verify seed is in place
+    with engine.connect() as conn:
+        assert (
+            conn.execute(
+                sa_select(routes).where(routes.c.list_address == "team@lists.example.org")
+            ).fetchall()
+            != []
+        )
+        assert (
+            conn.execute(
+                sa_select(alias).where(alias.c.address == "team-owner@lists.example.org")
+            ).fetchone()
+            is not None
+        )
+
+    svc.delete("team@lists.example.org", force=True)  # type: ignore[arg-type]  # WHY: passing plain str as EmailStr for test convenience; validated at the boundary in production
+
+    # Assert routes + owner alias are gone
+    with engine.connect() as conn:
+        remaining_routes = conn.execute(
+            sa_select(routes).where(routes.c.list_address == "team@lists.example.org")
+        ).fetchall()
+        assert remaining_routes == [], f"routes rows not deleted: {remaining_routes}"
+
+        owner_row = conn.execute(
+            sa_select(alias).where(alias.c.address == "team-owner@lists.example.org")
+        ).fetchone()
+        assert owner_row is None, f"owner alias row not deleted: {owner_row}"

@@ -168,6 +168,8 @@ class MailingListService:
 
         try:
             with translate_db_errors(), self._engine.begin() as conn:
+                self._routes.delete_by_list_address(conn, address)
+                self._delete_owner_alias(conn, str(address))
                 self._audit.write(
                     conn,
                     action=mk_action("mailing_list", "delete"),
