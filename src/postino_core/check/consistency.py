@@ -105,6 +105,9 @@ def run_consistency_check(
     findings.append(_check_mailbox_base(settings))
     findings.append(_check_postcreation_hook(settings))
     findings.extend(_check_postfix_sql_cfs(settings, engine))
+    if settings.mlmmj_spool_dir is not None:
+        main_cf = settings.postfix_sql_dir.parent / "main.cf"
+        findings.extend(check_postfix_transport_maps(main_cf))
     if deep:
         findings.extend(_check_deep(settings, engine, metadata))
     return CheckResult(findings=findings)
@@ -735,3 +738,86 @@ def _check_orphan_domain_maildirs(
             )
         ]
     return [_ok("orphan_domain_maildirs", "no orphan per-domain maildirs on disk")]
+
+
+def check_postfix_transport_maps(main_cf: Path) -> list[Finding]:
+    """Validate main.cf transport_maps wiring for v0.10+ mlmmj routing.
+
+    Required: ``transport_maps = mysql:<routes-cf>, mysql:<virtual-transport-cf>``
+    in that order. The routes source MUST appear FIRST so per-list
+    regex patterns win over per-domain catchall.
+    """
+    if not main_cf.exists():
+        return [
+            Finding(
+                name="postfix-main-cf",
+                severity="error",
+                message=f"main.cf not found at {main_cf}",
+            )
+        ]
+    content = main_cf.read_text()
+    line = next(
+        (
+            ln.split("=", 1)[1].strip()
+            for ln in content.splitlines()
+            if ln.strip().startswith("transport_maps")
+        ),
+        None,
+    )
+    if line is None:
+        return [
+            Finding(
+                name="postfix-transport-maps",
+                severity="error",
+                message=(
+                    "main.cf: transport_maps is not set; v0.10 requires "
+                    "transport_maps = mysql:sql-routes.cf, mysql:sql-virtual_transport.cf"
+                ),
+            )
+        ]
+    sources = [s.strip() for s in line.split(",")]
+    findings: list[Finding] = []
+    if len(sources) < 2:
+        findings.append(
+            Finding(
+                name="postfix-transport-maps",
+                severity="error",
+                message=(
+                    f"main.cf: transport_maps has only {len(sources)} source(s); "
+                    "v0.10 requires both mysql:sql-routes.cf and mysql:sql-virtual_transport.cf"
+                ),
+            )
+        )
+        return findings
+    first, second = sources[0], sources[1]
+    if "routes" not in first:
+        findings.append(
+            Finding(
+                name="postfix-transport-maps-order",
+                severity="error",
+                message=(
+                    f"main.cf: first transport_maps source must reference routes ('routes' "
+                    f"in path); got {first!r}. Per-list patterns must win over per-domain catchall."
+                ),
+            )
+        )
+    if not (first.startswith("mysql:") and second.startswith("mysql:")):
+        findings.append(
+            Finding(
+                name="postfix-transport-maps-type",
+                severity="error",
+                message=(
+                    f"main.cf: both transport_maps sources must be mysql:; "
+                    f"got {first!r}, {second!r}"
+                ),
+            )
+        )
+    if not findings:
+        findings.append(
+            Finding(
+                name="postfix-transport-maps",
+                severity="info",
+                message=f"transport_maps OK: {first}, {second}",
+            )
+        )
+    return findings
