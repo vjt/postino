@@ -156,26 +156,46 @@ trailing summary line so the previous regex was a no-op). Default:
 yellow warning + remediation hint. `POSTINO_CHECK_STRICT=1` makes
 it fail-exit; use this before tagging.
 
-## Unreleased on `main`
+## v0.8 — packaging + manpages + changelog (shipped 2026-05-13)
 
-Folded into the next feature release — not worth a tag on their own:
+Released as v0.8.10. **v0.8.0 through v0.8.9 are release-pipeline
+iterations** — same wheel code, only `.github/workflows/*` and
+`debian/`+`pkg/` adjustments to chase down `.deb` smoke + FreeBSD
+`pkg create` issues. Use v0.8.10+ for anything real.
 
-- Top-level Typer flipped to `add_completion=True`. Users get
-  `postino --install-completion {bash,zsh,fish,powershell}` and
-  `postino --show-completion <shell>` for free.
-- `reconcile` CLI stub removed (command, tests, ROADMAP entry).
-  Rationale: any TOML-driven "expected state" would compete with
-  the DB as source-of-truth for mailbox state, and PA web-UI edits
-  would silently revert on the next `--apply`. Drift detection
-  stays in `postino check --deep` (DB-only diff).
-- ROADMAP backfill: v0.4 already shipped the audit-to-PA-`log`
-  surface via `DefaultAuditWriter`; the v0.2 entry was stale doc.
+Shipped surface:
+- **Manpages** — `man postino`, `man postinod` (help2man + handwritten
+  template for the daemon).
+- **CHANGELOG** — `git-cliff` auto-generated from Conventional
+  Commits, attached to each GH Release body.
+- **`il-postino` Debian package** — `dh-virtualenv` 1.2.x via the
+  `python-virtualenv` addon. Matrix: bookworm + trixie, amd64.
+  Ships bundled venv at `/usr/share/postino/venv/`, systemd unit at
+  `/lib/systemd/system/postinod.service`, manpages.
+- **`il-postino` FreeBSD package** — `.pkg` (zstd, FreeBSD 14's
+  default). Hermetic venv built by pip+Rust inside the build VM.
+  External deps: `python311`, `mlmmj`. Ships rc(8) script at
+  `/usr/local/etc/rc.d/postinod`.
+- **GitHub Release per tag** — assets: `.pkg`, `bookworm.deb`,
+  `trixie.deb`; body from git-cliff.
+- **Verify gate on tag push** — `release.yml` calls `verify.yml`
+  before PyPI publish so a tag cannot ship if the same CI graph
+  enforced on PRs is red on the tagged SHA.
+- **Codecov OIDC** — coverage badge on the README.
+- **`postino` shell completion** — Typer `add_completion=True`.
+- **`reconcile` CLI stub removed** — TOML-driven "expected state"
+  would compete with the PA DB as source-of-truth and silently
+  revert PA web-UI edits on `--apply`. Drift detection stays in
+  `postino check --deep`.
+
+Specs:
+- `docs/superpowers/specs/2026-05-12-postino-v0.8-packaging-design.md`
 
 ## Production hardening (anytime)
 
 - Docker image — official runtime container, FROM python:3.13-slim
-- FreeBSD port — `lang/python313` + bundled wheels for rust-built deps
-- Manpage — typer auto-generates from `--help`
-- pre-commit hook config — wraps `./scripts/check.sh` for contributors
-- Coverage badge — codecov or local
 - SLSA provenance for releases
+- ARM64 Debian builds (currently amd64-only; matrix dropped arm64
+  due to runner availability)
+- Optimize FreeBSD VM build (~7 min for rust compile of
+  pydantic-core + cryptography from sdist)
