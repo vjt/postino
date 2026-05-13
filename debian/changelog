@@ -1,5 +1,10 @@
 il-postino (0.8.0-1) unstable; urgency=medium
 
+  * Release 0.8.0. See CHANGELOG.md for details.
+
+ -- Marcello Barnaba <vjt@openssl.it>  Wed, 13 May 2026 07:13:12 +0200
+il-postino (0.8.0-1) unstable; urgency=medium
+
   * Initial Debian package: bundle CPython 3.11+ venv via dh-virtualenv;
     ship postino(1) and postinod(8) manpages; ship systemd unit.
 

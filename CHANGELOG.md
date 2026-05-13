@@ -4,10 +4,37 @@ All notable changes to `il-postino` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and is generated automatically by [git-cliff](https://git-cliff.org) from
 commit subjects on every tag.
-## [Unreleased]
+## [0.8.0] — 2026-05-13
+
+### CI
+- Add git-cliff config and seed CHANGELOG.md
+- Harden build-manpages.sh — trap, fail-fast, version guard
+- Add opt-in pre-commit hook running scripts/check.sh
+- Add scripts/release.sh — bump version, regen, tag
+- Upload coverage to Codecov via OIDC
+- Extend release.yml with changelog, manpages, deb, txz, gh-release
+- Relax release.sh precondition to ignore all untracked files
+
+### Docs
+- Add postinod(8) manpage template and rendering
+- Correct postinod(8) env vars and SYNOPSIS
+- Add help2man supplement for postino(1)
+- Remove misleading Debian path claim from postino(1) FILES
+- Correct POSTINO_CONFIG semantics in postino(1)
+- Add build-manpages.sh and committed postino(1)
+- Add codecov badge and .deb/.txz install instructions
 
 ### Misc
 - Drop reconcile stub, enable typer shell completion
+
+### Packaging
+- Add Debian packaging skeleton with dh-virtualenv *(`deb`)*
+- Add scripts/build-deb.sh local Docker-based builder *(`deb`)*
+- Add FreeBSD pkg-create skeleton and build-txz.sh *(`txz`)*
+
+### Tests
+- Guard manpage drift and lint cleanliness *(`architecture`)*
+- Fold in Task 5 minor review nits
 ## [0.7.1] — 2026-05-12
 
 ### CI
