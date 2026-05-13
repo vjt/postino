@@ -16,6 +16,7 @@ import re
 from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy import MetaData
 from sqlalchemy.engine import Connection, Engine
+from sqlalchemy.engine.row import RowMapping
 
 _MLMMJ_SUFFIXES: tuple[tuple[str, str, int], ...] = (
     # (suffix-fragment, transport, priority)
@@ -108,3 +109,32 @@ class RoutesRepository:
         routes = self._md.tables["routes"]
         result = conn.execute(routes.delete().where(routes.c.list_address == str(list_address)))
         return int(result.rowcount or 0)
+
+    def list_by_domain(self, conn: Connection, domain: str) -> list[Route]:
+        """All routes rows for a given domain."""
+        routes = self._md.tables["routes"]
+        rows = conn.execute(
+            routes.select().where(routes.c.domain == domain).order_by(routes.c.priority)
+        ).fetchall()
+        return [self._row_to_route(r._mapping) for r in rows]  # pyright: ignore[reportPrivateUsage]  # WHY: SQLAlchemy Row._mapping is public API despite the underscore prefix.
+
+    def list_by_list_address(self, conn: Connection, list_address: EmailStr) -> list[Route]:
+        """All routes rows referencing a specific list address."""
+        routes = self._md.tables["routes"]
+        rows = conn.execute(
+            routes.select()
+            .where(routes.c.list_address == str(list_address))
+            .order_by(routes.c.priority)
+        ).fetchall()
+        return [self._row_to_route(r._mapping) for r in rows]  # pyright: ignore[reportPrivateUsage]  # WHY: SQLAlchemy Row._mapping is public API despite the underscore prefix.
+
+    @staticmethod
+    def _row_to_route(m: RowMapping) -> Route:
+        return Route(
+            pattern=str(m["pattern"]),
+            transport=str(m["transport"]),
+            domain=str(m["domain"]),
+            list_address=(str(m["list_address"]) if m["list_address"] is not None else None),
+            priority=int(m["priority"]),
+            active=bool(m["active"]),
+        )
