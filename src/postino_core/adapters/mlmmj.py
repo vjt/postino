@@ -147,44 +147,43 @@ class MlmmjAdapter:
         raise MlmmjError(f"{cmd[0]}: exit {result.returncode}: {stderr}")
 
     def _listdir(self, address: EmailStr) -> Path:
-        """Compose ``<spool_root>/<address>`` with path-traversal and
-        symlink defenses.
+        """Compose ``<spool_root>/<domain>/<localpart>/`` with
+        path-traversal + symlink defenses applied at each level.
 
-        Rejects:
-        - addresses containing a ``/`` (the local-part of an EmailStr can
-          legally contain quoted slashes; we refuse them because they
-          would split the path component).
-        - addresses containing ``..`` segments.
-        - results that escape ``spool_root`` (e.g. via prefix sibling
-          directories: ``/var/spool/mlmmj2/foo`` for a root of
-          ``/var/spool/mlmmj``).
-        - results that equal ``spool_root`` itself.
-        - any pre-existing component that is a symlink (symlinks under
-          the spool root would let an attacker redirect mlmmj writes).
+        v0.10 layout mirrors PA's virtual mailbox tree
+        (``<vmail>/<domain>/<localpart>/Maildir/``). Multi-domain stacks
+        are safe by construction.
+
+        Rejects (per component, both domain and localpart):
+        - ``/``, NUL, newline, CR, backslash
+        - leading dot (``.deleting.*`` sentinel namespace)
+        - ``..`` / ``.``
+        - the literal ``_DELETING_PREFIX`` (graveyard namespace)
+        - pre-existing symlinks at either level
+        - result equal to or escaping ``spool_root``
         """
         addr_str = str(address)
-        # Defend against bypass-the-EmailStr-boundary callers. EmailStr
-        # would reject most of these, but a future caller passing a
-        # plain str into the adapter must still fail closed.
-        # Reject:
-        # - path separators / traversal segments
-        # - leading dot (`.deleting.*` sentinel collision)
-        # - NUL / newline / CR / backslash (path-component sanitization)
-        # - the literal `_DELETING_PREFIX` (don't let an address claim
-        #   the rename graveyard namespace)
+        if "@" not in addr_str:
+            raise FilesystemError(f"path traversal: {address!r} missing '@'")
+        localpart, _, domain = addr_str.rpartition("@")
+        if not localpart or not domain:
+            raise FilesystemError(f"path traversal: {address!r} has empty local-part or domain")
         forbidden_chars = ("/", "\x00", "\n", "\r", "\\")
-        if (
-            any(c in addr_str for c in forbidden_chars)
-            or addr_str in ("..", ".")
-            or addr_str.startswith(".")
-            or addr_str.startswith(_DELETING_PREFIX)
-        ):
-            raise FilesystemError(f"path traversal: {address!r} contains invalid path characters")
-        joined = self._spool_root / addr_str
+        for label, component in (("domain", domain), ("localpart", localpart)):
+            if (
+                any(c in component for c in forbidden_chars)
+                or component in ("..", ".")
+                or component.startswith(".")
+                or component.startswith(_DELETING_PREFIX)
+            ):
+                raise FilesystemError(
+                    f"path traversal: {label} {component!r} contains invalid path characters"
+                )
+        joined = self._spool_root / domain / localpart
         # Component-by-component lstat: refuse any symlink under the
         # spool root rather than calling resolve() (which follows them).
         cursor = self._spool_root
-        for part in (addr_str,):
+        for part in (domain, localpart):
             cursor = cursor / part
             try:
                 st = cursor.lstat()
