@@ -81,14 +81,14 @@
 [test_type_ignore_justified."src/postino_core/services/domain.py"]
 # Inline WHY comments cover the two non-_row_to_model ignores.
 # Lines below are _row_to_model body: SQLAlchemy RowMapping[str, Any] indexing.
-324 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-325 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-326 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-327 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-329 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-330 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-331 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
-332 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+308 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+309 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+310 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+311 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+313 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+314 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+315 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
+316 = "WHY: SQLAlchemy RowMapping[str, Any] indexing."
 
 [test_type_ignore_justified."src/postino_core/services/mailbox.py"]
 # All entries are SQLAlchemy RowMapping Any access in
