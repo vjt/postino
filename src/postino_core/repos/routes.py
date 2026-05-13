@@ -17,7 +17,6 @@ from pydantic import BaseModel, ConfigDict, EmailStr
 from sqlalchemy import MetaData
 from sqlalchemy.engine import Connection, Engine
 
-
 _MLMMJ_SUFFIXES: tuple[tuple[str, str, int], ...] = (
     # (suffix-fragment, transport, priority)
     # priority 10 = specific-suffix; priority 50 = catchall last
@@ -77,9 +76,7 @@ class RoutesRepository:
         self._engine = engine
         self._md = metadata
 
-    def insert_mlmmj_list(
-        self, conn: Connection, list_address: EmailStr
-    ) -> None:
+    def insert_mlmmj_list(self, conn: Connection, list_address: EmailStr) -> None:
         """Write the 5 per-list routes rows for an mlmmj mailing list.
 
         Caller owns the transaction (typical use: inside
@@ -102,3 +99,12 @@ class RoutesRepository:
             for pattern, transport, priority in _mlmmj_patterns(addr)
         ]
         conn.execute(routes.insert(), rows)
+
+    def delete_by_list_address(self, conn: Connection, list_address: EmailStr) -> int:
+        """Remove all routes rows referencing the given list address.
+
+        Returns: number of rows deleted (5 for a properly-provisioned
+        list, 0 if the list never had routes)."""
+        routes = self._md.tables["routes"]
+        result = conn.execute(routes.delete().where(routes.c.list_address == str(list_address)))
+        return int(result.rowcount or 0)

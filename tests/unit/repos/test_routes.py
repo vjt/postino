@@ -116,3 +116,21 @@ def test_insert_mlmmj_list_writes_five_rows() -> None:
     assert list_addresses == {"team@lists.example.org"}
     domains = {r._mapping["domain"] for r in rows}  # pyright: ignore[reportPrivateUsage]  # WHY: SQLAlchemy Row._mapping is public API despite the underscore prefix.
     assert domains == {"lists.example.org"}
+
+
+def test_delete_by_list_address_clears_rows() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    md = _fake_metadata()
+    md.create_all(engine)
+    repo = RoutesRepository(engine=engine, metadata=md)
+
+    with engine.begin() as conn:
+        repo.insert_mlmmj_list(conn, "team@lists.example.org")  # type: ignore[arg-type]  # WHY: EmailStr accepts str at the test boundary; same pattern as src/postino/commands/list.py allowlist entries.
+        repo.insert_mlmmj_list(conn, "other@lists.example.org")  # type: ignore[arg-type]  # WHY: EmailStr accepts str at the test boundary; same pattern as src/postino/commands/list.py allowlist entries.
+        deleted = repo.delete_by_list_address(conn, "team@lists.example.org")  # type: ignore[arg-type]  # WHY: EmailStr accepts str at the test boundary; same pattern as src/postino/commands/list.py allowlist entries.
+
+    assert deleted == 5
+    with engine.connect() as conn:
+        remaining = conn.execute(md.tables["routes"].select()).fetchall()
+    assert len(remaining) == 5
+    assert all(r._mapping["list_address"] == "other@lists.example.org" for r in remaining)  # pyright: ignore[reportPrivateUsage]  # WHY: SQLAlchemy Row._mapping is public API despite the underscore prefix.
