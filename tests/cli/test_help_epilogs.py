@@ -15,6 +15,7 @@ output. Same pattern as test_domain_alias_cmd.py.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,17 @@ from tests.cli.test_user_cmd import env_for_cli, make_postfix_cf
 pytestmark = pytest.mark.integration
 
 runner = CliRunner()
+
+# WHY: Rich's rich_markup_mode="rich" auto-highlights flag-shaped tokens
+# (--json, --no-color) with inline ANSI escape codes that split the
+# literal `--json` substring across SGR sequences. CI's TERM/COLUMNS
+# triggers the wrap; local dev terminals may not. Strip ANSI before
+# substring asserts so we test the semantic text, not the rendering.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _plain(text: str) -> str:
+    return _ANSI_RE.sub("", text)
 
 
 def _bootstrap(db_url: str, tmp_path: Path, hook: Path) -> dict[str, str]:
@@ -52,10 +64,11 @@ def test_subcommand_help_has_epilog(
     env = _bootstrap(db_url, tmp_path, fake_postcreation_hook)
     result = runner.invoke(app, [subcommand, "--help"], env=env)
     assert result.exit_code == 0, result.output
-    assert "--json" in result.output, (
+    plain = _plain(result.output)
+    assert "--json" in plain, (
         f"{subcommand} --help missing --json reference; got:\n{result.output}"
     )
-    assert "global options" in result.output.lower() or "postino --help" in result.output, (
+    assert "global options" in plain.lower() or "postino --help" in plain, (
         f"{subcommand} --help missing global-flags pointer; got:\n{result.output}"
     )
 
@@ -70,5 +83,6 @@ def test_domain_alias_help_has_epilog(
     env = _bootstrap(db_url, tmp_path, fake_postcreation_hook)
     result = runner.invoke(app, ["domain", "alias", "--help"], env=env)
     assert result.exit_code == 0, result.output
-    assert "--json" in result.output
-    assert "global options" in result.output.lower() or "postino --help" in result.output
+    plain = _plain(result.output)
+    assert "--json" in plain
+    assert "global options" in plain.lower() or "postino --help" in plain
