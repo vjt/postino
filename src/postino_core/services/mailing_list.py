@@ -200,6 +200,49 @@ class MailingListService:
         """List all mlmmj lists, optionally filtered by FQDN."""
         return self._adapter.list_all(domain=domain)
 
+    def _write_owner_alias(
+        self,
+        conn: Connection,
+        list_address: str,
+        owners: list[EmailStr],
+    ) -> None:
+        """Insert the ``<localpart>-owner@<domain>`` alias row whose
+        ``goto`` resolves to the list's owners.
+
+        v0.10: mail to ``<list>-owner@<domain>`` is rewritten by postfix
+        ``virtual_alias_maps`` (PA's existing alias mysql lookup) to the
+        owner addresses, then delivered through each owner's domain
+        transport. Postino owns the row; it's audited under
+        ``mailing_list.owner_alias_sync`` rather than ``alias.create`` so
+        operators inspecting the log can trace it back to list ops."""
+        localpart, _, domain = list_address.partition("@")
+        owner_addr = f"{localpart}-owner@{domain}"
+        goto = ",".join(str(o) for o in owners)
+        alias = self._md.tables["alias"]
+        now = self._clock()
+        conn.execute(
+            alias.insert().values(
+                address=owner_addr,
+                goto=goto,
+                domain=domain,
+                active=1,
+                created=now,
+                modified=now,
+            )
+        )
+        self._audit.write(
+            conn,
+            action=mk_action("mailing_list", "owner_alias_sync"),
+            domain=domain,
+            data=f"{owner_addr} -> {goto}",
+        )
+
+    def _delete_owner_alias(self, conn: Connection, list_address: str) -> None:
+        localpart, _, domain = list_address.partition("@")
+        owner_addr = f"{localpart}-owner@{domain}"
+        alias = self._md.tables["alias"]
+        conn.execute(alias.delete().where(alias.c.address == owner_addr))
+
     def _validate_no_collision(self, conn: Connection, address: str) -> None:
         mailbox = self._md.tables["mailbox"]
         alias = self._md.tables["alias"]

@@ -195,3 +195,53 @@ def test_validate_no_collision_rejects_existing_owner_alias() -> None:
         )
     with engine.begin() as conn, pytest.raises(AlreadyExistsError, match="alias row"):
         svc._validate_no_collision(conn, "team@lists.example.org")  # pyright: ignore[reportPrivateUsage]  # WHY: testing private method directly to isolate collision logic
+
+
+# ---------------------------------------------------------------------------
+# Task 15: _write_owner_alias + _delete_owner_alias helpers
+# ---------------------------------------------------------------------------
+
+
+def test_write_owner_alias_inserts_alias_row() -> None:
+    """_write_owner_alias inserts alias row with goto=owners joined by comma."""
+    md = _fake_metadata()
+    svc, engine = _service(md, _fake_adapter())
+    with engine.begin() as conn:
+        svc._write_owner_alias(  # pyright: ignore[reportPrivateUsage]  # WHY: testing private helper directly
+            conn,
+            "team@lists.example.org",
+            ["alice@example.org", "bob@example.org"],
+        )
+    alias = md.tables["alias"]
+    from sqlalchemy import select as sa_select
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa_select(alias).where(alias.c.address == "team-owner@lists.example.org")
+        ).fetchone()
+    assert row is not None
+    assert row.goto == "alice@example.org,bob@example.org"
+    assert row.domain == "lists.example.org"
+    assert int(row.active) == 1
+
+
+def test_delete_owner_alias_removes_row() -> None:
+    """_delete_owner_alias removes the alias row written by _write_owner_alias."""
+    md = _fake_metadata()
+    svc, engine = _service(md, _fake_adapter())
+    alias = md.tables["alias"]
+    from sqlalchemy import select as sa_select
+
+    with engine.begin() as conn:
+        svc._write_owner_alias(  # pyright: ignore[reportPrivateUsage]  # WHY: testing private helper directly
+            conn,
+            "team@lists.example.org",
+            ["alice@example.org"],
+        )
+    with engine.begin() as conn:
+        svc._delete_owner_alias(conn, "team@lists.example.org")  # pyright: ignore[reportPrivateUsage]  # WHY: testing private helper directly
+    with engine.connect() as conn:
+        row = conn.execute(
+            sa_select(alias).where(alias.c.address == "team-owner@lists.example.org")
+        ).fetchone()
+    assert row is None
