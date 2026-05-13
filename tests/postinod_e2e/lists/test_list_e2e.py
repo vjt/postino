@@ -274,3 +274,36 @@ def test_bounce_routing_invokes_mlmmj_bounce(lists_stack: Path) -> None:
     assert r.returncode == 0 and r.stdout.strip(), (
         f"no bounce file in <listdir>/bounce/: {r.stdout!r} stderr={r.stderr!r}"
     )
+
+
+def test_help_routing_invokes_mlmmj_help(lists_stack: Path) -> None:
+    docker_exec(
+        lists_stack,
+        "agent",
+        "postino",
+        "list",
+        "add",
+        "team@lists.example.org",
+        "--owner",
+        "alice@example.org",
+    )
+    catcher_reset(lists_stack)
+
+    docker_exec(
+        lists_stack,
+        "mta",
+        "bash",
+        "-c",
+        (
+            "printf 'From: bob@external.test\\nTo: team-help@lists.example.org\\n"
+            "Subject: help\\n\\n' "
+            "| sendmail -i -f bob@external.test team-help@lists.example.org"
+        ),
+    )
+
+    def is_help_reply(m: CatcherMessage) -> bool:
+        # mlmmj-help replies to the sender; subject typically contains 'help'
+        addr_list: list[dict[str, str]] = m.get("To") or []
+        return any(r.get("Address") == "bob@external.test" for r in addr_list)
+
+    _wait_for_catcher_message(lists_stack, is_help_reply)
