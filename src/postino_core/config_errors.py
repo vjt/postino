@@ -9,12 +9,30 @@ that preserves that origin information.
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 from pathlib import Path
 
 import tomlkit
+from pydantic import ValidationError
 from tomlkit.items import Item
+
+_MAX_ERRORS = 5
+
+
+def _quote(value: object) -> str:
+    """Render a config value back to a TOML-ish literal for error messages.
+
+    Strings get double-quoted (matches the TOML source the operator
+    is staring at), everything else falls back to ``repr``. Python's
+    ``repr`` prefers single quotes for strings, which doesn't match
+    the file content the error is pointing at — confusing, especially
+    when grepping the message back to the line in the TOML.
+    """
+    if isinstance(value, str):
+        return json.dumps(value)
+    return repr(value)
 
 
 def load_toml_with_origin(paths: list[Path]) -> list[tuple[Path, dict[str, object]]]:
@@ -53,6 +71,47 @@ def field_origin(path: Path, key: str) -> tuple[Path, int, object] | None:
     line = _line_for_key(text, key)
     raw: object = item.unwrap() if isinstance(item, Item) else item
     return (path, line, raw)
+
+
+def format_validation_error(
+    error: ValidationError,
+    sources: list[tuple[Path, dict[str, object]]],
+) -> str:
+    """Format a pydantic ValidationError with TOML file:line context.
+
+    For each error, look up its top-level key in the source list (first
+    match wins) and prepend ``file:line: key`` to the pydantic message.
+    Errors whose key isn't in any TOML (env-set or default) get a
+    fallback header so we don't pretend they came from a file.
+    """
+    errors = error.errors()
+    lines: list[str] = [f"{len(errors)} config error{'s' if len(errors) != 1 else ''}:"]
+
+    by_key: dict[str, tuple[Path, int, object]] = {}
+    for path, contents in sources:
+        for key in contents:
+            origin = field_origin(path, key)
+            if origin is not None and key not in by_key:
+                by_key[key] = origin
+
+    for err in errors[:_MAX_ERRORS]:
+        loc = err["loc"]
+        key = str(loc[0]) if loc else "<root>"
+        msg = err["msg"]
+        origin = by_key.get(key)
+        if origin is not None:
+            file_, line, value = origin
+            lines.append(f"  {file_}:{line}: {key}")
+            lines.append(f"    {msg} (got {_quote(value)})")
+        else:
+            lines.append(f"  (no file — env var or default): {key}")
+            lines.append(f"    {msg}")
+
+    overflow = len(errors) - _MAX_ERRORS
+    if overflow > 0:
+        lines.append(f"  (and {overflow} more — fix these and re-run)")
+
+    return "\n".join(lines)
 
 
 def _line_for_key(text: str, key: str) -> int:

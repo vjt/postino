@@ -1,6 +1,14 @@
 from pathlib import Path
 
-from postino_core.config_errors import field_origin, load_toml_with_origin
+import pytest
+from pydantic import ValidationError
+
+from postino_core.config import PostinoSettings
+from postino_core.config_errors import (
+    field_origin,
+    format_validation_error,
+    load_toml_with_origin,
+)
 
 
 def test_load_toml_with_origin_returns_path_dict_pairs(tmp_path: Path) -> None:
@@ -40,3 +48,29 @@ def test_field_origin_returns_none_for_missing_key(tmp_path: Path) -> None:
     toml = tmp_path / "postino.toml"
     toml.write_text('identity_backend = "local"\n')
     assert field_origin(toml, "vmail_uid") is None
+
+
+def test_format_validation_error_names_file_and_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    toml = tmp_path / "postino.toml"
+    toml.write_text(
+        'identity_backend = "local"\n'
+        'postfix_sql_dir = "/usr/local/etc/postfix"\n'
+        'virtual_mailbox_base = "/srv/mail"\n'
+        'postcreation_hook = "/bin/true"\n'
+        "vmail_uid = 1006\n"
+        "vmail_gid = 1006\n"
+        'default_quota_bytes = "1gb"\n'
+    )
+    monkeypatch.setenv("POSTINO_CONFIG", str(toml))
+
+    with pytest.raises(ValidationError) as exc_info:
+        PostinoSettings()  # type: ignore[call-arg]  # WHY: pydantic-settings hydrates from POSTINO_CONFIG TOML; pyright still sees BaseSettings's positional signature.
+
+    msg = format_validation_error(exc_info.value, [(toml, {"default_quota_bytes": "1gb"})])
+
+    assert f"{toml}:7" in msg
+    assert "default_quota_bytes" in msg
+    assert "expected integer" in msg or "valid integer" in msg
+    assert '"1gb"' in msg

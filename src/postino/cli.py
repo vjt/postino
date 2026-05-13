@@ -49,20 +49,27 @@ def _load_settings() -> PostinoSettings:
     try:
         return PostinoSettings()  # type: ignore[call-arg]  # WHY: pydantic-settings raises ValidationError for missing fields; pyright thinks PostinoSettings() is missing args. Captured in PR-A6 cleanup.
     except ValidationError as e:
-        missing = [err["loc"][0] for err in e.errors() if err["type"] == "missing"]
-        if missing:
-            fields = ", ".join(str(m) for m in missing)
+        from postino_core.config import (
+            _config_toml_paths,  # pyright: ignore[reportPrivateUsage]  # WHY: TOML-path discovery for error attribution lives here; the CLI is the only caller that needs the same list pydantic-settings consumed, so duplicating the precedence logic would drift. Module-private by convention, not by intent.
+        )
+        from postino_core.config_errors import (
+            format_validation_error,
+            load_toml_with_origin,
+        )
+
+        # Missing-required: keep the existing "set POSTINO_DB_URL …"
+        # message; users with no TOML at all want that pointer.
+        missing = [err for err in e.errors() if err["type"] == "missing"]
+        if missing and not _config_toml_paths()[0].is_file():
             raise ConfigError(
-                f"missing required config: {fields}.\n"
-                "  Set POSTINO_* env vars (e.g. POSTINO_IDENTITY_BACKEND=local)\n"
+                "config not found: set POSTINO_DB_URL=mysql+pymysql://...\n"
                 "  or write /usr/local/etc/postino/postino.toml or "
                 "~/.config/postino/postino.toml.\n"
-                "  See `postino --help` and the README for the full schema."
+                f"  missing fields: {', '.join(str(err['loc'][0]) for err in missing)}"
             ) from e
-        details = "; ".join(
-            f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors()
-        )
-        raise ConfigError(f"invalid config: {details}") from e
+
+        sources = load_toml_with_origin(list(_config_toml_paths()))
+        raise ConfigError(format_validation_error(e, sources)) from e
 
 
 def _cli_actor() -> str:
