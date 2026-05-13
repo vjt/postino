@@ -7,8 +7,15 @@ the integration test suite covers MariaDB compatibility separately.
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
+from sqlalchemy import Column, MetaData, SmallInteger, String, Table, create_engine
+from sqlalchemy.dialects.sqlite import BOOLEAN
 
-from postino_core.repos.routes import Route, _mlmmj_patterns  # pyright: ignore[reportPrivateUsage]  # WHY: module-private helper exercised directly to assert pattern-generation contract
+from postino_core.repos.routes import (
+    Route,
+    RoutesRepository,
+    _mlmmj_patterns,  # pyright: ignore[reportPrivateUsage]  # WHY: module-private helper exercised directly to assert pattern-generation contract
+)
 
 
 def test_mlmmj_patterns_emits_five_rows() -> None:
@@ -24,7 +31,7 @@ def test_mlmmj_patterns_emits_five_rows() -> None:
         "mlmmj-help:",
         "mlmmj-receive:",
     }
-    assert priorities == {10, 50}  # 4× priority 10 + 1× priority 50
+    assert priorities == {10, 50}  # 4x priority 10 + 1x priority 50
     # localpart-anchored, not domain-wide
     assert any(p == r"^team-bounces@lists\.example\.org$" for p in patterns)
     assert any(p == r"^team-confirm-sub-.+@lists\.example\.org$" for p in patterns)
@@ -64,5 +71,48 @@ def test_route_model_frozen_strict() -> None:
     )
     assert r.pattern == r"^team@lists\.example\.org$"
     assert r.transport == "mlmmj-receive:"
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         r.priority = 10  # type: ignore[misc]  # WHY: testing frozen model rejection at runtime
+
+
+def _fake_metadata() -> MetaData:
+    """Build an in-memory SQLite metadata that mirrors the routes table
+    (SQLite types only; integration tests cover MariaDB type fidelity)."""
+    md = MetaData()
+    Table(
+        "routes",
+        md,
+        Column("pattern", String(255), primary_key=True),
+        Column("transport", String(64), nullable=False),
+        Column("domain", String(255), nullable=False),
+        Column("list_address", String(255), nullable=True),
+        Column("priority", SmallInteger, nullable=False, default=50),
+        Column("active", BOOLEAN, nullable=False, default=True),
+    )
+    return md
+
+
+def test_insert_mlmmj_list_writes_five_rows() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    md = _fake_metadata()
+    md.create_all(engine)
+    repo = RoutesRepository(engine=engine, metadata=md)
+
+    with engine.begin() as conn:
+        repo.insert_mlmmj_list(conn, "team@lists.example.org")  # type: ignore[arg-type]  # WHY: EmailStr accepts str at the test boundary; same pattern as src/postino/commands/list.py allowlist entries.
+
+    with engine.connect() as conn:
+        rows = conn.execute(md.tables["routes"].select()).fetchall()
+    assert len(rows) == 5
+    transports = {r._mapping["transport"] for r in rows}  # pyright: ignore[reportPrivateUsage]  # WHY: SQLAlchemy Row._mapping is public API despite the underscore prefix.
+    assert transports == {
+        "mlmmj-bounce:",
+        "mlmmj-sub:",
+        "mlmmj-unsub:",
+        "mlmmj-help:",
+        "mlmmj-receive:",
+    }
+    list_addresses = {r._mapping["list_address"] for r in rows}  # pyright: ignore[reportPrivateUsage]  # WHY: SQLAlchemy Row._mapping is public API despite the underscore prefix.
+    assert list_addresses == {"team@lists.example.org"}
+    domains = {r._mapping["domain"] for r in rows}  # pyright: ignore[reportPrivateUsage]  # WHY: SQLAlchemy Row._mapping is public API despite the underscore prefix.
+    assert domains == {"lists.example.org"}

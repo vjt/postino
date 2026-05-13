@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import re
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr
+from sqlalchemy import MetaData
+from sqlalchemy.engine import Connection, Engine
 
 
 _MLMMJ_SUFFIXES: tuple[tuple[str, str, int], ...] = (
@@ -26,7 +28,7 @@ _MLMMJ_SUFFIXES: tuple[tuple[str, str, int], ...] = (
 )
 
 
-def _mlmmj_patterns(list_address: str) -> list[tuple[str, str, int]]:  # pyright: ignore[reportUnusedFunction]  # WHY: called from tests + future RoutesRepository; not yet wired into repo CRUD
+def _mlmmj_patterns(list_address: str) -> list[tuple[str, str, int]]:
     """Return the 5 (pattern, transport, priority) tuples for one list.
 
     Patterns are localpart-anchored — each list owns its own pattern set;
@@ -61,3 +63,42 @@ class Route(BaseModel):
     list_address: str | None
     priority: int
     active: bool
+
+
+class RoutesRepository:
+    """CRUD on the `routes` table.
+
+    The repository is intentionally thin: SQLAlchemy reflection-based,
+    no per-row Pydantic validation on writes (the rows are deterministic
+    from list_address). Read paths return `Route` models for typed
+    consumption."""
+
+    def __init__(self, *, engine: Engine, metadata: MetaData) -> None:
+        self._engine = engine
+        self._md = metadata
+
+    def insert_mlmmj_list(
+        self, conn: Connection, list_address: EmailStr
+    ) -> None:
+        """Write the 5 per-list routes rows for an mlmmj mailing list.
+
+        Caller owns the transaction (typical use: inside
+        `MailingListService.add`'s single tx so routes + alias + spool
+        commit atomically). The PRIMARY KEY on `pattern` enforces
+        uniqueness; concurrent inserts for the same list raise
+        `IntegrityError` from the DBAPI."""
+        addr = str(list_address)
+        _, _, domain = addr.rpartition("@")
+        routes = self._md.tables["routes"]
+        rows = [
+            {
+                "pattern": pattern,
+                "transport": transport,
+                "domain": domain,
+                "list_address": addr,
+                "priority": priority,
+                "active": 1,
+            }
+            for pattern, transport, priority in _mlmmj_patterns(addr)
+        ]
+        conn.execute(routes.insert(), rows)
