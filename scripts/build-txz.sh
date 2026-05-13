@@ -52,14 +52,25 @@ install -d "$STAGE/usr/local/etc/postino"
 
 # Build venv with --system-site-packages so it inherits the ports-installed
 # C extensions. pip will not rebuild them since they're already importable.
-/usr/local/bin/python3.11 -m venv --system-site-packages "$STAGE/usr/local/share/postino/venv"
-"$STAGE/usr/local/share/postino/venv/bin/pip" install --upgrade pip setuptools wheel
+VENV="$STAGE/usr/local/share/postino/venv"
+/usr/local/bin/python3.11 -m venv --system-site-packages "$VENV"
+
+# Use venv's python -m pip explicitly so scripts always land in $VENV/bin/,
+# not in the system bin/ (the pip shim can misbehave with --system-site-packages).
+"$VENV/bin/python3.11" -m pip install --upgrade pip setuptools wheel
 
 # Install postino itself. pip resolves deps against system-site-packages
 # FIRST, so any pydantic/bcrypt/cryptography already there are accepted
 # (modulo version constraints). Daemon deps (litestar) are NOT in
 # FreeBSD ports, so pip will fetch them from PyPI as pure-Python wheels.
-"$STAGE/usr/local/share/postino/venv/bin/pip" install --no-cache-dir '.[daemon]'
+"$VENV/bin/python3.11" -m pip install --no-cache-dir '.[daemon]'
+
+# Diagnostics: list what got installed where.
+echo "=== venv bin/ contents ==="
+ls -la "$VENV/bin/"
+echo "=== venv site-packages ==="
+"$VENV/bin/python3.11" -c "import postino; print('postino at:', postino.__file__)"
+"$VENV/bin/python3.11" -c "import postinod; print('postinod at:', postinod.__file__)" || echo "WARNING: postinod not importable in venv"
 
 # Replace absolute shebangs with /usr/local prefix (BSD sed -i needs empty extension).
 find "$STAGE/usr/local/share/postino/venv/bin" -type f -exec \
