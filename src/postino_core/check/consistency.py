@@ -893,7 +893,7 @@ def check_owner_aliases_for_routes(engine: Engine, md: MetaData) -> list[Finding
             select(routes_t.c.list_address).where(routes_t.c.list_address.is_not(None)).distinct()
         ).fetchall()
         for (la,) in list_addrs:
-            la_str = str(la)  # type: ignore[arg-type]  # WHY: SQLAlchemy RowMapping[str, Any] indexing.
+            la_str = str(la)
             localpart, _, domain = la_str.partition("@")
             owner_addr = f"{localpart}-owner@{domain}"
             row = conn.execute(
