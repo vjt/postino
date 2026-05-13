@@ -265,9 +265,7 @@ def test_bounce_routing_invokes_mlmmj_bounce(lists_stack: Path) -> None:
     deadline = time.monotonic() + 15.0
     r = docker_exec(lists_stack, "mta", "ls", "/var/spool/mlmmj/lists.example.org/team/bounce/")
     while time.monotonic() < deadline:
-        r = docker_exec(
-            lists_stack, "mta", "ls", "/var/spool/mlmmj/lists.example.org/team/bounce/"
-        )
+        r = docker_exec(lists_stack, "mta", "ls", "/var/spool/mlmmj/lists.example.org/team/bounce/")
         if r.returncode == 0 and r.stdout.strip():
             break
         time.sleep(0.5)
@@ -403,9 +401,11 @@ def test_shared_domain_list_coexists_with_mailbox(lists_stack: Path) -> None:
     # carol@external.test must receive (list fanned out).
     _wait_for_catcher_message(
         lists_stack,
-        lambda m: m.get("Subject") == "shared-domain list"
-        and any(
-            r.get("Address") == "carol@external.test"
-            for r in cast(list[dict[str, Any]] | None, m.get("Bcc")) or []
+        lambda m: (
+            m.get("Subject") == "shared-domain list"
+            and any(
+                r.get("Address") == "carol@external.test"
+                for r in cast(list[dict[str, Any]] | None, m.get("Bcc")) or []
+            )
         ),
     )
