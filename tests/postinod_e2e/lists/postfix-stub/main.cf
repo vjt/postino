@@ -1,9 +1,13 @@
 myhostname = mta.test.local
 mydomain = test.local
 mydestination =
-virtual_mailbox_domains = lists.example.org
-virtual_transport = mlmmj
-transport_maps = hash:/etc/postfix/transport
-recipient_delimiter = +
+virtual_mailbox_domains = lists.example.org, example.org
+virtual_transport = virtual
+transport_maps =
+    mysql:/etc/postfix/sql-routes.cf,
+    mysql:/etc/postfix/sql-virtual_transport_maps.cf
+recipient_delimiter = +-
 local_recipient_maps =
 maillog_file = /dev/stdout
+virtual_alias_maps = mysql:/etc/postfix/sql-virtual_alias_maps.cf
+virtual_mailbox_maps = mysql:/etc/postfix/sql-virtual_mailbox_maps.cf
