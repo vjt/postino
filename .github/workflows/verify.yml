@@ -50,8 +50,8 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - run: pip install -e '.[dev,daemon]'
-      - name: Install mlmmj
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mlmmj
+      - name: Install mlmmj + manpage build tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mlmmj help2man mandoc
       - name: Wait for MariaDB
         run: |
           for i in $(seq 1 30); do
