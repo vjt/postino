@@ -107,8 +107,10 @@ def run_consistency_check(
     findings.extend(_check_postfix_sql_cfs(settings, engine))
     if settings.mlmmj_spool_dir is not None:
         main_cf = settings.postfix_sql_dir.parent / "main.cf"
+        master_cf = settings.postfix_sql_dir.parent / "master.cf"
         findings.extend(check_postfix_transport_maps(main_cf))
         findings.extend(check_recipient_delimiter(main_cf))
+        findings.extend(check_master_cf_mlmmj_pipes(master_cf))
     if deep:
         findings.extend(_check_deep(settings, engine, metadata))
     return CheckResult(findings=findings)
@@ -821,6 +823,48 @@ def check_postfix_transport_maps(main_cf: Path) -> list[Finding]:
                 message=f"transport_maps OK: {first}, {second}",
             )
         )
+    return findings
+
+
+_REQUIRED_MASTER_CF_PIPES = (
+    "mlmmj-receive",
+    "mlmmj-bounce",
+    "mlmmj-sub",
+    "mlmmj-unsub",
+    "mlmmj-help",
+)
+
+
+def check_master_cf_mlmmj_pipes(master_cf: Path) -> list[Finding]:
+    """Validate master.cf has the 5 v0.10 mlmmj pipe service blocks."""
+    if not master_cf.exists():
+        return [
+            Finding(
+                name="master-cf",
+                severity="error",
+                message=f"master.cf not found at {master_cf}",
+            )
+        ]
+    text = master_cf.read_text()
+    findings: list[Finding] = []
+    for name in _REQUIRED_MASTER_CF_PIPES:
+        # service blocks start with `<name> unix ... pipe`
+        if not any(ln.split() and ln.split()[0] == name for ln in text.splitlines()):
+            findings.append(
+                Finding(
+                    name=f"master-cf-{name}",
+                    severity="error",
+                    message=f"master.cf missing service block: {name}",
+                )
+            )
+        else:
+            findings.append(
+                Finding(
+                    name=f"master-cf-{name}",
+                    severity="info",
+                    message=f"master.cf has {name}",
+                )
+            )
     return findings
 
 
