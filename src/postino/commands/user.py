@@ -49,7 +49,11 @@ def _read_password_from_stdin() -> SecretStr:
     return SecretStr(pw)
 
 
-app = typer.Typer(no_args_is_help=True, add_completion=False)
+app = typer.Typer(
+    no_args_is_help=True,
+    add_completion=False,
+    epilog="Run `postino --help` for global options (--json, --quiet, --no-color).",
+)
 
 
 @app.command("add")

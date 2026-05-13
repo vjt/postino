@@ -11,7 +11,11 @@ from postino.output import Renderer
 from postino_core.enums import MailboxStatus
 from postino_core.errors import MailctlError
 
-app = typer.Typer(no_args_is_help=True, add_completion=False)
+app = typer.Typer(
+    no_args_is_help=True,
+    add_completion=False,
+    epilog="Run `postino --help` for global options (--json, --quiet, --no-color).",
+)
 
 
 @app.command("add")

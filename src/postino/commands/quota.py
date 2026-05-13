@@ -8,7 +8,11 @@ from postino.exit import exit_with_error, get_services
 from postino.output import Renderer
 from postino_core.errors import NotFoundError
 
-app = typer.Typer(no_args_is_help=True, add_completion=False)
+app = typer.Typer(
+    no_args_is_help=True,
+    add_completion=False,
+    epilog="Run `postino --help` for global options (--json, --quiet, --no-color).",
+)
 
 
 @app.command("show")

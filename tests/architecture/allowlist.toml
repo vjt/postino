@@ -114,7 +114,7 @@
 [test_no_str_dispatch]
 [test_no_empty_str_sentinel]
 [test_no_empty_str_sentinel."src/postino/commands/quota.py"]
-15 = "WHY: typer Argument default; CLI cleanup will swap for `username: str | None = None` plus typer.Argument(None)."
+19 = "WHY: typer Argument default; CLI cleanup will swap for `username: str | None = None` plus typer.Argument(None)."
 
 [test_pydantic_strict]
 [test_pydantic_strict."src/postinod/zitadel/models.py"]

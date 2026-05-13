@@ -16,7 +16,11 @@ from postino_core.errors import ConfigError, MailctlError, NotFoundError
 from postino_core.models import MailingListCreate
 from postino_core.services.mailing_list import MailingListService
 
-app = typer.Typer(no_args_is_help=True, add_completion=False)
+app = typer.Typer(
+    no_args_is_help=True,
+    add_completion=False,
+    epilog="Run `postino --help` for global options (--json, --quiet, --no-color).",
+)
 
 
 def _ml_service(ctx: typer.Context) -> MailingListService:

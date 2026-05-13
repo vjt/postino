@@ -12,7 +12,11 @@ from postino_core.enums import DomainTransport, MailboxStatus
 from postino_core.errors import MailctlError
 from postino_core.quota import parse_quota
 
-app = typer.Typer(no_args_is_help=True, add_completion=False)
+app = typer.Typer(
+    no_args_is_help=True,
+    add_completion=False,
+    epilog="Run `postino --help` for global options (--json, --quiet, --no-color).",
+)
 
 
 @app.command("add")
@@ -106,6 +110,7 @@ alias_app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
     help="Manage alias_domain rows",
+    epilog="Run `postino --help` for global options (--json, --quiet, --no-color).",
 )
 app.add_typer(alias_app, name="alias")
 

@@ -37,8 +37,18 @@ app.add_typer(alias_cmd.app, name="alias", help="Alias CRUD.")
 app.add_typer(domain_cmd.app, name="domain", help="Domain CRUD.")
 app.add_typer(list_cmd.app, name="list", help="Mailing-list (mlmmj) CRUD.")
 app.add_typer(quota_cmd.app, name="quota", help="Quota inspection.")
-app.command("check", help="Validate consistency between postino and the mail stack.")(check_cmd.run)
-app.command("status", help="Snapshot of mail stack health.")(status_cmd.run)
+_SUBCMD_EPILOG = "Run `postino --help` for global options (--json, --quiet, --no-color)."
+
+app.command(
+    "check",
+    help="Validate consistency between postino and the mail stack.",
+    epilog=_SUBCMD_EPILOG,
+)(check_cmd.run)
+app.command(
+    "status",
+    help="Snapshot of mail stack health.",
+    epilog=_SUBCMD_EPILOG,
+)(status_cmd.run)
 
 
 def _load_settings() -> PostinoSettings:
