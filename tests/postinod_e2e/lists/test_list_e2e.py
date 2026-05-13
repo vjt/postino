@@ -307,3 +307,47 @@ def test_help_routing_invokes_mlmmj_help(lists_stack: Path) -> None:
         return any(r.get("Address") == "bob@external.test" for r in addr_list)
 
     _wait_for_catcher_message(lists_stack, is_help_reply)
+
+
+def test_owner_alias_rewrites_to_control_owner_addresses(lists_stack: Path) -> None:
+    docker_exec(
+        lists_stack,
+        "agent",
+        "postino",
+        "list",
+        "add",
+        "team@lists.example.org",
+        "--owner",
+        "alice@external.test",
+        "--owner",
+        "bob@external.test",
+    )
+    catcher_reset(lists_stack)
+
+    docker_exec(
+        lists_stack,
+        "mta",
+        "bash",
+        "-c",
+        (
+            "printf 'From: ext@example.com\\nTo: team-owner@lists.example.org\\n"
+            "Subject: ping owner\\n\\nhi owner\\n' "
+            "| sendmail -i -f ext@example.com team-owner@lists.example.org"
+        ),
+    )
+
+    # Both alice@ and bob@ should receive (virtual_alias_maps rewrites
+    # the recipient to both addresses).
+    seen_addrs: set[str] = set()
+    deadline = time.monotonic() + 15.0
+    while time.monotonic() < deadline:
+        for m in catcher_messages(lists_stack):
+            if m.get("Subject") == "ping owner":
+                recipients = cast(list[dict[str, Any]] | None, m.get("To")) or []
+                for recipient in recipients:
+                    addr = cast(str | None, recipient.get("Address")) or ""
+                    seen_addrs.add(addr)
+        if {"alice@external.test", "bob@external.test"} <= seen_addrs:
+            break
+        time.sleep(0.5)
+    assert {"alice@external.test", "bob@external.test"} <= seen_addrs, seen_addrs
