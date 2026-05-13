@@ -167,6 +167,35 @@ export POSTINO_VIRTUAL_MAILBOX_BASE=/srv/mail
 `postfix_sql_dir/sql-virtual_mailbox_maps.cf` to extract `host / user /
 password / dbname`. Single source of truth.
 
+## Scripting
+
+postino is non-interactive-friendly. Recommended pattern for
+automated provisioning:
+
+```sh
+echo "$NEW_PASSWORD" | postino --json --no-color \
+  user add marketing@example.com --password-stdin \
+  --quota 1G --name "Marketing"
+```
+
+Global flags:
+- `--json`  — machine-readable output (stdout) on every command
+- `--quiet` — drop banners and confirmation echoes
+- `--no-color` — strip ANSI; honored automatically when `NO_COLOR`
+  or `CI` is set in the environment
+
+Global flags (`--json`, `--quiet`, `--no-color`) may appear anywhere
+in the command line. `postino user list --json` and
+`postino --json user list` are equivalent.
+
+Password-taking commands (`user add`, `user passwd`) accept
+`--password-stdin` to read one line from stdin in lieu of the TTY
+prompt. The password is not echoed and is consumed only once (no
+confirmation re-read — the script either has it right or doesn't).
+
+Rejected by design: `--password-file PATH` (file footgun),
+`POSTINO_PASSWORD` env var (leaks via `/proc/<pid>/environ`).
+
 ## Identity backends
 
 postino supports three identity-backend modes. Set in `postino.toml`:

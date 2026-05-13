@@ -46,6 +46,55 @@ environment variable (pydantic-settings convention, prefix
 Nested fields use double-underscore as separator
 (e.g. \fBPOSTINO_MLMMJ_SPOOL_DIR\fR).
 
+[SCRIPTING]
+.B postino
+is non-interactive-friendly. Recommended pattern for
+automated provisioning:
+
+.RS
+.nf
+echo "$NEW_PASSWORD" | postino --json --no-color \\
+  user add marketing@example.com --password-stdin \\
+  --quota 1G --name "Marketing"
+.fi
+.RE
+
+.SS Global flags
+.TP
+.B --json
+Machine-readable output (stdout) on every command.
+.TP
+.B --quiet
+Drop banners and confirmation echoes.
+.TP
+.B --no-color
+Strip ANSI; honored automatically when
+.B NO_COLOR
+or
+.B CI
+is set in the environment.
+.PP
+Global flags may appear at any position in the command line.
+.B postino user list --json
+and
+.B postino --json user list
+are equivalent.
+
+.SS Password-stdin
+Password-taking commands (\fBuser add\fR, \fBuser passwd\fR) accept
+.B --password-stdin
+to read one line from stdin in lieu of the TTY prompt. The password
+is not echoed and is consumed only once (no confirmation re-read \(em
+the script either has it right or doesn't).
+.PP
+Rejected by design:
+.B --password-file
+.I PATH
+(file footgun),
+.B POSTINO_PASSWORD
+environment variable (leaks via
+.IR /proc/<pid>/environ ).
+
 [EXIT STATUS]
 .TP
 .B 0
