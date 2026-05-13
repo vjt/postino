@@ -41,20 +41,8 @@ def _wait_for_catcher_message(
 
 
 def test_agent_can_create_list_and_mta_sees_spool(lists_stack: Path) -> None:
-    r = docker_exec(
-        lists_stack,
-        "agent",
-        "postino",
-        "domain",
-        "add",
-        "lists.example.org",
-        "--description",
-        "e2e mlmmj domain",
-        "--transport",
-        "virtual",
-    )
-    assert r.returncode == 0, r.stderr
-
+    # WHY: lists.example.org is pre-seeded by seed.sql (transport=virtual);
+    # no domain add needed.
     r = docker_exec(
         lists_stack,
         "agent",
@@ -67,11 +55,12 @@ def test_agent_can_create_list_and_mta_sees_spool(lists_stack: Path) -> None:
     )
     assert r.returncode == 0, r.stderr
 
+    # v0.10 two-level layout: <spool>/<domain>/<localpart>/
     r = docker_exec(
         lists_stack,
         "mta",
         "ls",
-        "/var/spool/mlmmj/team@lists.example.org/control/owner",
+        "/var/spool/mlmmj/lists.example.org/team/control/owner",
     )
     assert r.returncode == 0, r.stderr
 
@@ -89,12 +78,12 @@ def test_agent_can_subscribe_external_address(lists_stack: Path) -> None:
     assert r.returncode == 0, r.stderr
 
     # mlmmj-sub fans subscribers out into subscribers.d/<first-letter>/
-    # — assert the bucket dir exists.
+    # — assert the bucket dir exists.  v0.10 two-level: <spool>/<domain>/<localpart>/
     r = docker_exec(
         lists_stack,
         "mta",
         "ls",
-        "/var/spool/mlmmj/team@lists.example.org/subscribers.d/b",
+        "/var/spool/mlmmj/lists.example.org/team/subscribers.d/b",
     )
     assert r.returncode == 0, r.stderr
 
@@ -171,12 +160,13 @@ def test_agent_can_remove_list_and_spool_vanishes_for_mta(lists_stack: Path) -> 
     assert r.returncode == 0, r.stderr
 
     # Spool dir must be gone from the mta's view (shared volume).
+    # v0.10 two-level: <spool>/<domain>/<localpart>/ must not exist.
     r = docker_exec(
         lists_stack,
         "mta",
         "test",
         "!",
         "-e",
-        "/var/spool/mlmmj/team@lists.example.org",
+        "/var/spool/mlmmj/lists.example.org/team",
     )
     assert r.returncode == 0, r.stderr
