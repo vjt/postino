@@ -61,7 +61,7 @@ dev = [
 ]
 
 [project.scripts]
-postino = "postino.cli:app"
+postino = "postino.__main__:main"
 postinod = "postinod.__main__:main"
 
 [project.urls]
