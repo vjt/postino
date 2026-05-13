@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Annotated
 
 import typer
@@ -27,6 +28,27 @@ def _prompt_new_password(label: str = "Password") -> SecretStr:
     return SecretStr(pw)
 
 
+def _read_password_from_stdin() -> SecretStr:
+    """Read one line from stdin; refuse if stdin is a TTY or empty.
+
+    Used by ``--password-stdin``: enables scripted provisioning and
+    rotation. Refuses interactive stdin because the keystrokes would
+    echo to the terminal (no ``hide_input`` wrapper), and an empty
+    line is treated as user error rather than silently provisioning a
+    blank password.
+    """
+    if sys.stdin.isatty():
+        raise ConfigError(
+            "refusing to read password from interactive stdin; "
+            "drop --password-stdin or pipe the password in"
+        )
+    line = sys.stdin.readline()
+    pw = line.rstrip("\n")
+    if not pw:
+        raise ConfigError("empty password on stdin")
+    return SecretStr(pw)
+
+
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
 
@@ -43,12 +65,22 @@ def add(
         PasswordScheme,
         typer.Option("--scheme", help="Hash scheme."),
     ] = PasswordScheme.BCRYPT,
+    password_stdin: Annotated[
+        bool,
+        typer.Option(
+            "--password-stdin",
+            help="Read password from stdin (one line). Refuses TTY input.",
+        ),
+    ] = False,
 ) -> None:
     """Create a mailbox.
 
-    Prompts for the password twice. The password is never accepted on
-    the command line: it would appear in shell history, the process
-    tree, and CI logs.
+    By default prompts for the password twice. Pass ``--password-stdin``
+    to read one line from stdin (for scripting / config-management
+    drivers); the flag refuses an interactive TTY so a typo cannot end
+    up echoed to the terminal. The password is never accepted on the
+    command line: it would appear in shell history, the process tree,
+    and CI logs.
 
     Refuses to run under ``identity_backend = "noauth"``: in that mode
     the external IdP owns provisioning (postinod / IdP admin UI), and
@@ -62,7 +94,7 @@ def add(
                 "identity_backend=noauth: provision mailboxes via the external IdP, "
                 "not `postino user add`"
             )
-        password = _prompt_new_password()
+        password = _read_password_from_stdin() if password_stdin else _prompt_new_password()
         m = s.mailbox.add(
             MailboxCreate(
                 username=username,
