@@ -441,38 +441,44 @@ class MlmmjAdapter:
         )
 
     def list_all(self, *, domain: str | None = None) -> list[MailingList]:
-        """Scan ``spool_root`` for list dirs, optionally filtered by FQDN.
+        """Scan ``spool_root`` for list dirs under the v0.10 two-level
+        layout ``<spool>/<domain>/<localpart>/``. Filter by FQDN when
+        ``domain`` is set.
 
-        A directory counts as a list if it contains ``control/owner``."""
+        A directory counts as a list if it contains ``control/owner``.
+        Dot-prefixed entries at any level are skipped (``.deleting.*``
+        rename graveyards, ``.create.lock``)."""
         if not self._spool_root.exists():
             return []
         out: list[MailingList] = []
-        for child in sorted(self._spool_root.iterdir()):
-            if not child.is_dir():
+        domain_iter: list[Path] = (
+            [self._spool_root / domain]
+            if domain is not None
+            else sorted(self._spool_root.iterdir())
+        )
+        for dom_dir in domain_iter:
+            if not dom_dir.exists() or not dom_dir.is_dir():
                 continue
-            # Skip dot-prefixed sentinels: ``.deleting.*`` rename graveyard
-            # from a partial delete, ``.create.lock`` directory if ever
-            # created in error. The consistency checker handles surfacing
-            # these to the operator.
-            if child.name.startswith("."):
+            if dom_dir.name.startswith("."):
                 continue
-            if not (child / "control" / "owner").exists():
-                continue
-            address = child.name
-            if domain is not None:
-                _, _, fqdn = address.partition("@")
-                if fqdn != domain:
+            for list_dir in sorted(dom_dir.iterdir()):
+                if not list_dir.is_dir():
                     continue
-            owners = self._read_owners(child)
-            subscribers = self._read_subscribers(child)
-            out.append(
-                MailingList(
-                    address=address,
-                    owners=owners,
-                    subscriber_count=len(subscribers),
-                    spool_dir=child,
+                if list_dir.name.startswith("."):
+                    continue
+                if not (list_dir / "control" / "owner").exists():
+                    continue
+                address = f"{list_dir.name}@{dom_dir.name}"
+                owners = self._read_owners(list_dir)
+                subscribers = self._read_subscribers(list_dir)
+                out.append(
+                    MailingList(
+                        address=address,
+                        owners=owners,
+                        subscriber_count=len(subscribers),
+                        spool_dir=list_dir,
+                    )
                 )
-            )
         return out
 
     def _read_owners(self, listdir: Path) -> list[str]:

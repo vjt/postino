@@ -193,7 +193,7 @@ def test_listdir_rejects_path_traversal(tmp_path: Path) -> None:
     a = _adapter(tmp_path)
     with pytest.raises(FilesystemError):
         # Pydantic EmailStr would normally block this; adapter must defend itself too.
-        a._listdir("../escape@x.org")  # type: ignore[arg-type]  # WHY: testing the guard against a value that bypassed EmailStr validation
+        a._listdir("../escape@x.org")  # pyright: ignore[reportPrivateUsage]  # WHY: direct _listdir access from test bypasses pyright's private-method enforcement.
 
 
 def test_exists_returns_true_when_listdir_present(tmp_path: Path) -> None:
@@ -328,10 +328,6 @@ def test_get_raises_mlmmj_error_when_mlmmj_list_fails(tmp_path: Path) -> None:
             a.get(address="team@lists.example.org")
 
 
-@pytest.mark.xfail(
-    reason="list_all still uses flat spool walk; Task 11 rewrites it for two-level layout",
-    strict=True,
-)
 def test_list_all_scans_spool_root(tmp_path: Path) -> None:
     _seed_list(tmp_path, "team@lists.example.org", ["alice@example.org"])
     _seed_list(tmp_path, "ops@lists.example.org", ["carol@example.org"])
@@ -345,10 +341,6 @@ def test_list_all_scans_spool_root(tmp_path: Path) -> None:
     assert addrs == ["ops@lists.example.org", "team@lists.example.org"]
 
 
-@pytest.mark.xfail(
-    reason="list_all still uses flat spool walk; Task 11 rewrites it for two-level layout",
-    strict=True,
-)
 def test_list_all_filters_by_domain(tmp_path: Path) -> None:
     _seed_list(tmp_path, "team@lists.example.org", ["alice@example.org"])
     _seed_list(tmp_path, "ops@lists.other.org", ["carol@example.org"])
@@ -358,6 +350,39 @@ def test_list_all_filters_by_domain(tmp_path: Path) -> None:
         result = a.list_all(domain="lists.example.org")
     addrs = [ml.address for ml in result]
     assert addrs == ["team@lists.example.org"]
+
+
+def test_list_all_walks_two_level_layout(tmp_path: Path) -> None:
+    # Manually lay out: <spool>/lists.example.org/team/control/owner
+    #                   <spool>/example.org/soci/control/owner
+    (tmp_path / "lists.example.org" / "team" / "control").mkdir(parents=True)
+    (tmp_path / "lists.example.org" / "team" / "control" / "owner").write_text(
+        "alice@example.org\n"
+    )
+    (tmp_path / "example.org" / "soci" / "control").mkdir(parents=True)
+    (tmp_path / "example.org" / "soci" / "control" / "owner").write_text("bob@example.org\n")
+    # Use a stub for mlmmj-list binary; patch _read_subscribers to return []
+    adapter = MlmmjAdapter(spool_root=tmp_path, mlmmj_uid=-1, mlmmj_gid=-1)
+    adapter._read_subscribers = lambda listdir: []  # pyright: ignore[reportPrivateUsage]  # WHY: monkeypatching private method in test to avoid subprocess invocation.
+
+    all_lists = adapter.list_all()
+    addrs = {ml.address for ml in all_lists}
+    assert addrs == {"team@lists.example.org", "soci@example.org"}
+
+    filtered = adapter.list_all(domain="lists.example.org")
+    assert {ml.address for ml in filtered} == {"team@lists.example.org"}
+
+
+def test_list_all_skips_deleting_sentinels(tmp_path: Path) -> None:
+    (tmp_path / "lists.example.org" / "team" / "control").mkdir(parents=True)
+    (tmp_path / "lists.example.org" / "team" / "control" / "owner").write_text("a@b.c\n")
+    (tmp_path / ".deleting.x").mkdir()
+    (tmp_path / "lists.example.org" / ".deleting.y" / "control").mkdir(parents=True)
+    (tmp_path / "lists.example.org" / ".deleting.y" / "control" / "owner").write_text("a@b.c\n")
+    adapter = MlmmjAdapter(spool_root=tmp_path, mlmmj_uid=-1, mlmmj_gid=-1)
+    adapter._read_subscribers = lambda listdir: []  # pyright: ignore[reportPrivateUsage]  # WHY: monkeypatching private method in test to avoid subprocess invocation.
+    addrs = {ml.address for ml in adapter.list_all()}
+    assert addrs == {"team@lists.example.org"}
 
 
 # ---------------------------------------------------------------------------
@@ -371,21 +396,21 @@ def test_listdir_composes_domain_localpart(tmp_path: Path) -> None:
         mlmmj_uid=-1,
         mlmmj_gid=-1,
     )
-    p = adapter._listdir("team@lists.example.org")  # type: ignore[arg-type]  # WHY: testing internal method with a plain str that bypassed EmailStr validation
+    p = adapter._listdir("team@lists.example.org")  # pyright: ignore[reportPrivateUsage]  # WHY: direct _listdir access from test bypasses pyright's private-method enforcement.
     assert p == tmp_path / "lists.example.org" / "team"
 
 
 def test_listdir_rejects_traversal_in_domain(tmp_path: Path) -> None:
     adapter = MlmmjAdapter(spool_root=tmp_path, mlmmj_uid=-1, mlmmj_gid=-1)
     with pytest.raises(FilesystemError):
-        adapter._listdir("team@../escape.example.org")  # type: ignore[arg-type]  # WHY: testing traversal guard against a value that bypassed EmailStr validation
+        adapter._listdir("team@../escape.example.org")  # pyright: ignore[reportPrivateUsage]  # WHY: direct _listdir access from test bypasses pyright's private-method enforcement.
 
 
 def test_listdir_rejects_traversal_in_localpart(tmp_path: Path) -> None:
     adapter = MlmmjAdapter(spool_root=tmp_path, mlmmj_uid=-1, mlmmj_gid=-1)
     with pytest.raises(FilesystemError):
         # /  in local-part — split would create a third path component.
-        adapter._listdir("te/am@lists.example.org")  # type: ignore[arg-type]  # WHY: testing traversal guard against a value that bypassed EmailStr validation
+        adapter._listdir("te/am@lists.example.org")  # pyright: ignore[reportPrivateUsage]  # WHY: direct _listdir access from test bypasses pyright's private-method enforcement.
 
 
 def test_listdir_rejects_symlink_at_domain_level(tmp_path: Path) -> None:
@@ -394,7 +419,7 @@ def test_listdir_rejects_symlink_at_domain_level(tmp_path: Path) -> None:
     real.mkdir()
     (tmp_path / "lists.example.org").symlink_to(real)
     with pytest.raises(FilesystemError):
-        adapter._listdir("team@lists.example.org")  # type: ignore[arg-type]  # WHY: testing symlink guard against a value that bypassed EmailStr validation
+        adapter._listdir("team@lists.example.org")  # pyright: ignore[reportPrivateUsage]  # WHY: direct _listdir access from test bypasses pyright's private-method enforcement.
 
 
 def test_listdir_rejects_symlink_at_localpart_level(tmp_path: Path) -> None:
@@ -404,4 +429,4 @@ def test_listdir_rejects_symlink_at_localpart_level(tmp_path: Path) -> None:
     real.mkdir()
     (tmp_path / "lists.example.org" / "team").symlink_to(real)
     with pytest.raises(FilesystemError):
-        adapter._listdir("team@lists.example.org")  # type: ignore[arg-type]  # WHY: testing symlink guard against a value that bypassed EmailStr validation
+        adapter._listdir("team@lists.example.org")  # pyright: ignore[reportPrivateUsage]  # WHY: direct _listdir access from test bypasses pyright's private-method enforcement.
