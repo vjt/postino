@@ -147,30 +147,30 @@ jobs:
           name: deb-${{ matrix.dist }}-${{ matrix.arch }}
           path: dist/*.deb
 
-  txz:
+  pkg:
     needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build .txz inside FreeBSD VM
+      - name: Build .pkg inside FreeBSD VM
         uses: vmactions/freebsd-vm@v1
         with:
           release: "14.2"
           usesh: true
           run: |
             ./scripts/build-txz.sh
-            # Smoke-install the produced .txz to verify the artefact is sane.
-            pkg add dist/il-postino-*.txz
+            # Smoke-install the produced .pkg to verify the artefact is sane.
+            pkg add dist/il-postino-*.pkg
             postino --version
             test -x /usr/local/bin/postinod
             test -f /usr/local/etc/rc.d/postinod
       - uses: actions/upload-artifact@v4
         with:
-          name: txz-freebsd14-amd64
-          path: dist/*.txz
+          name: pkg-freebsd14-amd64
+          path: dist/*.pkg
 
   github-release:
-    needs: [verify, deb, txz, changelog, manpages-check]
+    needs: [verify, deb, pkg, changelog, manpages-check]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -183,7 +183,7 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -name '*.deb' -exec mv {} release/ \;
-          find artifacts -name '*.txz' -exec mv {} release/ \;
+          find artifacts -name '*.pkg' -exec mv {} release/ \;
           ls -la release/
       - name: Create GitHub Release
         env:

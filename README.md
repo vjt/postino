@@ -114,7 +114,7 @@ curl -fLo /tmp/il-postino.deb "$url"
 sudo apt install -y /tmp/il-postino.deb
 ```
 
-### FreeBSD (.txz)
+### FreeBSD (.pkg)
 
 FreeBSD 14, amd64. Brings `pkg`-installed `py311-pydantic`,
 `py311-bcrypt`, `py311-cryptography` etc. as runtime deps so the venv
@@ -122,10 +122,10 @@ doesn't carry duplicate C extensions. Ships an `rc(8)` script disabled
 by default; enable with `postinod_enable=YES` in `/etc/rc.conf`.
 
 ```sh
-v=0.8.2
-fetch -o /tmp/il-postino.txz \
-  "https://github.com/vjt/postino/releases/download/v${v}/il-postino-${v}.txz"
-sudo pkg add /tmp/il-postino.txz
+v=0.8.6
+fetch -o /tmp/il-postino.pkg \
+  "https://github.com/vjt/postino/releases/download/v${v}/il-postino-${v}.pkg"
+sudo pkg add /tmp/il-postino.pkg
 ```
 
 ## Configuration

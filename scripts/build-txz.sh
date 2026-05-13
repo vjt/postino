@@ -95,8 +95,8 @@ install -m 0644 pkg/postino.toml.sample "$STAGE/usr/local/etc/postino/postino.to
 # Manifest with version substituted.
 sed "s/@VERSION@/$VERSION/" pkg/manifest.json.in > "$WORK/manifest.json"
 
-# Build the .txz.
-pkg create -f txz -M "$WORK/manifest.json" -r "$STAGE" -o "$DIST"
+# Build the package (FreeBSD 14 default = .pkg / zstd).
+pkg create -M "$WORK/manifest.json" -r "$STAGE" -o "$DIST"
 
 echo "Built:"
-ls -la "$DIST"/*.txz
+ls -la "$DIST"/il-postino-*.pkg

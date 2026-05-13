@@ -1,8 +1,12 @@
 #!/usr/bin/make -f
 export DH_VIRTUALENV_INSTALL_ROOT=/usr/share
 
+# Use the dh-virtualenv addon (inserts dh_virtualenv into the normal dh
+# sequence) rather than the python-virtualenv addon (which REPLACES the
+# sequence and excludes dh_installsystemd / dh_installman runtime install
+# of debian/<pkg>.<unit>.service + debian/<pkg>.manpages).
 %:
-	dh $@ --with python-virtualenv
+	dh $@ --with dh-virtualenv
 
 override_dh_virtualenv:
 	dh_virtualenv \
