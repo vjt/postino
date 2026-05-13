@@ -15,6 +15,7 @@ from sqlalchemy.dialects.sqlite import BOOLEAN, SMALLINT
 from sqlalchemy.engine import Engine
 
 from postino_core.errors import AlreadyExistsError
+from postino_core.repos.routes import RoutesRepository
 from postino_core.services.mailing_list import MailingListService
 
 
@@ -82,6 +83,7 @@ def _service(md: MetaData, adapter: MagicMock) -> tuple[MailingListService, Engi
         engine=engine,
         metadata=md,
         adapter=adapter,  # type: ignore[arg-type]  # WHY: MagicMock satisfies the MlmmjAdapter protocol for these unit tests
+        routes=RoutesRepository(engine=engine, metadata=md),
         clock=lambda: datetime(2026, 1, 1),
     )
     return svc, engine

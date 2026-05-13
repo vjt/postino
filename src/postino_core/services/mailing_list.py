@@ -31,6 +31,7 @@ from postino_core.errors import (
     NotFoundError,
 )
 from postino_core.models import MailingList, MailingListCreate
+from postino_core.repos.routes import RoutesRepository
 
 _logger = logging.getLogger(__name__)
 
@@ -42,12 +43,14 @@ class MailingListService:
         engine: Engine,
         metadata: MetaData,
         adapter: MlmmjAdapter,
+        routes: RoutesRepository,
         clock: Callable[[], datetime],
         audit_writer: AuditWriter | None = None,
     ) -> None:
         self._engine = engine
         self._md = metadata
         self._adapter = adapter
+        self._routes = routes
         self._clock = clock
         self._audit: AuditWriter = audit_writer or DefaultAuditWriter(
             metadata=metadata, clock=clock
@@ -65,8 +68,10 @@ class MailingListService:
         try:
             with translate_db_errors(), self._engine.begin() as conn:
                 self._validate_no_collision(conn, str(create.address))
-                # Spool tree is created INSIDE the tx so DB uniqueness
-                # and FS creation share the same serialisation point.
+                # DB writes first; if the adapter raises, the tx rolls back
+                # and compensation below deletes any partial spool tree.
+                self._routes.insert_mlmmj_list(conn, create.address)
+                self._write_owner_alias(conn, str(create.address), list(create.owners))
                 self._adapter.create(address=create.address, primary_owner=create.owners[0])
                 for owner in create.owners[1:]:
                     self._adapter.append_owner(address=create.address, owner=owner)

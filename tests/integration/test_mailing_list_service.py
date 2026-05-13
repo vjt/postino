@@ -15,6 +15,7 @@ from postino_core.enums import DomainTransport
 from postino_core.errors import AlreadyExistsError, CapacityError, NotFoundError
 from postino_core.fs import FilesystemAdapter
 from postino_core.models import MailingListCreate
+from postino_core.repos.routes import RoutesRepository
 from postino_core.services.domain import DomainService
 from postino_core.services.mailing_list import MailingListService
 
@@ -65,6 +66,7 @@ def _service(db: Engine, frozen_clock: datetime, spool: Path) -> MailingListServ
         engine=db,
         metadata=md,
         adapter=adapter,
+        routes=RoutesRepository(engine=db, metadata=md),
         clock=lambda: frozen_clock,
     )
 
@@ -85,7 +87,7 @@ def test_add_creates_list_and_writes_audit(
     )
     assert ml.address == "team@lists.example.org"
     assert ml.owners == ["alice@example.org"]
-    assert (spool / "team@lists.example.org" / "control" / "owner").exists()
+    assert (spool / "lists.example.org" / "team" / "control" / "owner").exists()
 
     md = MetaData()
     md.reflect(bind=db)
@@ -171,7 +173,7 @@ def test_add_multi_owner_writes_all_owners(
         )
     )
     assert sorted(ml.owners) == ["alice@example.org", "bob@example.org", "carol@example.org"]
-    contents = (spool / "team@lists.example.org" / "control" / "owner").read_text().splitlines()
+    contents = (spool / "lists.example.org" / "team" / "control" / "owner").read_text().splitlines()
     assert sorted(contents) == ["alice@example.org", "bob@example.org", "carol@example.org"]
 
 
@@ -197,7 +199,7 @@ def test_add_compensating_cleanup_removes_spool_on_owner_append_failure(
                 owners=["alice@example.org", "bob@example.org"],
             )
         )
-    assert not (spool / "team@lists.example.org").exists()
+    assert not (spool / "lists.example.org" / "team").exists()
 
 
 def test_subscribe_unsubscribe_round_trip(
@@ -249,7 +251,7 @@ def test_delete_refuses_non_empty_without_force(
     svc.subscribe(address="team@lists.example.org", email="bob@example.org")
     with pytest.raises(CapacityError):
         svc.delete("team@lists.example.org")
-    assert (spool / "team@lists.example.org").exists()
+    assert (spool / "lists.example.org" / "team").exists()
 
 
 def test_delete_with_force_removes_non_empty_list(
@@ -262,7 +264,7 @@ def test_delete_with_force_removes_non_empty_list(
     svc.add(MailingListCreate(address="team@lists.example.org", owners=["alice@example.org"]))
     svc.subscribe(address="team@lists.example.org", email="bob@example.org")
     svc.delete("team@lists.example.org", force=True)
-    assert not (spool / "team@lists.example.org").exists()
+    assert not (spool / "lists.example.org" / "team").exists()
 
 
 def test_delete_raises_not_found_for_unknown_list(
