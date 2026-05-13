@@ -114,16 +114,12 @@ curl -fLo /tmp/il-postino.deb "$url"
 sudo apt install -y /tmp/il-postino.deb
 ```
 
-### FreeBSD (.txz)
+### FreeBSD
 
-FreeBSD 14, amd64. Ships an `rc(8)` script disabled by default; enable with `postinod_enable=YES` in `/etc/rc.conf`.
-
-```sh
-v=0.8.0
-fetch -o /tmp/il-postino.txz \
-  "https://github.com/vjt/postino/releases/download/v${v}/il-postino-${v}.txz"
-sudo pkg add /tmp/il-postino.txz
-```
+`pip install il-postino` is the supported path on FreeBSD. A native
+`.txz` is on the v0.9 roadmap — `pkg create` blocked on maturin's
+SOABI detection for `pydantic-core` (see `docs/superpowers/specs/`
+or the README § FreeBSD notes for the pip-cached-wheels workaround).
 
 ## Configuration
 

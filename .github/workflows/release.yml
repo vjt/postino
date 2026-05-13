@@ -20,16 +20,30 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     outputs:
-      body: ${{ steps.cliff.outputs.content }}
+      body: ${{ steps.cliff.outputs.body }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0   # git-cliff needs full history
+      - name: Install git-cliff
+        run: |
+          v=2.6.1
+          arch=$(uname -m)
+          case "$arch" in
+            x86_64) tarball="git-cliff-${v}-x86_64-unknown-linux-gnu.tar.gz" ;;
+            aarch64) tarball="git-cliff-${v}-aarch64-unknown-linux-gnu.tar.gz" ;;
+            *) echo "unsupported arch $arch" >&2; exit 1 ;;
+          esac
+          curl -fsSL "https://github.com/orhun/git-cliff/releases/download/v${v}/${tarball}" | \
+            sudo tar -xz -C /usr/local/bin --strip-components=1 --wildcards '*/git-cliff'
+          git-cliff --version
       - id: cliff
-        uses: orhun/git-cliff-action@v3
-        with:
-          config: cliff.toml
-          args: --latest --strip header
+        run: |
+          {
+            echo 'body<<CLIFF_EOF'
+            git-cliff --config cliff.toml --latest --strip header
+            echo 'CLIFF_EOF'
+          } >> "$GITHUB_OUTPUT"
 
   manpages-check:
     needs: verify
@@ -128,31 +142,14 @@ jobs:
           name: deb-${{ matrix.dist }}-${{ matrix.arch }}
           path: dist/*.deb
 
-  txz:
-    needs: verify
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build .txz inside FreeBSD VM
-        uses: vmactions/freebsd-vm@v1
-        with:
-          release: "14.2"
-          usesh: true
-          prepare: |
-            pkg install -y python311 py311-pip py311-virtualenv mlmmj git
-          run: |
-            ./scripts/build-txz.sh
-            pkg add dist/il-postino-*.txz
-            postino --version
-            test -x /usr/local/bin/postinod
-            test -f /usr/local/etc/rc.d/postinod
-      - uses: actions/upload-artifact@v4
-        with:
-          name: txz-freebsd14-amd64
-          path: dist/*.txz
+  # FreeBSD .txz disabled in v0.8.1: maturin on FreeBSD fails SOABI
+  # platform detection ("Unsupported platform: 311") when pip rebuilds
+  # pydantic-core. Needs either pkg install py311-pydantic with
+  # --system-site-packages venv, or a rust toolchain + maturin pin.
+  # Defer to v0.9 with a dedicated FreeBSD build path.
 
   github-release:
-    needs: [verify, deb, txz, changelog, manpages-check]
+    needs: [verify, deb, changelog, manpages-check]
     runs-on: ubuntu-latest
     permissions:
       contents: write
