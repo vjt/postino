@@ -217,6 +217,15 @@ def test_delete_removes_spool_dir(tmp_path: Path) -> None:
     assert not listdir.exists()
 
 
+def test_create_lays_down_two_level_tree(tmp_path: Path) -> None:
+    """create() must produce <spool>/<domain>/<localpart> — two-level path."""
+    adapter = _adapter(tmp_path)
+    adapter.create(address="team@lists.example.org", primary_owner="alice@example.org")
+    base = tmp_path / "lists.example.org" / "team"
+    assert (base / "incoming").is_dir()
+    assert (base / "control" / "owner").read_text() == "alice@example.org\n"
+
+
 def test_delete_raises_not_found_if_missing(tmp_path: Path) -> None:
     a = _adapter(tmp_path)
     with pytest.raises(NotFoundError):
