@@ -65,9 +65,7 @@ def test_subcommand_help_has_epilog(
     result = runner.invoke(app, [subcommand, "--help"], env=env)
     assert result.exit_code == 0, result.output
     plain = _plain(result.output)
-    assert "--json" in plain, (
-        f"{subcommand} --help missing --json reference; got:\n{result.output}"
-    )
+    assert "--json" in plain, f"{subcommand} --help missing --json reference; got:\n{result.output}"
     assert "global options" in plain.lower() or "postino --help" in plain, (
         f"{subcommand} --help missing global-flags pointer; got:\n{result.output}"
     )
