@@ -217,3 +217,60 @@ def test_agent_can_remove_list_and_spool_vanishes_for_mta(lists_stack: Path) -> 
         "/var/spool/mlmmj/lists.example.org/team",
     )
     assert r.returncode == 0, r.stderr
+
+
+def test_bounce_routing_invokes_mlmmj_bounce(lists_stack: Path) -> None:
+    """Inject a DSN to team-bounces@... and assert mlmmj-bounce wrote a
+    bounce file under the list spool."""
+    docker_exec(
+        lists_stack,
+        "agent",
+        "postino",
+        "list",
+        "add",
+        "team@lists.example.org",
+        "--owner",
+        "alice@example.org",
+    )
+    docker_exec(
+        lists_stack,
+        "agent",
+        "postino",
+        "list",
+        "sub",
+        "team@lists.example.org",
+        "dead@external.test",
+    )
+
+    # Inject a synthetic DSN body addressed to team-bounces@...
+    inject = docker_exec(
+        lists_stack,
+        "mta",
+        "bash",
+        "-c",
+        (
+            "printf '%s\\n' "
+            "'From: MAILER-DAEMON@external.test' "
+            "'To: team-bounces@lists.example.org' "
+            "'Subject: Undelivered Mail Returned to Sender' "
+            "'Content-Type: multipart/report; report-type=delivery-status; boundary=B' "
+            "'' '--B' '' 'Action: failed' "
+            "'Final-Recipient: rfc822;dead@external.test' '' '--B--' "
+            "| sendmail -i -f MAILER-DAEMON@external.test team-bounces@lists.example.org"
+        ),
+    )
+    assert inject.returncode == 0, inject.stderr
+
+    # mlmmj-bounce writes <listdir>/bounce/<encoded-addr>; poll for the file.
+    deadline = time.monotonic() + 15.0
+    r = docker_exec(lists_stack, "mta", "ls", "/var/spool/mlmmj/lists.example.org/team/bounce/")
+    while time.monotonic() < deadline:
+        r = docker_exec(
+            lists_stack, "mta", "ls", "/var/spool/mlmmj/lists.example.org/team/bounce/"
+        )
+        if r.returncode == 0 and r.stdout.strip():
+            break
+        time.sleep(0.5)
+    assert r.returncode == 0 and r.stdout.strip(), (
+        f"no bounce file in <listdir>/bounce/: {r.stdout!r} stderr={r.stderr!r}"
+    )
