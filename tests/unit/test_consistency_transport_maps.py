@@ -17,8 +17,7 @@ def test_check_warns_when_transport_maps_missing_routes_source(tmp_path: Path) -
     source pointing at the routes table, check returns an error finding."""
     main_cf = tmp_path / "main.cf"
     main_cf.write_text(
-        "myhostname = test\n"
-        "transport_maps = mysql:/etc/postfix/sql-virtual_transport.cf\n"
+        "myhostname = test\ntransport_maps = mysql:/etc/postfix/sql-virtual_transport.cf\n"
     )
     findings = check_postfix_transport_maps(main_cf)
     severities = {f.severity for f in findings}
@@ -59,9 +58,7 @@ def test_check_errors_when_transport_maps_not_set(tmp_path: Path) -> None:
 def test_check_errors_when_fewer_than_two_sources(tmp_path: Path) -> None:
     """transport_maps with only one source → error."""
     main_cf = tmp_path / "main.cf"
-    main_cf.write_text(
-        "transport_maps = mysql:/etc/postfix/sql-routes.cf\n"
-    )
+    main_cf.write_text("transport_maps = mysql:/etc/postfix/sql-routes.cf\n")
     findings = check_postfix_transport_maps(main_cf)
     assert len(findings) >= 1
     assert any(f.severity == "error" for f in findings)
@@ -82,8 +79,6 @@ def test_check_errors_when_routes_not_first(tmp_path: Path) -> None:
 def test_check_errors_when_sources_not_mysql(tmp_path: Path) -> None:
     """transport_maps using non-mysql:// sources → error."""
     main_cf = tmp_path / "main.cf"
-    main_cf.write_text(
-        "transport_maps = hash:/etc/postfix/routes, hash:/etc/postfix/transport\n"
-    )
+    main_cf.write_text("transport_maps = hash:/etc/postfix/routes, hash:/etc/postfix/transport\n")
     findings = check_postfix_transport_maps(main_cf)
     assert any(f.severity == "error" for f in findings)

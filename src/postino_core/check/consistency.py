@@ -108,6 +108,7 @@ def run_consistency_check(
     if settings.mlmmj_spool_dir is not None:
         main_cf = settings.postfix_sql_dir.parent / "main.cf"
         findings.extend(check_postfix_transport_maps(main_cf))
+        findings.extend(check_recipient_delimiter(main_cf))
     if deep:
         findings.extend(_check_deep(settings, engine, metadata))
     return CheckResult(findings=findings)
@@ -821,3 +822,47 @@ def check_postfix_transport_maps(main_cf: Path) -> list[Finding]:
             )
         )
     return findings
+
+
+def check_recipient_delimiter(main_cf: Path) -> list[Finding]:
+    """v0.10 needs recipient_delimiter to contain both `+` (mailbox
+    subaddressing) and `-` (mlmmj hyphen-suffix dispatch)."""
+    if not main_cf.exists():
+        return []
+    text = main_cf.read_text()
+    line = next(
+        (
+            ln.split("=", 1)[1].strip()
+            for ln in text.splitlines()
+            if ln.strip().startswith("recipient_delimiter")
+        ),
+        None,
+    )
+    if line is None:
+        return [
+            Finding(
+                name="recipient-delimiter",
+                severity="error",
+                message=(
+                    "main.cf: recipient_delimiter is not set; v0.10 requires "
+                    "recipient_delimiter = +-"
+                ),
+            )
+        ]
+    if "+" not in line or "-" not in line:
+        return [
+            Finding(
+                name="recipient-delimiter",
+                severity="error",
+                message=(
+                    f"main.cf: recipient_delimiter must contain both '+' and '-'; got {line!r}"
+                ),
+            )
+        ]
+    return [
+        Finding(
+            name="recipient-delimiter",
+            severity="info",
+            message=f"recipient_delimiter OK: {line}",
+        )
+    ]
