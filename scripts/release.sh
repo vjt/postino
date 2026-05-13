@@ -12,10 +12,12 @@ case "$v" in
   ''|*[!0-9a-z.-]*) echo "usage: $0 <X.Y.Z[-rc.N]>" >&2; exit 1 ;;
 esac
 
-# 0. Working tree must be clean (apart from untracked specs/plans).
-if [ -n "$(git status --porcelain | grep -v '^?? docs/superpowers/')" ]; then
-  echo "ERROR: working tree has uncommitted changes; commit or stash first" >&2
-  git status --short
+# 0. No staged or unstaged changes to tracked files. Untracked files
+#    (specs/plans, .claude/, ad-hoc review dumps) are ignored — they are
+#    operator scratch space and never end up in the release commit.
+if [ -n "$(git status --porcelain | grep -v '^??')" ]; then
+  echo "ERROR: working tree has uncommitted tracked changes; commit or stash first" >&2
+  git status --short | grep -v '^??'
   exit 1
 fi
 
