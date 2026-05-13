@@ -4,6 +4,10 @@ All notable changes to `il-postino` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and is generated automatically by [git-cliff](https://git-cliff.org) from
 commit subjects on every tag.
+## [0.8.1] — 2026-05-13
+
+### CI
+- Fix deb smoke + replace broken changelog action; drop txz to v0.9
 ## [0.8.0] — 2026-05-13
 
 ### CI
@@ -14,6 +18,9 @@ commit subjects on every tag.
 - Upload coverage to Codecov via OIDC
 - Extend release.yml with changelog, manpages, deb, txz, gh-release
 - Relax release.sh precondition to ignore all untracked files
+- Drop arm64 from deb matrix; v0.8.0 startup_failure root cause
+- Grant verify job-call id-token + contents permissions
+- Install help2man + mandoc in verify test job
 
 ### Docs
 - Add postinod(8) manpage template and rendering
@@ -31,6 +38,9 @@ commit subjects on every tag.
 - Add Debian packaging skeleton with dh-virtualenv *(`deb`)*
 - Add scripts/build-deb.sh local Docker-based builder *(`deb`)*
 - Add FreeBSD pkg-create skeleton and build-txz.sh *(`txz`)*
+
+### Release
+- 0.8.0
 
 ### Tests
 - Guard manpage drift and lint cleanliness *(`architecture`)*
