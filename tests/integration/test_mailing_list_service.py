@@ -12,7 +12,7 @@ from sqlalchemy.engine import Engine
 
 from postino_core.adapters.mlmmj import MlmmjAdapter
 from postino_core.enums import DomainTransport
-from postino_core.errors import AlreadyExistsError, CapacityError, ConfigError, NotFoundError
+from postino_core.errors import AlreadyExistsError, CapacityError, NotFoundError
 from postino_core.fs import FilesystemAdapter
 from postino_core.models import MailingListCreate
 from postino_core.services.domain import DomainService
@@ -97,9 +97,10 @@ def test_add_creates_list_and_writes_audit(
     assert row is not None
 
 
-def test_add_rejects_when_domain_transport_not_mlmmj(
+def test_add_succeeds_on_virtual_transport_domain(
     db: Engine, frozen_clock: datetime, tmp_path: Path
 ) -> None:
+    """Lists no longer require transport='mlmmj'; virtual domains are accepted."""
     spool = tmp_path / "spool"
     spool.mkdir()
     md = MetaData()
@@ -121,8 +122,8 @@ def test_add_rejects_when_domain_transport_not_mlmmj(
         backupmx=False,
     )
     svc = _service(db, frozen_clock, spool)
-    with pytest.raises(ConfigError):
-        svc.add(MailingListCreate(address="team@lists.example.org", owners=["alice@example.org"]))
+    ml = svc.add(MailingListCreate(address="team@lists.example.org", owners=["alice@example.org"]))
+    assert ml.address == "team@lists.example.org"
 
 
 def test_add_rejects_collision_with_mailbox(

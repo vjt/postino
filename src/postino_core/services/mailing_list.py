@@ -24,7 +24,6 @@ from sqlalchemy.engine import Connection, Engine
 from postino_core.adapters.mlmmj import MlmmjAdapter
 from postino_core.audit import AuditWriter, DefaultAuditWriter, mk_action, sanitize_audit_error
 from postino_core.db import translate_db_errors
-from postino_core.enums import DomainTransport
 from postino_core.errors import (
     AlreadyExistsError,
     CapacityError,
@@ -59,24 +58,15 @@ class MailingListService:
 
         Returns: the freshly-read MailingList.
         Raises:
-            ConfigError: domain transport != 'mlmmj' or domain absent.
             AlreadyExistsError: address collides with mailbox/alias/list.
             MlmmjError, FilesystemError: from the adapter.
         """
         _, _, domain = str(create.address).partition("@")
-        # Lock the domain row FOR UPDATE before validation + spool
-        # create so a concurrent `postino domain del --force` blocks
-        # here and cannot vanish the domain mid-create (A3-A2). The
-        # lock spans the adapter.create call so spool tree creation
-        # and DB validation share the same serialisation point.
         try:
             with translate_db_errors(), self._engine.begin() as conn:
-                self._validate_domain_is_mlmmj(conn, domain, lock=True)
                 self._validate_no_collision(conn, str(create.address))
-                # Spool tree is created INSIDE the locked tx so a
-                # concurrent `domain del --force` is serialised behind
-                # the domain row lock and cannot vanish the routing
-                # row while the spool is being laid down (A3-A2).
+                # Spool tree is created INSIDE the tx so DB uniqueness
+                # and FS creation share the same serialisation point.
                 self._adapter.create(address=create.address, primary_owner=create.owners[0])
                 for owner in create.owners[1:]:
                     self._adapter.append_owner(address=create.address, owner=owner)
@@ -209,23 +199,6 @@ class MailingListService:
     def list_all(self, *, domain: str | None = None) -> list[MailingList]:
         """List all mlmmj lists, optionally filtered by FQDN."""
         return self._adapter.list_all(domain=domain)
-
-    def _validate_domain_is_mlmmj(
-        self, conn: Connection, domain: str, *, lock: bool = False
-    ) -> None:
-        d = self._md.tables["domain"]
-        stmt = select(d.c.transport).where(d.c.domain == domain)
-        if lock:
-            stmt = stmt.with_for_update()
-        row = conn.execute(stmt).fetchone()
-        if row is None:
-            raise ConfigError(f"domain {domain!r} does not exist")
-        if str(row[0]) != DomainTransport.MLMMJ.value:
-            raise ConfigError(
-                f"domain {domain!r} has transport={row[0]!r}, "
-                f"expected {DomainTransport.MLMMJ.value!r}. "
-                f"Run `postino domain add` with --transport mlmmj first."
-            )
 
     def _validate_no_collision(self, conn: Connection, address: str) -> None:
         mailbox = self._md.tables["mailbox"]
