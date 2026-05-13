@@ -1,15 +1,20 @@
 #!/usr/bin/make -f
 export DH_VIRTUALENV_INSTALL_ROOT=/usr/share
+export DH_VERBOSE=1
 
-# Skip the python-virtualenv addon: on bookworm/trixie it ships a custom
-# build/binary sequence that silently drops dh_installman and excludes
-# dh_installsystemd, dh_installtmpfiles, etc. We use the default dh
-# sequence and call dh_virtualenv from override_dh_auto_install so
-# dh_installman + dh_installsystemd run normally on the standard helpers.
+# dh-virtualenv 1.2.x on bookworm/trixie only ships python-virtualenv.
+# We've observed:
+# - With --with python-virtualenv: dh_installman runs but doesn't actually
+#   stage manpages from debian/<pkg>.manpages, and dh_installsystemd only
+#   runs if a .service file is pre-staged in debian/<pkg>/lib/systemd/.
+# - With bare dh $@: dh_installsystemd is silently absent from the binary
+#   sequence and dh_installman still doesn't stage manpages.
+# Work around BOTH by manually staging the systemd unit and manpages from
+# execute_after_dh_virtualenv. Diagnostic ls afterwards confirms staging.
 %:
-	dh $@
+	dh $@ --with python-virtualenv
 
-override_dh_auto_install:
+override_dh_virtualenv:
 	dh_virtualenv \
 	  --python /usr/bin/python3 \
 	  --install-suffix postino/venv \
@@ -18,9 +23,15 @@ override_dh_auto_install:
 	  --extra-pip-arg --no-cache-dir \
 	  --extra-pip-arg --upgrade-strategy=only-if-needed
 
-# Bundled venv ships its own ELFs; the default dh_strip/dh_shlibdeps/dh_dwz
-# helpers don't have anything useful to do on .so files inside the venv
-# and slow the build down.
-override_dh_strip:
-override_dh_shlibdeps:
-override_dh_dwz:
+execute_after_dh_virtualenv:
+	@echo "=== execute_after_dh_virtualenv: pre-stage ==="
+	ls -la man/postino.1 man/postinod.8
+	install -d debian/il-postino/lib/systemd/system
+	install -m 0644 debian/il-postino.postinod.service \
+	  debian/il-postino/lib/systemd/system/postinod.service
+	install -d debian/il-postino/usr/share/man/man1
+	install -d debian/il-postino/usr/share/man/man8
+	install -m 0644 man/postino.1  debian/il-postino/usr/share/man/man1/postino.1
+	install -m 0644 man/postinod.8 debian/il-postino/usr/share/man/man8/postinod.8
+	@echo "=== execute_after_dh_virtualenv: staged files ==="
+	find debian/il-postino/usr/share/man debian/il-postino/lib/systemd -type f

@@ -132,6 +132,8 @@ jobs:
         run: |
           set -x
           apt-get install -y --no-install-recommends mlmmj adduser
+          echo "=== dpkg-deb -c (contents of built deb) ==="
+          dpkg-deb -c ./dist/il-postino_*_${{ matrix.dist }}_${{ matrix.arch }}.deb | grep -E "man/|systemd/" || true
           apt-get install -y --no-install-recommends ./dist/il-postino_*_${{ matrix.dist }}_${{ matrix.arch }}.deb
           ls -la /usr/bin/postino* || true
           ls -la /lib/systemd/system/postino* || true
