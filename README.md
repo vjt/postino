@@ -106,7 +106,7 @@ git pull
 Bookworm and trixie, amd64 and arm64. The whole CPython venv is bundled in `/usr/share/postino/venv` — no `pip` runs at install time.
 
 ```sh
-v=0.8.0
+v=0.9.0
 arch=$(dpkg --print-architecture)         # amd64 or arm64
 codename=$(lsb_release -cs)               # bookworm or trixie
 url="https://github.com/vjt/postino/releases/download/v${v}/il-postino_${v}-1_${codename}_${arch}.deb"
@@ -122,7 +122,7 @@ doesn't carry duplicate C extensions. Ships an `rc(8)` script disabled
 by default; enable with `postinod_enable=YES` in `/etc/rc.conf`.
 
 ```sh
-v=0.8.10
+v=0.9.0
 fetch -o /tmp/il-postino.pkg \
   "https://github.com/vjt/postino/releases/download/v${v}/il-postino-${v}.pkg"
 sudo pkg add /tmp/il-postino.pkg

@@ -191,6 +191,30 @@ Shipped surface:
 Specs:
 - `docs/superpowers/specs/2026-05-12-postino-v0.8-packaging-design.md`
 
+## v0.9 — scripting ergonomics + config errors (shipped 2026-05-13)
+
+- **`--password-stdin`** on `user add` and `user passwd` — pipe-in
+  the password (one line) instead of TTY prompt; refuses interactive
+  stdin and empty input.
+- **`--quiet` and `--no-color` global flags** — `--no-color` honors
+  `NO_COLOR` and `CI` env vars; threaded through Renderer +
+  `exit_with_error` + `postino check`. `--quiet` plumbed (no-op
+  today; reserved for future banner-emitting commands).
+- **Position-flexible globals** — `--json`, `--quiet`, `--no-color`
+  may appear at any position in the command line (argv pre-shuffle
+  in `__main__.main`, before Typer parses).
+- **Subcommand `--help` epilog footers** — every sub-Typer (`user`,
+  `alias`, `domain`, `list`, `quota`, `check`, `status`) points
+  operators at `postino --help` for global options.
+- **Config-error file:line reporting** — `postino`-as-script gets
+  pydantic ValidationErrors rewritten as
+  `postino.toml:7: default_quota_bytes: ... (got "1gb")` instead of
+  the bare pydantic field-error string. Backed by `tomlkit`
+  source-position lookup in `postino_core.config_errors`.
+
+Specs:
+- `docs/superpowers/specs/2026-05-13-postino-scripting-ergonomics.md`
+
 ## Production hardening (anytime)
 
 - Docker image — official runtime container, FROM python:3.13-slim
