@@ -351,3 +351,61 @@ def test_owner_alias_rewrites_to_control_owner_addresses(lists_stack: Path) -> N
             break
         time.sleep(0.5)
     assert {"alice@external.test", "bob@external.test"} <= seen_addrs, seen_addrs
+
+
+def test_shared_domain_list_coexists_with_mailbox(lists_stack: Path) -> None:
+    """On `example.org` (PA transport=virtual), `alice@` is a regular
+    mailbox AND `soci@` is an mlmmj list. Mail to alice@ delivers via
+    LMTP; mail to soci@ fans out via mlmmj. Both paths work without
+    interference."""
+    # Pre-seeded: example.org domain row exists, transport='virtual'.
+    # WHY: docker_exec has no input_text kwarg; pipe the password via bash -c.
+    docker_exec(
+        lists_stack,
+        "agent",
+        "bash",
+        "-c",
+        "printf 'ALICEpwd12345\\n' | postino user add alice@example.org --password-stdin",
+    )
+    docker_exec(
+        lists_stack,
+        "agent",
+        "postino",
+        "list",
+        "add",
+        "soci@example.org",
+        "--owner",
+        "alice@example.org",
+    )
+    docker_exec(
+        lists_stack,
+        "agent",
+        "postino",
+        "list",
+        "sub",
+        "soci@example.org",
+        "carol@external.test",
+    )
+
+    catcher_reset(lists_stack)
+    # Send to the list.
+    docker_exec(
+        lists_stack,
+        "mta",
+        "bash",
+        "-c",
+        (
+            "printf 'From: ext@example.com\\nTo: soci@example.org\\n"
+            "Subject: shared-domain list\\n\\nhello\\n' "
+            "| sendmail -i -f ext@example.com soci@example.org"
+        ),
+    )
+    # carol@external.test must receive (list fanned out).
+    _wait_for_catcher_message(
+        lists_stack,
+        lambda m: m.get("Subject") == "shared-domain list"
+        and any(
+            r.get("Address") == "carol@external.test"
+            for r in cast(list[dict[str, Any]] | None, m.get("Bcc")) or []
+        ),
+    )
