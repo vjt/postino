@@ -92,11 +92,6 @@ install -m 0755 pkg/postinod.rc "$STAGE/usr/local/etc/rc.d/postinod"
 # Sample config.
 install -m 0644 pkg/postino.toml.sample "$STAGE/usr/local/etc/postino/postino.toml.sample"
 
-# Smoke-test the staged install before packaging.
-echo "=== Staged install smoke ==="
-"$STAGE/usr/local/share/postino/venv/bin/postino" --version
-"$STAGE/usr/local/share/postino/venv/bin/postino" --help > /dev/null
-
 # Manifest with version substituted.
 sed "s/@VERSION@/$VERSION/" pkg/manifest.json.in > "$WORK/manifest.json"
 

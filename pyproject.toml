@@ -61,6 +61,7 @@ dev = [
 
 [project.scripts]
 postino = "postino.cli:app"
+postinod = "postinod.__main__:main"
 
 [project.urls]
 Homepage = "https://github.com/vjt/postino"
