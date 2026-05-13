@@ -230,15 +230,29 @@ class MailingListService:
     def _validate_no_collision(self, conn: Connection, address: str) -> None:
         mailbox = self._md.tables["mailbox"]
         alias = self._md.tables["alias"]
+        routes = self._md.tables["routes"]
+        localpart, _, domain = address.partition("@")
+        owner_alias_addr = f"{localpart}-owner@{domain}"
         if (
             conn.execute(select(mailbox.c.username).where(mailbox.c.username == address)).fetchone()
             is not None
         ):
             raise AlreadyExistsError(f"mailbox row already exists for {address!r}")
         if (
-            conn.execute(select(alias.c.address).where(alias.c.address == address)).fetchone()
+            conn.execute(
+                select(alias.c.address).where(alias.c.address.in_([address, owner_alias_addr]))
+            ).fetchone()
             is not None
         ):
-            raise AlreadyExistsError(f"alias row already exists for {address!r}")
-        if self._adapter.exists(address=address):  # type: ignore[arg-type]  # WHY: adapter accepts EmailStr; address is a validated str at the boundary
+            raise AlreadyExistsError(
+                f"alias row already exists for {address!r} or {owner_alias_addr!r}"
+            )
+        if (
+            conn.execute(
+                select(routes.c.list_address).where(routes.c.list_address == address)
+            ).fetchone()
+            is not None
+        ):
+            raise AlreadyExistsError(f"routes row already exists for list {address!r}")
+        if self._adapter.exists(address=address):
             raise AlreadyExistsError(f"mailing list {address!r} already exists")
