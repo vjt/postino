@@ -111,6 +111,7 @@ def run_consistency_check(
         findings.extend(check_postfix_transport_maps(main_cf))
         findings.extend(check_recipient_delimiter(main_cf))
         findings.extend(check_master_cf_mlmmj_pipes(master_cf))
+        findings.extend(check_owner_aliases_for_routes(engine, metadata))
     if deep:
         findings.extend(_check_deep(settings, engine, metadata))
     return CheckResult(findings=findings)
@@ -865,6 +866,58 @@ def check_master_cf_mlmmj_pipes(master_cf: Path) -> list[Finding]:
                     message=f"master.cf has {name}",
                 )
             )
+    return findings
+
+
+def check_owner_aliases_for_routes(engine: Engine, md: MetaData) -> list[Finding]:
+    """For every distinct list_address in routes, confirm a matching
+    ``<localpart>-owner@<domain>`` alias row exists in the alias table.
+
+    A mailing list without an ``-owner`` alias means bounce messages and
+    owner-directed mail (e.g. ``list-owner@domain``) have no delivery target.
+    This surfaces as severity=error so the operator can create the alias
+    before going live.
+
+    Returns a single info finding when the routes table is empty or all
+    lists have their -owner alias.
+    """
+    routes_t = md.tables.get("routes")
+    alias_t = md.tables.get("alias")
+    if routes_t is None or alias_t is None:
+        return [
+            _err("owner-aliases", "routes or alias table missing — cannot verify -owner aliases")
+        ]
+    findings: list[Finding] = []
+    with engine.connect() as conn:
+        list_addrs = conn.execute(
+            select(routes_t.c.list_address).where(routes_t.c.list_address.is_not(None)).distinct()
+        ).fetchall()
+        for (la,) in list_addrs:
+            la_str = str(la)  # type: ignore[arg-type]  # WHY: SQLAlchemy RowMapping[str, Any] indexing.
+            localpart, _, domain = la_str.partition("@")
+            owner_addr = f"{localpart}-owner@{domain}"
+            row = conn.execute(
+                select(alias_t.c.address).where(alias_t.c.address == owner_addr)
+            ).fetchone()
+            if row is None:
+                findings.append(
+                    Finding(
+                        name=f"owner-alias-{la_str}",
+                        severity="error",
+                        message=(
+                            f"missing -owner alias row for list {la_str}; "
+                            f"expected alias.address={owner_addr!r}"
+                        ),
+                    )
+                )
+    if not findings:
+        findings.append(
+            Finding(
+                name="owner-aliases",
+                severity="info",
+                message="all routes have matching -owner aliases",
+            )
+        )
     return findings
 
 

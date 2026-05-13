@@ -18,6 +18,7 @@ from sqlalchemy.engine import Engine
 from postino_core.check.consistency import (
     CheckResult,
     Finding,
+    check_owner_aliases_for_routes,
     run_consistency_check,
 )
 from postino_core.config import PostinoSettings
@@ -381,6 +382,70 @@ def test_check_accepts_alias_domain_cfs_when_present_and_matching(
     for filename in _ALIAS_DOMAIN_CFS:
         f = _by_name(result, f"postfix_sql_cf:{filename}")
         assert f.severity == "info", f.model_dump()
+
+
+# ---------- owner alias checks ----------
+
+
+def _seed_route(db: Engine, *, list_address: str, domain: str) -> None:
+    """Insert a single routes row with the mlmmj-receive transport."""
+    md = MetaData()
+    md.reflect(bind=db)
+    with db.begin() as conn:
+        conn.execute(
+            md.tables["routes"]
+            .insert()
+            .values(
+                pattern=f"{list_address.split('@')[0]}@{domain}",
+                transport="mlmmj-receive:",
+                domain=domain,
+                list_address=list_address,
+                priority=50,
+                active=1,
+            )
+        )
+
+
+@pytest.mark.integration
+def test_check_flags_missing_owner_alias_for_route(db: Engine) -> None:
+    """routes row present but no matching -owner alias → error finding."""
+    md = MetaData()
+    md.reflect(bind=db)
+    # Insert a routes row without a matching -owner alias.
+    _seed_route(db, list_address="announce@lists.example.org", domain="lists.example.org")
+    findings = check_owner_aliases_for_routes(db, md)
+    assert any("missing -owner alias" in f.message for f in findings), findings
+
+
+@pytest.mark.integration
+def test_check_passes_when_owner_alias_present(db: Engine) -> None:
+    """routes row + matching -owner alias → info-only findings."""
+    md = MetaData()
+    md.reflect(bind=db)
+    _seed_route(db, list_address="announce@lists.example.org", domain="lists.example.org")
+    _seed_alias(
+        db,
+        address="announce-owner@lists.example.org",
+        goto="admin@lists.example.org",
+        domain="lists.example.org",
+    )
+    findings = check_owner_aliases_for_routes(db, md)
+    assert all(f.severity == "info" for f in findings), findings
+
+
+@pytest.mark.integration
+def test_check_owner_aliases_no_routes_returns_info(db: Engine) -> None:
+    """Empty routes table → single info finding (nothing to check)."""
+    md = MetaData()
+    md.reflect(bind=db)
+    findings = check_owner_aliases_for_routes(db, md)
+    assert findings == [
+        Finding(
+            name="owner-aliases",
+            severity="info",
+            message="all routes have matching -owner aliases",
+        )
+    ]
 
 
 def test_check_rejects_alias_domain_cfs_when_creds_mismatch(
