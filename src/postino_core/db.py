@@ -26,6 +26,7 @@ _REQUIRED_TABLES: tuple[str, ...] = (
     "domain_admins",
     "quota2",
     "log",
+    "routes",
 )
 
 
