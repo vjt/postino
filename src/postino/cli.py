@@ -49,26 +49,27 @@ def _load_settings() -> PostinoSettings:
     try:
         return PostinoSettings()  # type: ignore[call-arg]  # WHY: pydantic-settings raises ValidationError for missing fields; pyright thinks PostinoSettings() is missing args. Captured in PR-A6 cleanup.
     except ValidationError as e:
-        from postino_core.config import (
-            _config_toml_paths,  # pyright: ignore[reportPrivateUsage]  # WHY: TOML-path discovery for error attribution lives here; the CLI is the only caller that needs the same list pydantic-settings consumed, so duplicating the precedence logic would drift. Module-private by convention, not by intent.
-        )
+        from postino_core.config import config_toml_paths
         from postino_core.config_errors import (
             format_validation_error,
             load_toml_with_origin,
         )
 
-        # Missing-required: keep the existing "set POSTINO_DB_URL …"
-        # message; users with no TOML at all want that pointer.
+        # Missing-required with no TOML at all: point operators at the
+        # simplest "make it work" path (one env var) rather than dumping
+        # raw pydantic errors. Once any TOML exists, fall through to
+        # format_validation_error so the message names file:line:key.
         missing = [err for err in e.errors() if err["type"] == "missing"]
-        if missing and not _config_toml_paths()[0].is_file():
+        if missing and not any(p.is_file() for p in config_toml_paths()):
             raise ConfigError(
-                "config not found: set POSTINO_DB_URL=mysql+pymysql://...\n"
+                "config not found: set POSTINO_IDENTITY_BACKEND=local "
+                "(or another POSTINO_* env var)\n"
                 "  or write /usr/local/etc/postino/postino.toml or "
                 "~/.config/postino/postino.toml.\n"
                 f"  missing fields: {', '.join(str(err['loc'][0]) for err in missing)}"
             ) from e
 
-        sources = load_toml_with_origin(list(_config_toml_paths()))
+        sources = load_toml_with_origin(list(config_toml_paths()))
         raise ConfigError(format_validation_error(e, sources)) from e
 
 

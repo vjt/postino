@@ -38,7 +38,7 @@ _USER_TOML = Path.home() / ".config" / "postino" / "postino.toml"
 _POSTINO_CONFIG_ENV = "POSTINO_CONFIG"
 
 
-def _config_toml_paths() -> tuple[Path, ...]:
+def config_toml_paths() -> tuple[Path, ...]:
     """Return TOML paths in precedence order (first wins).
 
     Highest first: ``$POSTINO_CONFIG`` (if set) → user override
@@ -164,7 +164,7 @@ class PostinoSettings(BaseSettings):
         # honoured here instead of the production discovery defaults.
         toml_files = settings_cls.model_config.get("toml_file")
         if toml_files is None:
-            paths: tuple[Path, ...] = _config_toml_paths()
+            paths: tuple[Path, ...] = config_toml_paths()
         else:
             # pydantic-settings' own TomlConfigSettingsSource reads a
             # toml_file=[a, b] list in order with later paths overriding

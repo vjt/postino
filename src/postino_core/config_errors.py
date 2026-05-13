@@ -24,15 +24,12 @@ _MAX_ERRORS = 5
 def _quote(value: object) -> str:
     """Render a config value back to a TOML-ish literal for error messages.
 
-    Strings get double-quoted (matches the TOML source the operator
-    is staring at), everything else falls back to ``repr``. Python's
-    ``repr`` prefers single quotes for strings, which doesn't match
-    the file content the error is pointing at — confusing, especially
-    when grepping the message back to the line in the TOML.
+    JSON output matches the TOML source the operator is staring at
+    (double-quoted strings, lowercase ``true``/``false``/``null``,
+    plain numbers, bracketed lists) better than Python's ``repr``
+    would. Non-JSON-native types fall back to ``repr`` via ``default``.
     """
-    if isinstance(value, str):
-        return json.dumps(value)
-    return repr(value)
+    return json.dumps(value, default=repr)
 
 
 def load_toml_with_origin(paths: list[Path]) -> list[tuple[Path, dict[str, object]]]:
