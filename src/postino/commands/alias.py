@@ -6,7 +6,7 @@ from typing import Annotated
 
 import typer
 
-from postino.exit import exit_with_error, get_services, is_json
+from postino.exit import exit_with_error, get_services
 from postino.output import Renderer
 from postino_core.enums import MailboxStatus
 from postino_core.errors import MailctlError
@@ -18,7 +18,7 @@ app = typer.Typer(no_args_is_help=True, add_completion=False)
 def add(ctx: typer.Context, address: str, goto: str) -> None:
     try:
         a = get_services(ctx).alias.add(address=address, goto=goto)
-        Renderer(json=is_json(ctx)).render(a)
+        Renderer.from_ctx(ctx).render(a)
     except MailctlError as e:
         exit_with_error(e)
 
@@ -43,7 +43,7 @@ def list_(
     domain: Annotated[str, typer.Option("--domain")] = "",
 ) -> None:
     items = get_services(ctx).alias.list(domain=domain or None)
-    Renderer(json=is_json(ctx)).render(items)
+    Renderer.from_ctx(ctx).render(items)
 
 
 @app.command("enable")

@@ -18,7 +18,7 @@ runner = CliRunner()
 def _ctx(mailing_list_svc: object) -> dict[str, object]:
     services = MagicMock()
     services.mailing_list = mailing_list_svc
-    return {"services": services, "json": False}
+    return {"services": services, "json": False, "quiet": False, "no_color": False}
 
 
 def _make_app(svc: object) -> typer.Typer:

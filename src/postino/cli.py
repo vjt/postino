@@ -6,6 +6,7 @@ code. Anything else propagates to Rich's traceback handler and exits 99."""
 from __future__ import annotations
 
 import getpass
+import os
 from datetime import UTC, datetime
 
 import typer
@@ -97,6 +98,8 @@ def _version_callback(value: bool) -> None:
 def _entry(  # pyright: ignore[reportUnusedFunction]
     ctx: typer.Context,
     json: bool = typer.Option(False, "--json", help="Output JSON."),
+    quiet: bool = typer.Option(False, "--quiet", help="Suppress banners; data still printed."),
+    no_color: bool = typer.Option(False, "--no-color", help="Disable ANSI colors."),
     _version: bool = typer.Option(
         False,
         "--version",
@@ -106,6 +109,12 @@ def _entry(  # pyright: ignore[reportUnusedFunction]
     ),
 ) -> None:
     install_traceback(show_locals=False)
+    # NO_COLOR is the de-facto standard (no-color.org); CI=true is a
+    # widely-adopted CI-runner convention. Either one disables color even
+    # without the explicit flag.
+    no_color_effective = (
+        no_color or bool(os.environ.get("NO_COLOR")) or os.environ.get("CI", "").lower() == "true"
+    )
     try:
         settings = _load_settings()
         services = build_services(
@@ -114,7 +123,12 @@ def _entry(  # pyright: ignore[reportUnusedFunction]
             echo=False,
             actor=_cli_actor,
         )
-        state: CliState = {"services": services, "json": json}
+        state: CliState = {
+            "services": services,
+            "json": json,
+            "quiet": quiet,
+            "no_color": no_color_effective,
+        }
         ctx.obj = state
     except MailctlError as e:
         exit_with_error(e)

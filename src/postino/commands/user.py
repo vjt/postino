@@ -8,7 +8,7 @@ from typing import Annotated
 import typer
 from pydantic import SecretStr
 
-from postino.exit import exit_with_error, get_services, is_json
+from postino.exit import exit_with_error, get_services
 from postino.output import Renderer
 from postino_core.enums import MailboxStatus, PasswordScheme
 from postino_core.errors import ConfigError, MailctlError, NotFoundError
@@ -104,7 +104,7 @@ def add(
                 scheme=scheme,
             )
         )
-        Renderer(json=is_json(ctx)).render(m)
+        Renderer.from_ctx(ctx).render(m)
     except MailctlError as e:
         exit_with_error(e)
 
@@ -137,7 +137,7 @@ def list_(
         domain=domain or None,
         include_disabled=include_disabled,
     )
-    Renderer(json=is_json(ctx)).render(items)
+    Renderer.from_ctx(ctx).render(items)
 
 
 @app.command("show")
@@ -147,7 +147,7 @@ def show(ctx: typer.Context, username: str) -> None:
         m = get_services(ctx).mailbox.get(username)
         if m is None:
             raise NotFoundError(f"mailbox {username} does not exist")
-        Renderer(json=is_json(ctx)).render(m)
+        Renderer.from_ctx(ctx).render(m)
     except MailctlError as e:
         exit_with_error(e)
 
@@ -271,6 +271,6 @@ def quota_cmd(
         m = s.mailbox.get(username)
         if m is None:
             raise NotFoundError(f"mailbox {username} does not exist")
-        Renderer(json=is_json(ctx)).render(m)
+        Renderer.from_ctx(ctx).render(m)
     except MailctlError as e:
         exit_with_error(e)

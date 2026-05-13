@@ -6,7 +6,7 @@ from typing import Annotated
 
 import typer
 
-from postino.exit import exit_with_error, get_services, is_json
+from postino.exit import exit_with_error, get_services
 from postino.output import Renderer
 from postino_core.enums import DomainTransport, MailboxStatus
 from postino_core.errors import MailctlError
@@ -42,7 +42,7 @@ def add(
             transport=transport,
             backupmx=backupmx,
         )
-        Renderer(json=is_json(ctx)).render(d)
+        Renderer.from_ctx(ctx).render(d)
     except MailctlError as e:
         exit_with_error(e)
 
@@ -81,7 +81,7 @@ def delete(
 @app.command("list")
 def list_(ctx: typer.Context) -> None:
     items = get_services(ctx).domain.list()
-    Renderer(json=is_json(ctx)).render(items)
+    Renderer.from_ctx(ctx).render(items)
 
 
 @app.command("enable")
@@ -119,7 +119,7 @@ def alias_add(
     """Map alias_domain -> target."""
     try:
         row = get_services(ctx).alias_domain.add(alias_domain, target=target)
-        Renderer(json=is_json(ctx)).render(row)
+        Renderer.from_ctx(ctx).render(row)
     except MailctlError as e:
         exit_with_error(e)
 
@@ -134,14 +134,14 @@ def alias_list(
         target=target or None,
         include_disabled=include_disabled,
     )
-    Renderer(json=is_json(ctx)).render(rows)
+    Renderer.from_ctx(ctx).render(rows)
 
 
 @alias_app.command("show")
 def alias_show(ctx: typer.Context, alias_domain: str) -> None:
     try:
         row = get_services(ctx).alias_domain.get(alias_domain)
-        Renderer(json=is_json(ctx)).render(row)
+        Renderer.from_ctx(ctx).render(row)
     except MailctlError as e:
         exit_with_error(e)
 
@@ -187,6 +187,6 @@ def alias_retarget(
     """Repoint alias_domain to a new target."""
     try:
         row = get_services(ctx).alias_domain.retarget(alias_domain, target=target)
-        Renderer(json=is_json(ctx)).render(row)
+        Renderer.from_ctx(ctx).render(row)
     except MailctlError as e:
         exit_with_error(e)

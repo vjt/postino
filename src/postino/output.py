@@ -10,16 +10,59 @@ from __future__ import annotations
 import json
 import sys
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 from rich.console import Console
 from rich.table import Table
 
+if TYPE_CHECKING:
+    import typer
+
 
 class Renderer:
-    def __init__(self, *, json: bool, console: Console | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        json: bool,
+        quiet: bool = False,
+        no_color: bool = False,
+        console: Console | None = None,
+    ) -> None:
         self._json = json
-        self._console = console if console is not None else Console()
+        self._quiet = quiet
+        self._no_color = no_color
+        if console is not None:
+            self._console = console
+        else:
+            # color_system=None disables ALL ANSI emission (including bold/
+            # reset codes). Rich's no_color=True only suppresses foreground
+            # colors — the bold-header markup in our tables would still
+            # leak \x1b[1m/\x1b[0m into piped output, defeating the flag's
+            # purpose. color_system=None is the right hammer here.
+            self._console = Console(
+                color_system=None if no_color else "auto",
+                no_color=no_color,
+            )
+
+    @classmethod
+    def from_ctx(cls, ctx: typer.Context) -> Renderer:
+        """Build a Renderer reading json/quiet/no_color from CliState.
+
+        Sweep target: replaces ``Renderer(json=is_json(ctx))`` at command
+        sites so the three flags arrive at the renderer without three
+        ``is_X(ctx)`` calls at every callsite.
+        """
+        # Local import to avoid an output.py → typer/exit.py runtime cycle
+        # (output.py is otherwise typer-free; TYPE_CHECKING import handles
+        # the ctx type annotation).
+        from postino.exit import is_json, is_no_color, is_quiet
+
+        return cls(
+            json=is_json(ctx),
+            quiet=is_quiet(ctx),
+            no_color=is_no_color(ctx),
+        )
 
     def render(self, payload: BaseModel | Sequence[BaseModel]) -> None:
         if self._json:

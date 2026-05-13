@@ -10,7 +10,7 @@ from typing import Annotated
 
 import typer
 
-from postino.exit import exit_with_error, get_services, is_json
+from postino.exit import exit_with_error, get_services
 from postino.output import Renderer
 from postino_core.errors import ConfigError, MailctlError, NotFoundError
 from postino_core.models import MailingListCreate
@@ -43,7 +43,7 @@ def add(
         raise typer.BadParameter("at least one --owner is required")
     try:
         ml = _ml_service(ctx).add(MailingListCreate(address=address, owners=owners))
-        Renderer(json=is_json(ctx)).render(ml)
+        Renderer.from_ctx(ctx).render(ml)
     except MailctlError as e:
         exit_with_error(e)
 
@@ -78,7 +78,7 @@ def show(ctx: typer.Context, address: str) -> None:
         ml = _ml_service(ctx).get(address)  # type: ignore[arg-type]  # WHY: EmailStr at boundary
         if ml is None:
             raise NotFoundError(f"mailing list {address!r} does not exist")
-        Renderer(json=is_json(ctx)).render(ml)
+        Renderer.from_ctx(ctx).render(ml)
     except MailctlError as e:
         exit_with_error(e)
 
@@ -90,7 +90,7 @@ def ls(
 ) -> None:
     try:
         items = _ml_service(ctx).list_all(domain=domain)
-        Renderer(json=is_json(ctx)).render(items)
+        Renderer.from_ctx(ctx).render(items)
     except MailctlError as e:
         exit_with_error(e)
 

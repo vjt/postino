@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typer
 
-from postino.exit import exit_with_error, get_services, is_json
+from postino.exit import exit_with_error, get_services
 from postino.output import Renderer
 from postino_core.errors import NotFoundError
 
@@ -18,7 +18,7 @@ def show(ctx: typer.Context, username: str = "") -> None:
         u = get_services(ctx).quota.show(username)
         if u is None:
             exit_with_error(NotFoundError(f"no quota row for {username}"))
-        Renderer(json=is_json(ctx)).render(u)
+        Renderer.from_ctx(ctx).render(u)
     else:
         items = get_services(ctx).quota.list()
-        Renderer(json=is_json(ctx)).render(items)
+        Renderer.from_ctx(ctx).render(items)

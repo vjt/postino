@@ -36,6 +36,8 @@ class CliState(TypedDict):
 
     services: ServicesBundle
     json: bool
+    quiet: bool
+    no_color: bool
 
 
 _EXIT_CODES: dict[type[MailctlError], int] = {
@@ -78,3 +80,13 @@ def get_services(ctx: typer.Context) -> ServicesBundle:
 def is_json(ctx: typer.Context) -> bool:
     """Whether ``--json`` was passed."""
     return get_state(ctx)["json"]
+
+
+def is_quiet(ctx: typer.Context) -> bool:
+    """Whether ``--quiet`` was passed."""
+    return get_state(ctx)["quiet"]
+
+
+def is_no_color(ctx: typer.Context) -> bool:
+    """Whether color output is disabled (via ``--no-color`` or NO_COLOR/CI env)."""
+    return get_state(ctx)["no_color"]
