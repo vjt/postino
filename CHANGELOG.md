@@ -4,10 +4,19 @@ All notable changes to `il-postino` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and is generated automatically by [git-cliff](https://git-cliff.org) from
 commit subjects on every tag.
+## [0.8.2] — 2026-05-13
+
+### Packaging
+- Re-enable FreeBSD build using pkg binary deps *(`txz`)*
+- Install manpages and rename systemd unit to postinod.service *(`deb`)*
+- Remove orphan il-postino.service file *(`deb`)*
 ## [0.8.1] — 2026-05-13
 
 ### CI
 - Fix deb smoke + replace broken changelog action; drop txz to v0.9
+
+### Release
+- 0.8.1
 ## [0.8.0] — 2026-05-13
 
 ### CI
