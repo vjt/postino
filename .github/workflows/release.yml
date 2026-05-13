@@ -84,8 +84,8 @@ jobs:
       fail-fast: false
       matrix:
         dist: [bookworm, trixie]
-        arch: [amd64, arm64]
-    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+        arch: [amd64]
+    runs-on: ubuntu-latest
     container:
       image: debian:${{ matrix.dist }}-slim
     steps:
