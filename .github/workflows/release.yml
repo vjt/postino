@@ -12,6 +12,9 @@ jobs:
   # v0.7.0 (release-yml-no-test-gate gotcha).
   verify:
     uses: ./.github/workflows/verify.yml
+    permissions:
+      id-token: write
+      contents: read
 
   changelog:
     needs: verify
