@@ -6,5 +6,14 @@ on:
   pull_request:
 
 jobs:
+  # WHY: verify.yml's test job requests `id-token: write` for Codecov
+  # OIDC upload. Reusable-workflow rules require the caller to grant a
+  # superset of the called workflow's permissions; without the explicit
+  # block GH Actions rejects the workflow at startup with
+  # `startup_failure` and never starts a job. Same fix release.yml got
+  # in 6dbd9d1; ci.yml had been silently broken since v0.8.0.
   verify:
     uses: ./.github/workflows/verify.yml
+    permissions:
+      id-token: write
+      contents: read
