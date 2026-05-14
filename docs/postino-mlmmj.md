@@ -122,19 +122,12 @@ This is unchanged from pre-v0.10. It handles all non-list transports
 
 Apply once before starting postinod or running any `postino list` command:
 
-```sql
-CREATE TABLE routes (
-  pattern       VARCHAR(255) PRIMARY KEY,
-  transport     VARCHAR(64)  NOT NULL,
-  domain        VARCHAR(255) NOT NULL,
-  list_address  VARCHAR(255),
-  priority      SMALLINT     NOT NULL DEFAULT 50,
-  active        TINYINT(1)   NOT NULL DEFAULT 1,
-  created       TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-  KEY idx_domain (domain),
-  KEY idx_list_address (list_address)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+```sh
+postino schema migrate
 ```
+
+The command creates the `routes` table idempotently (safe to run twice).
+The DDL is bundled with postino — no manual SQL required.
 
 postino startup reflects the schema and will exit with `ConfigError` if the
 `routes` table is absent.

@@ -339,10 +339,11 @@ or on a shared domain alongside regular mailboxes (`soci@example.org`).
 Routing is SQL-driven via the `routes` table — no per-domain `transport`
 setting is needed.
 
-**v0.10+ requires the `routes` table and specific Postfix wiring.** Apply the
-DDL and configure `main.cf` / `master.cf` before creating any list. See
-`CHANGELOG.md [0.10.0]` for the migration steps and
-[`docs/postino-mlmmj.md`](docs/postino-mlmmj.md) for the full wiring reference.
+**v0.10+ requires the `routes` table and specific Postfix wiring.** Run
+`postino schema migrate` once to apply the new table, then configure
+`main.cf` / `master.cf` before creating any list. See `CHANGELOG.md
+[0.10.0]` for the full migration steps and
+[`docs/postino-mlmmj.md`](docs/postino-mlmmj.md) for the wiring reference.
 
 ```sh
 # Create a list.

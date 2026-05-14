@@ -29,24 +29,15 @@ commit subjects on every tag.
   are operator-side cleanup: `UPDATE domain SET transport='virtual'
   WHERE transport='mlmmj'`.
 
-- **New required SQL table `routes`.** Apply once:
-  ```sql
-  CREATE TABLE routes (
-    pattern       VARCHAR(255) PRIMARY KEY,
-    transport     VARCHAR(64)  NOT NULL,
-    domain        VARCHAR(255) NOT NULL,
-    list_address  VARCHAR(255),
-    priority      SMALLINT     NOT NULL DEFAULT 50,
-    active        TINYINT(1)   NOT NULL DEFAULT 1,
-    created       TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
-    KEY idx_domain (domain),
-    KEY idx_list_address (list_address)
-  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+- **New required SQL table `routes`.** Run once before starting postinod
+  or any `postino list` command:
+  ```sh
+  postino schema migrate
   ```
-
+  The DDL is included in the postino package and applied idempotently.
   Note: postino startup now requires this table — `reflect_schema`
   loads `_REQUIRED_TABLES = (..., "routes")`. Pre-v0.10 deployments
-  will fail-fast with `ConfigError` until the DDL is applied.
+  will fail-fast with `ConfigError` until the migration is applied.
 
 - **Postfix `transport_maps` and `recipient_delimiter` requirements.**
   `main.cf` MUST now declare:
@@ -61,6 +52,7 @@ commit subjects on every tag.
 ### Added
 
 - New `routes` SQL table — postino-managed routing patterns.
+- `postino schema migrate` — apply v0.10 routes DDL idempotently.
 - `postino list add` now writes 5 routes rows + 1 `-owner` alias row.
 - `postino list rm` cleans them up.
 - `postino check` validates `transport_maps`, `recipient_delimiter`,
