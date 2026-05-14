@@ -5,6 +5,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and is generated automatically by [git-cliff](https://git-cliff.org) from
 commit subjects on every tag.
 
+## [0.10.3] - 2026-05-14
+
+### Fixed
+
+- **`postino list sub` no longer sends a welcome mail on every
+  subscribe (and `postino list unsub` no longer sends a goodbye
+  mail).** The `mlmmj-sub` and `mlmmj-unsub` argv builders in
+  `MlmmjAdapter` passed `-c` with comments claiming it suppressed
+  the welcome/goodbye mail. Per mlmmj-sub(1) and mlmmj-unsub(1),
+  `-c` does the opposite — it **sends** the welcome / goodbye mail.
+  The mlmmj-sub(1) footer is explicit: "To ensure subscription is
+  silent from the point of view of the subscriber, use -f, but
+  neither -c nor -C. To inhibit notification of the owner, use -q.
+  Use of -s is recommended to ensure you don't spam already-
+  subscribed addresses by accident." mlmmj-unsub(1) is the
+  mirror: "When neither -c nor -C is specified, unsubscription
+  happens silently from the point of view of the subscriber."
+
+  `subscribe()` now invokes `mlmmj-sub -L … -a … -f -q -s`;
+  `unsubscribe()` now invokes `mlmmj-unsub -L … -a … -q -s`. Both
+  are silent from the subscriber's and owner's points of view, and
+  remain idempotent on re-sub / re-unsub thanks to `-s`.
+
+  Impact for operators: bulk-provisioning via `postino list sub`
+  on prior 0.10.x versions emitted a "Welcome to <list>" mail per
+  subscriber plus an owner notification per event. Operators who
+  ran bulk imports against a list with real recipient addresses
+  (not a smtp-sink) should expect those mails to have been
+  delivered. Reported by sibling Claude on `/srv/olografix`
+  (athena rollout) — caught in their environment because they
+  contain outbound to a smtp-sink for staging.
+
+  Tests now assert `-c` and `-C` are **not** present in the argv
+  for both subscribe and unsubscribe (regression guard).
+
 ## [0.10.2] - 2026-05-14
 
 ### Fixed
