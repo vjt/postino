@@ -1,3 +1,13 @@
+il-postino (0.10.2-1) unstable; urgency=medium
+
+  * Release 0.10.2. See CHANGELOG.md for details (drops phantom mlmmj-help
+    binary references, fixes postino schema migrate chicken-and-egg, renames
+    sql-virtual_domain_maps.cf to canonical sql-virtual_domains.cf with
+    legacy fallback). Includes the v0.10.0 + v0.10.1 changes that never made
+    it into a deb stanza.
+
+ -- Marcello Barnaba <vjt@openssl.it>  Thu, 14 May 2026 09:28:45 +0200
+
 il-postino (0.9.0-1) unstable; urgency=medium
 
   * Release 0.9.0. See CHANGELOG.md for details.
