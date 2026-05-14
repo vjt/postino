@@ -161,7 +161,7 @@ def test_list_add_writes_routes_and_owner_alias(lists_stack: Path) -> None:
     )
     assert r.returncode == 0, r.stderr
 
-    # routes table has 5 rows for this list
+    # routes table has 4 rows for this list (v0.10.1 dropped mlmmj-help)
     r = docker_exec(
         lists_stack,
         "mariadb",
@@ -174,7 +174,7 @@ def test_list_add_writes_routes_and_owner_alias(lists_stack: Path) -> None:
         "SELECT COUNT(*) FROM routes WHERE list_address='routes@lists.example.org'",
     )
     assert r.returncode == 0, r.stderr
-    assert "5" in r.stdout
+    assert "4" in r.stdout
 
     # alias table has the -owner row with both owners
     r = docker_exec(
