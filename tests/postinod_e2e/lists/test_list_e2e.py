@@ -153,7 +153,7 @@ def test_list_add_writes_routes_and_owner_alias(lists_stack: Path) -> None:
         "postino",
         "list",
         "add",
-        "team@lists.example.org",
+        "routes@lists.example.org",
         "--owner",
         "alice@example.org",
         "--owner",
@@ -171,7 +171,7 @@ def test_list_add_writes_routes_and_owner_alias(lists_stack: Path) -> None:
         "-ppostfix",
         "postfix",
         "-Be",
-        "SELECT COUNT(*) FROM routes WHERE list_address='team@lists.example.org'",
+        "SELECT COUNT(*) FROM routes WHERE list_address='routes@lists.example.org'",
     )
     assert r.returncode == 0, r.stderr
     assert "5" in r.stdout
@@ -186,7 +186,7 @@ def test_list_add_writes_routes_and_owner_alias(lists_stack: Path) -> None:
         "-ppostfix",
         "postfix",
         "-Be",
-        "SELECT goto FROM alias WHERE address='team-owner@lists.example.org'",
+        "SELECT goto FROM alias WHERE address='routes-owner@lists.example.org'",
     )
     assert r.returncode == 0, r.stderr
     assert "alice@example.org" in r.stdout
@@ -220,7 +220,7 @@ def test_agent_can_remove_list_and_spool_vanishes_for_mta(lists_stack: Path) -> 
 
 
 def test_bounce_routing_invokes_mlmmj_bounce(lists_stack: Path) -> None:
-    """Inject a DSN to team-bounces@... and assert mlmmj-bounce wrote a
+    """Inject a DSN to bouncer-bounces@... and assert mlmmj-bounce wrote a
     bounce file under the list spool."""
     docker_exec(
         lists_stack,
@@ -228,7 +228,7 @@ def test_bounce_routing_invokes_mlmmj_bounce(lists_stack: Path) -> None:
         "postino",
         "list",
         "add",
-        "team@lists.example.org",
+        "bouncer@lists.example.org",
         "--owner",
         "alice@example.org",
     )
@@ -238,11 +238,11 @@ def test_bounce_routing_invokes_mlmmj_bounce(lists_stack: Path) -> None:
         "postino",
         "list",
         "sub",
-        "team@lists.example.org",
+        "bouncer@lists.example.org",
         "dead@external.test",
     )
 
-    # Inject a synthetic DSN body addressed to team-bounces@...
+    # Inject a synthetic DSN body addressed to bouncer-bounces@...
     inject = docker_exec(
         lists_stack,
         "mta",
@@ -251,21 +251,22 @@ def test_bounce_routing_invokes_mlmmj_bounce(lists_stack: Path) -> None:
         (
             "printf '%s\\n' "
             "'From: MAILER-DAEMON@external.test' "
-            "'To: team-bounces@lists.example.org' "
+            "'To: bouncer-bounces@lists.example.org' "
             "'Subject: Undelivered Mail Returned to Sender' "
             "'Content-Type: multipart/report; report-type=delivery-status; boundary=B' "
             "'' '--B' '' 'Action: failed' "
             "'Final-Recipient: rfc822;dead@external.test' '' '--B--' "
-            "| sendmail -i -f MAILER-DAEMON@external.test team-bounces@lists.example.org"
+            "| sendmail -i -f MAILER-DAEMON@external.test bouncer-bounces@lists.example.org"
         ),
     )
     assert inject.returncode == 0, inject.stderr
 
     # mlmmj-bounce writes <listdir>/bounce/<encoded-addr>; poll for the file.
+    _bounce_dir = "/var/spool/mlmmj/lists.example.org/bouncer/bounce/"
     deadline = time.monotonic() + 15.0
-    r = docker_exec(lists_stack, "mta", "ls", "/var/spool/mlmmj/lists.example.org/team/bounce/")
+    r = docker_exec(lists_stack, "mta", "ls", _bounce_dir)
     while time.monotonic() < deadline:
-        r = docker_exec(lists_stack, "mta", "ls", "/var/spool/mlmmj/lists.example.org/team/bounce/")
+        r = docker_exec(lists_stack, "mta", "ls", _bounce_dir)
         if r.returncode == 0 and r.stdout.strip():
             break
         time.sleep(0.5)
@@ -281,7 +282,7 @@ def test_help_routing_invokes_mlmmj_help(lists_stack: Path) -> None:
         "postino",
         "list",
         "add",
-        "team@lists.example.org",
+        "helpme@lists.example.org",
         "--owner",
         "alice@example.org",
     )
@@ -293,9 +294,9 @@ def test_help_routing_invokes_mlmmj_help(lists_stack: Path) -> None:
         "bash",
         "-c",
         (
-            "printf 'From: bob@external.test\\nTo: team-help@lists.example.org\\n"
+            "printf 'From: bob@external.test\\nTo: helpme-help@lists.example.org\\n"
             "Subject: help\\n\\n' "
-            "| sendmail -i -f bob@external.test team-help@lists.example.org"
+            "| sendmail -i -f bob@external.test helpme-help@lists.example.org"
         ),
     )
 
@@ -314,7 +315,7 @@ def test_owner_alias_rewrites_to_control_owner_addresses(lists_stack: Path) -> N
         "postino",
         "list",
         "add",
-        "team@lists.example.org",
+        "ownertest@lists.example.org",
         "--owner",
         "alice@external.test",
         "--owner",
@@ -328,9 +329,9 @@ def test_owner_alias_rewrites_to_control_owner_addresses(lists_stack: Path) -> N
         "bash",
         "-c",
         (
-            "printf 'From: ext@example.com\\nTo: team-owner@lists.example.org\\n"
+            "printf 'From: ext@example.com\\nTo: ownertest-owner@lists.example.org\\n"
             "Subject: ping owner\\n\\nhi owner\\n' "
-            "| sendmail -i -f ext@example.com team-owner@lists.example.org"
+            "| sendmail -i -f ext@example.com ownertest-owner@lists.example.org"
         ),
     )
 
