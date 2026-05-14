@@ -2,3 +2,4 @@ hosts = mariadb
 user = postfix
 password = postfixpw
 dbname = postfix
+query = SELECT 1 FROM domain WHERE domain='%s' AND active = 1

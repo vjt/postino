@@ -2,3 +2,4 @@ hosts = mariadb
 user = postfix
 password = postfixpw
 dbname = postfix
+query = SELECT goto FROM alias WHERE address='%s' AND active = 1
