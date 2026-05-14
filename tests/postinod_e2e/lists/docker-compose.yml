@@ -36,7 +36,7 @@ services:
       - ./postfix-stub/sql-virtual_transport_maps.cf:/etc/postfix/sql-virtual_transport_maps.cf:ro
       - ./postfix-stub/sql-virtual_alias_maps.cf:/etc/postfix/sql-virtual_alias_maps.cf:ro
       - ./postfix-stub/sql-virtual_mailbox_maps.cf:/etc/postfix/sql-virtual_mailbox_maps.cf:ro
-      - ./postfix-stub/sql-virtual_domain_maps.cf:/etc/postfix/sql-virtual_domain_maps.cf:ro
+      - ./postfix-stub/sql-virtual_domains.cf:/etc/postfix/sql-virtual_domains.cf:ro
     depends_on:
       mariadb:
         condition: service_healthy
@@ -54,7 +54,7 @@ services:
       - ./postino.toml:/usr/local/etc/postino/postino.toml:ro
       - ./postfix-stub/sql-virtual_mailbox_maps.cf:/etc/postino/postfix/sql-virtual_mailbox_maps.cf:ro
       - ./postfix-stub/sql-virtual_alias_maps.cf:/etc/postino/postfix/sql-virtual_alias_maps.cf:ro
-      - ./postfix-stub/sql-virtual_domain_maps.cf:/etc/postino/postfix/sql-virtual_domain_maps.cf:ro
+      - ./postfix-stub/sql-virtual_domains.cf:/etc/postino/postfix/sql-virtual_domains.cf:ro
     environment:
       POSTINO_CONFIG: /etc/postino/postino.toml
       POSTINO_MLMMJ_SPOOL_DIR: /var/spool/mlmmj

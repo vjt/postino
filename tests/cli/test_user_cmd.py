@@ -80,7 +80,7 @@ def make_postfix_cf(db_url: str, sql_dir: Path, *, include_alias_domain: bool = 
     files = [
         "sql-virtual_mailbox_maps.cf",
         "sql-virtual_alias_maps.cf",
-        "sql-virtual_domain_maps.cf",
+        "sql-virtual_domains.cf",
     ]
     if include_alias_domain:
         # The 2 conditional cf files — required by `postino check` only

@@ -126,8 +126,11 @@ If installing on a slimmed-down FreeBSD host:
 - `postino check` validates 5 postfix `sql-virtual_*.cf` files. The
   two `*_alias_domain_maps.cf` files are required iff the
   `alias_domain` table has rows; otherwise they're optional. The
-  other three (`mailbox_maps`, `alias_maps`, `domain_maps`) are
-  always required.
+  other three (`mailbox_maps`, `alias_maps`, `domains`) are always
+  required. v0.10.2 renamed the singular legacy `domain_maps` to the
+  canonical plural `domains` (matches postfix's
+  `virtual_mailbox_domains` parameter); the legacy filename is still
+  accepted with a deprecation warning.
 
 ## Engineering preferences
 

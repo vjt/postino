@@ -49,10 +49,25 @@ _CfPolicy = Literal["always", "if_alias_domain_nonempty"]
 _POSTFIX_CF_FILES: tuple[tuple[str, _CfPolicy], ...] = (
     ("sql-virtual_mailbox_maps.cf", "always"),
     ("sql-virtual_alias_maps.cf", "always"),
-    ("sql-virtual_domain_maps.cf", "always"),
+    ("sql-virtual_domains.cf", "always"),
     ("sql-virtual_alias_alias_domain_maps.cf", "if_alias_domain_nonempty"),
     ("sql-virtual_mailbox_alias_domain_maps.cf", "if_alias_domain_nonempty"),
 )
+# Canonical filename → tuple of legacy filenames historically accepted.
+# When the canonical file is missing but a legacy alias is present,
+# postino accepts the legacy file but emits a deprecation warning so
+# the operator can rename at their leisure.
+#
+# v0.10.2: switched from ``sql-virtual_domain_maps.cf`` (singular noun
+# + ``_maps`` suffix) to ``sql-virtual_domains.cf`` (plural, no suffix)
+# to match the postfix parameter name ``virtual_mailbox_domains``. The
+# ``_maps`` suffix is reserved for recipient→target lookups
+# (mailbox_maps, alias_maps); domains is a yes/no membership lookup,
+# so the bare plural is the right name. Legacy singular accepted as a
+# transition aid and to keep existing PostfixAdmin deploys working.
+_POSTFIX_CF_LEGACY_NAMES: dict[str, tuple[str, ...]] = {
+    "sql-virtual_domains.cf": ("sql-virtual_domain_maps.cf",),
+}
 _MAILDIRPP_SUBDIRS = ("cur", "new", "tmp")
 _HOOK_WRITE_BITS = 0o022
 # A4-A4.4: `sql-virtual_*.cf` files carry the cleartext SQL password.
@@ -211,10 +226,35 @@ def _check_postfix_sql_cfs(s: PostinoSettings, engine: Engine) -> list[Finding]:
         name = f"postfix_sql_cf:{filename}"
         required = policy == "always" or alias_domain_nonempty
         if not cf.exists():
-            if required:
-                out.append(_err(name, f"postfix sql cf missing: {cf}"))
-            # else: silently skip — file is not required for this deployment.
-            continue
+            # Try legacy filenames before declaring missing. If found,
+            # accept and emit a deprecation warning so the operator can
+            # rename without breaking running mail flow.
+            legacy_match: Path | None = None
+            legacy_match_name: str | None = None
+            for legacy in _POSTFIX_CF_LEGACY_NAMES.get(filename, ()):
+                candidate = s.postfix_sql_dir / legacy
+                if candidate.exists():
+                    legacy_match = candidate
+                    legacy_match_name = legacy
+                    break
+            if legacy_match is None:
+                if required:
+                    out.append(_err(name, f"postfix sql cf missing: {cf}"))
+                # else: silently skip — file is not required for this deployment.
+                continue
+            out.append(
+                Finding(
+                    name=name,
+                    severity="warn",
+                    message=(
+                        f"using legacy filename {legacy_match_name!r} for "
+                        f"{filename!r}; rename to canonical {filename!r} to "
+                        f"match postfix parameter naming. Legacy name will "
+                        f"be removed in a future release. ({legacy_match})"
+                    ),
+                )
+            )
+            cf = legacy_match
         st = cf.stat()
         bad_bits = st.st_mode & _CF_FORBIDDEN_BITS
         if bad_bits:

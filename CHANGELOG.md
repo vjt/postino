@@ -20,10 +20,32 @@ commit subjects on every tag.
   schema commands fall through to their own raw-engine bootstrap.
   Reported by sibling Claude on `/srv/olografix` (athena rollout) with
   the live trace; previous workaround was applying the routes DDL
-  manually via MariaDB root. Regression test
-  `test_migrate_via_root_app_works_on_fresh_db` exercises the full
-  root-CLI path that the prior unit test (which invoked the schema
-  sub-app directly) had bypassed.
+  manually via MariaDB root.
+
+### Changed
+
+- **Postfix sql-virtual_domain_maps.cf renamed to sql-virtual_domains.cf.**
+  Postfix's parameter for the domain-membership lookup is
+  `virtual_mailbox_domains` (plural noun). The `_maps` suffix
+  convention is reserved for recipient→target lookups (mailbox_maps,
+  alias_maps); domain membership is yes/no, so the bare plural
+  `sql-virtual_domains.cf` is the right name and the one PostfixAdmin
+  upstream uses. Existing deployments with the legacy singular
+  `sql-virtual_domain_maps.cf` continue to work — postino accepts the
+  legacy file and emits a deprecation `warn` finding instead of
+  failing. Operators can rename at their leisure; the legacy fallback
+  will be removed in a future release. Reported by sibling Claude on
+  `/srv/olografix` (athena rollout) where the file on disk was already
+  symlinked to work around the mismatch.
+
+### Tooling
+
+- `scripts/check.sh` is now always strict (no `POSTINO_CHECK_STRICT`
+  env-var gate). Any skipped test fails the script. Matches the CI
+  invariant; no more "loose locally, strict in CI" drift.
+- `scripts/check.sh` prepends `$(pwd)/.venv/bin` to `PATH` so the
+  architecture test's `shutil.which("lint-imports")` finds the
+  venv-installed binary instead of silently skipping.
 
 ## [0.10.1] - 2026-05-14
 

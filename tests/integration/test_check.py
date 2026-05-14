@@ -46,7 +46,7 @@ def _write_postfix_cf(sql_dir: Path, db: Engine, *, files: tuple[str, ...] | Non
     for filename in files or (
         "sql-virtual_mailbox_maps.cf",
         "sql-virtual_alias_maps.cf",
-        "sql-virtual_domain_maps.cf",
+        "sql-virtual_domains.cf",
     ):
         cf_path = sql_dir / filename
         cf_path.write_text(f"hosts = {host}\nuser = {user}\npassword = {pwd}\ndbname = {dbname}\n")
@@ -268,7 +268,49 @@ def test_fails_when_postfix_cf_missing(
     result = run_consistency_check(settings=s, engine=db, metadata=md)
     assert _by_name(result, "postfix_sql_cf:sql-virtual_mailbox_maps.cf").severity == "info"
     assert _by_name(result, "postfix_sql_cf:sql-virtual_alias_maps.cf").severity == "error"
-    assert _by_name(result, "postfix_sql_cf:sql-virtual_domain_maps.cf").severity == "error"
+    assert _by_name(result, "postfix_sql_cf:sql-virtual_domains.cf").severity == "error"
+
+
+def test_legacy_sql_virtual_domain_maps_cf_accepted_with_deprecation_warning(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    """v0.10.2: existing PostfixAdmin deploys may still ship the legacy
+    ``sql-virtual_domain_maps.cf`` (singular noun + ``_maps`` suffix).
+    When the canonical ``sql-virtual_domains.cf`` is missing but the
+    legacy file is present, postino accepts it and emits a deprecation
+    warning instead of erroring — so existing mail flows aren't
+    broken by the rename."""
+    sql_dir = tmp_path / "postfix"
+    sql_dir.mkdir()
+    host, user, pwd, dbname = _engine_url_parts(db)
+    body = f"hosts = {host}\nuser = {user}\npassword = {pwd}\ndbname = {dbname}\n"
+    for filename in (
+        "sql-virtual_mailbox_maps.cf",
+        "sql-virtual_alias_maps.cf",
+        # legacy name: postino should accept this with a warn finding
+        "sql-virtual_domain_maps.cf",
+    ):
+        cf_path = sql_dir / filename
+        cf_path.write_text(body)
+        cf_path.chmod(0o600)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md)
+    f = _by_name(result, "postfix_sql_cf:sql-virtual_domains.cf")
+    assert f.severity == "warn", f"expected warn (legacy accepted), got {f.severity}: {f.message}"
+    assert "legacy filename" in f.message
+    assert "sql-virtual_domain_maps.cf" in f.message
+    # Ensure no false-positive "missing" error for the canonical name.
+    errors = [r for r in result.findings if r.severity == "error"]
+    assert not any("sql-virtual_domains.cf" in e.message for e in errors), (
+        f"unexpected error finding for canonical name: "
+        f"{[e.message for e in errors if 'sql-virtual' in e.message]}"
+    )
 
 
 def test_fails_when_postfix_cf_credentials_drift(
@@ -284,7 +326,7 @@ def test_fails_when_postfix_cf_credentials_drift(
     for filename in (
         "sql-virtual_mailbox_maps.cf",
         "sql-virtual_alias_maps.cf",
-        "sql-virtual_domain_maps.cf",
+        "sql-virtual_domains.cf",
     ):
         (sql_dir / filename).write_text(body)
     mail_root = tmp_path / "mail"
@@ -368,7 +410,7 @@ def test_check_accepts_alias_domain_cfs_when_present_and_matching(
         files=(
             "sql-virtual_mailbox_maps.cf",
             "sql-virtual_alias_maps.cf",
-            "sql-virtual_domain_maps.cf",
+            "sql-virtual_domains.cf",
             "sql-virtual_alias_alias_domain_maps.cf",
             "sql-virtual_mailbox_alias_domain_maps.cf",
         ),
@@ -681,6 +723,6 @@ def test_check_uses_environment_db_url_for_engine_drift(
     for filename in (
         "sql-virtual_mailbox_maps.cf",
         "sql-virtual_alias_maps.cf",
-        "sql-virtual_domain_maps.cf",
+        "sql-virtual_domains.cf",
     ):
         assert _by_name(result, f"postfix_sql_cf:{filename}").severity == "info"
