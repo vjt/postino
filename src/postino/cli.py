@@ -131,6 +131,18 @@ def _entry(  # pyright: ignore[reportUnusedFunction]
     no_color_effective = (
         no_color or bool(os.environ.get("NO_COLOR")) or os.environ.get("CI", "").lower() == "true"
     )
+    # `postino schema *` runs the bootstrap that creates the routes table
+    # (and any future postino-managed DDL), so it CANNOT call
+    # build_services → reflect_schema(only=_REQUIRED_TABLES) on a fresh
+    # deploy without crashing on the missing routes table:
+    #   InvalidRequestError: Could not reflect: requested table(s) not
+    #   available in Engine(...): (routes)
+    # schema commands maintain their own raw-engine bootstrap (see
+    # postino.commands.schema._load_settings_for_migrate); leave ctx.obj
+    # unset for that subcommand. Every other command requires services
+    # and goes through the normal path below.
+    if ctx.invoked_subcommand == "schema":
+        return
     try:
         settings = _load_settings()
         services = build_services(

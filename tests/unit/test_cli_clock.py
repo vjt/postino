@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -34,8 +35,13 @@ def test_cli_default_clock_is_utc(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli, "build_services", fake_build_services)
     monkeypatch.setattr(cli, "_load_settings", fake_load_settings)
 
+    # _entry now reads ctx.invoked_subcommand to decide whether to skip
+    # build_services for the schema bootstrap (v0.10.2). Use a stub with
+    # invoked_subcommand=None so the non-schema path runs and we hit the
+    # patched build_services.
+    fake_ctx = SimpleNamespace(invoked_subcommand=None)
     with pytest.raises(SystemExit):
-        cli._entry(ctx=None, json=False)  # type: ignore[arg-type]  # WHY: ctx unused in this code path before SystemExit.
+        cli._entry(ctx=fake_ctx, json=False)  # type: ignore[arg-type]  # WHY: SimpleNamespace duck-types typer.Context for the two attributes _entry reads before SystemExit.
 
     clock = captured["clock"]
     now = clock()

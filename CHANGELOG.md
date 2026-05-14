@@ -5,6 +5,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and is generated automatically by [git-cliff](https://git-cliff.org) from
 commit subjects on every tag.
 
+## [0.10.2] - 2026-05-14
+
+### Fixed
+
+- **`postino schema migrate` no longer crashes on fresh deploys.** The
+  root `_entry` callback called `build_services` →
+  `reflect_schema(only=_REQUIRED_TABLES)` for every subcommand, which
+  failed with `InvalidRequestError: Could not reflect: requested
+  table(s) not available in Engine(...): (routes)` whenever the routes
+  table didn't yet exist — i.e. precisely when the operator ran the
+  bootstrap command meant to create it. `_entry` now skips
+  `build_services` when `ctx.invoked_subcommand == "schema"`, letting
+  schema commands fall through to their own raw-engine bootstrap.
+  Reported by sibling Claude on `/srv/olografix` (athena rollout) with
+  the live trace; previous workaround was applying the routes DDL
+  manually via MariaDB root. Regression test
+  `test_migrate_via_root_app_works_on_fresh_db` exercises the full
+  root-CLI path that the prior unit test (which invoked the schema
+  sub-app directly) had bypassed.
+
 ## [0.10.1] - 2026-05-14
 
 ### Fixed
