@@ -5,7 +5,7 @@ FROM debian:13-slim
 # POSTINO_MLMMJ_UID / POSTINO_MLMMJ_GID in the agent service.
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-       postfix mlmmj rsyslog adduser \
+       postfix postfix-mysql mlmmj rsyslog adduser \
     && rm -rf /var/lib/apt/lists/* \
     && (getent group mlmmj > /dev/null || groupadd --system --gid 1042 mlmmj) \
     && (getent passwd mlmmj > /dev/null \
