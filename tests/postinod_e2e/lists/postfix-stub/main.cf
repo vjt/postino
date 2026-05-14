@@ -1,6 +1,8 @@
+compatibility_level = 3.10
 myhostname = mta.test.local
 mydomain = test.local
 mydestination =
+smtpd_relay_restrictions = permit_mynetworks, defer_unauth_destination
 virtual_mailbox_domains = lists.example.org, example.org
 virtual_transport = virtual
 transport_maps =

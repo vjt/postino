@@ -44,7 +44,7 @@ postlog   unix-dgram n  -       n       -       1       postlogd
 # listdir is `<spool>/<domain>/<localpart>` per the v0.10 layout.
 # ==========================================================================
 mlmmj-receive unix - n n - - pipe
-   flags=DRhu user=mlmmj argv=/usr/bin/mlmmj-receive -L /var/spool/mlmmj/$domain/$user -e ${extension}
+   flags=DRhu user=mlmmj argv=/usr/bin/mlmmj-receive -F -L /var/spool/mlmmj/$domain/$user -e ${extension}
 mlmmj-bounce unix - n n - - pipe
    flags=DRhu user=mlmmj argv=/usr/bin/mlmmj-bounce -L /var/spool/mlmmj/$domain/$user -a ${sender}
 mlmmj-sub unix - n n - - pipe
