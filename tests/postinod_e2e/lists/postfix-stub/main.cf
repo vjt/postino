@@ -11,3 +11,6 @@ local_recipient_maps =
 maillog_file = /dev/stdout
 virtual_alias_maps = mysql:/etc/postfix/sql-virtual_alias_maps.cf
 virtual_mailbox_maps = mysql:/etc/postfix/sql-virtual_mailbox_maps.cf
+relayhost = [catcher]:1025
+smtp_host_lookup = native
+disable_dns_lookups = yes
