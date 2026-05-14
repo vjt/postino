@@ -282,13 +282,12 @@ def test_bounce_routing_invokes_mlmmj_bounce(lists_stack: Path) -> None:
     )
 
 
-@pytest.mark.skip(
-    reason="v0.10 follow-up: -help@ routes to mlmmj-help correctly per postfix "
-    "logs but mlmmj 1.5.2 in Debian 13 does not emit an auto-reply (no "
-    "configured help-text or sender-restriction). Underlying -help@ routing "
-    "path is validated by unit + integration suites."
-)
-def test_help_routing_invokes_mlmmj_help(lists_stack: Path) -> None:
+def test_help_routing_emits_auto_reply(lists_stack: Path) -> None:
+    """v0.10.1 fix: a request to ``list+help@`` rides the priority-50
+    catchall to ``mlmmj-receive``, which is invoked with ``-e help`` and
+    auto-emits the ``text/listcontrol-help`` reply. There is no separate
+    ``mlmmj-help`` binary in mlmmj 1.3+ — the previous spec referenced a
+    phantom that doesn't exist in any Debian/Ubuntu/FreeBSD pkg."""
     docker_exec(
         lists_stack,
         "agent",
@@ -307,18 +306,17 @@ def test_help_routing_invokes_mlmmj_help(lists_stack: Path) -> None:
         "bash",
         "-c",
         (
-            "printf 'From: bob@external.test\\nTo: helpme-help@lists.example.org\\n"
+            "printf 'From: bob@external.test\\nTo: helpme+help@lists.example.org\\n"
             "Subject: help\\n\\n' "
-            "| sendmail -i -f bob@external.test helpme-help@lists.example.org"
+            "| sendmail -i -f bob@external.test helpme+help@lists.example.org"
         ),
     )
 
     def is_help_reply(m: CatcherMessage) -> bool:
-        # mlmmj-help replies to the sender; subject typically contains 'help'
         addr_list: list[dict[str, str]] = m.get("To") or []
         return any(r.get("Address") == "bob@external.test" for r in addr_list)
 
-    _wait_for_catcher_message(lists_stack, is_help_reply)
+    _wait_for_catcher_message(lists_stack, is_help_reply, timeout=30.0)
 
 
 @pytest.mark.skip(

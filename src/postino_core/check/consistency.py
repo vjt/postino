@@ -832,12 +832,17 @@ _REQUIRED_MASTER_CF_PIPES = (
     "mlmmj-bounce",
     "mlmmj-sub",
     "mlmmj-unsub",
-    "mlmmj-help",
 )
 
 
 def check_master_cf_mlmmj_pipes(master_cf: Path) -> list[Finding]:
-    """Validate master.cf has the 5 v0.10 mlmmj pipe service blocks."""
+    """Validate master.cf has the 4 v0.10 mlmmj pipe service blocks.
+
+    Help requests (`list+help@domain`) are handled by `mlmmj-receive -e
+    help` via plus-addressing, not by a separate `mlmmj-help` binary
+    (which doesn't exist in mlmmj 1.3+ in Debian/Ubuntu/FreeBSD pkg).
+    See repos/routes.py for the routing rationale.
+    """
     if not master_cf.exists():
         return [
             Finding(

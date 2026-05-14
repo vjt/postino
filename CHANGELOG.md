@@ -5,6 +5,44 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and is generated automatically by [git-cliff](https://git-cliff.org) from
 commit subjects on every tag.
 
+## [0.10.1] - 2026-05-14
+
+### Fixed
+
+- **Phantom `mlmmj-help` binary removed from spec, code, and master.cf
+  template.** mlmmj 1.3+ (Debian 12 1.3.0-4, Debian 13 1.5.2-1, FreeBSD
+  ports) ships no `mlmmj-help` binary; the v0.10.0 spec referenced it
+  in the `master.cf` snippet, in `_REQUIRED_MASTER_CF_PIPES`, and in
+  `_MLMMJ_SUFFIXES` (one of the five per-list `routes` rows). Postfix
+  attempts to invoke a nonexistent binary on every `list-help@` request,
+  producing an MTA error and no auto-reply. The bug shipped because the
+  e2e test for help routing was `@pytest.mark.skip`'d with a misleading
+  reason ("no configured help-text") that masked the missing binary.
+  Reported by sibling Claude on `/srv/olografix` (athena rollout) via
+  `cc-talk` cross-pane channel.
+
+### Changed
+
+- **Help requests now ride plus-addressing**: send to `list+help@domain`
+  instead of `list-help@domain`. The priority-50 catchall route
+  `^list(\+.+)?@dom$` already maps `+ext` into `mlmmj-receive`, which
+  carries `-e ${extension}` in the master.cf snippet and emits the
+  matching `text/listcontrol-help` template (or `+faq`, `+get-N`,
+  `+subscribe`, `+owner`, etc.). This is the canonical mlmmj 1.3+
+  interface; no new wiring is required if you already deployed v0.10.0.
+- `postino list add` now writes **4** rows to the `routes` table per
+  list (down from 5). Existing v0.10.0 deployments should clean up the
+  obsolete row:
+  ```sql
+  DELETE FROM routes WHERE transport = 'mlmmj-help:';
+  ```
+  Optionally drop the `mlmmj-help` block from `/etc/postfix/master.cf`
+  (it does nothing — the transport is no longer referenced).
+- `postino check` validates **4** master.cf pipe blocks (not 5).
+- New e2e test `test_help_routing_emits_auto_reply` exercises the
+  `list+help@` path end-to-end: catcher must receive an auto-reply
+  addressed back to the requester. **Not skipped — runs in CI.**
+
 ## [0.10.0] - 2026-05-14
 
 ### BREAKING

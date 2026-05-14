@@ -72,8 +72,13 @@ virtual_mailbox_maps = mysql:/etc/postfix/sql-virtual_mailbox_maps.cf
 
 ### master.cf
 
-Add these five pipe service blocks. They use `$domain/$user` so the spool
+Add these four pipe service blocks. They use `$domain/$user` so the spool
 path resolves correctly for both dedicated-subdomain and shared-domain lists.
+`mlmmj-receive` carries `-e ${extension}` so plus-addressed control
+requests (`list+help@`, `list+subscribe@`, `list+get-N@`, `list+faq@`,
+`list+owner@`, …) reach the canonical mlmmj auto-reply machinery. There
+is no separate `mlmmj-help` binary in mlmmj 1.3+ (Debian, Ubuntu, FreeBSD
+ports all ship the same set of binaries).
 
 ```
 mlmmj-receive unix - n n - - pipe
@@ -84,8 +89,6 @@ mlmmj-sub unix - n n - - pipe
    flags=DRhu user=mlmmj argv=/usr/bin/mlmmj-sub -L /var/spool/mlmmj/$domain/$user -m ${extension}
 mlmmj-unsub unix - n n - - pipe
    flags=DRhu user=mlmmj argv=/usr/bin/mlmmj-unsub -L /var/spool/mlmmj/$domain/$user -m ${extension}
-mlmmj-help unix - n n - - pipe
-   flags=DRhu user=mlmmj argv=/usr/bin/mlmmj-help -L /var/spool/mlmmj/$domain/$user
 ```
 
 postino does not write to `master.cf`. These blocks must be present before
@@ -161,9 +164,11 @@ postino list ls --domain lists.example.org
 postino list rm team@lists.example.org --yes --force
 ```
 
-`postino list add` writes 5 rows to the `routes` table (one per hyphen-suffix
-transport: receive, bounce, sub, unsub, help) plus one `-owner@` alias row in
-the `alias` table. `postino list rm` removes all of them.
+`postino list add` writes 4 rows to the `routes` table (three hyphen-suffix
+transports — `bounces`, `confirm-sub-*`, `confirm-unsub-*` — plus the
+priority-50 catchall that absorbs `+ext` plus-addressing for help, faq,
+get-N, subscribe, owner, etc. via `mlmmj-receive -e`) plus one `-owner@`
+alias row in the `alias` table. `postino list rm` removes all of them.
 
 ## Migration from v0.x
 
@@ -194,8 +199,8 @@ See the full migration notes in `CHANGELOG.md` under `[0.10.0]`.
 - `transport_maps` in `main.cf` lists `sql-routes.cf` before
   `sql-virtual_transport_maps.cf`.
 - `recipient_delimiter = +-` is present in `main.cf`.
-- All five pipe service blocks (`mlmmj-receive`, `mlmmj-bounce`, `mlmmj-sub`,
-  `mlmmj-unsub`, `mlmmj-help`) are present in `master.cf`.
+- All four pipe service blocks (`mlmmj-receive`, `mlmmj-bounce`, `mlmmj-sub`,
+  `mlmmj-unsub`) are present in `master.cf`.
 - Every active list address has a corresponding `-owner@<domain>` alias row.
 
 Run `postino check --json` for a machine-readable findings payload.

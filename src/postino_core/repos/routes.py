@@ -1,10 +1,16 @@
 """RoutesRepository — CRUD on the postino_core v0.10 `routes` table.
 
 `routes` carries postfix `transport_maps` data in SQL. Each mailing list
-contributes 5 regex-pattern rows that map per-suffix recipient patterns
+contributes 4 regex-pattern rows that map per-suffix recipient patterns
 to mlmmj binary transports. Postfix consults via a `transport_maps =
 mysql:...` source ordered ahead of PA's existing domain-transport
 source.
+
+Help requests (`list+help@domain`) ride the priority-50 catchall pattern
+to `mlmmj-receive`, which auto-emits the `text/listcontrol-help` reply
+when invoked with `-e help`. There is no separate help binary in mlmmj
+1.3+; the master.cf snippet for `mlmmj-receive` passes `-e ${extension}`
+to surface the plus-addressed extension.
 
 Schema lives in tests/fixtures/postfixadmin.sql (test) and is reflected
 at runtime — postino never declares it via SQLAlchemy `Table(...)`."""
@@ -24,12 +30,11 @@ _MLMMJ_SUFFIXES: tuple[tuple[str, str, int], ...] = (
     ("-bounces", "mlmmj-bounce:", 10),
     ("-confirm-sub-.+", "mlmmj-sub:", 10),
     ("-confirm-unsub-.+", "mlmmj-unsub:", 10),
-    ("-help", "mlmmj-help:", 10),
 )
 
 
 def _mlmmj_patterns(list_address: str) -> list[tuple[str, str, int]]:
-    """Return the 5 (pattern, transport, priority) tuples for one list.
+    """Return the 4 (pattern, transport, priority) tuples for one list.
 
     Patterns are localpart-anchored — each list owns its own pattern set;
     no domain-wide `^.+-bounces@` regex that would collide across
@@ -104,7 +109,7 @@ class RoutesRepository:
     def delete_by_list_address(self, conn: Connection, list_address: EmailStr) -> int:
         """Remove all routes rows referencing the given list address.
 
-        Returns: number of rows deleted (5 for a properly-provisioned
+        Returns: number of rows deleted (4 for a properly-provisioned
         list, 0 if the list never had routes)."""
         routes = self._md.tables["routes"]
         result = conn.execute(routes.delete().where(routes.c.list_address == str(list_address)))

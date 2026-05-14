@@ -18,9 +18,9 @@ from postino_core.repos.routes import (
 )
 
 
-def test_mlmmj_patterns_emits_five_rows() -> None:
+def test_mlmmj_patterns_emits_four_rows() -> None:
     rows = _mlmmj_patterns("team@lists.example.org")
-    assert len(rows) == 5
+    assert len(rows) == 4
     patterns = {p for p, _t, _pri in rows}
     transports = {t for _p, t, _pri in rows}
     priorities = {pri for _p, _t, pri in rows}
@@ -28,17 +28,19 @@ def test_mlmmj_patterns_emits_five_rows() -> None:
         "mlmmj-bounce:",
         "mlmmj-sub:",
         "mlmmj-unsub:",
-        "mlmmj-help:",
         "mlmmj-receive:",
     }
-    assert priorities == {10, 50}  # 4x priority 10 + 1x priority 50
+    # WHY: mlmmj-help is intentionally absent — see repos/routes.py.
+    assert "mlmmj-help:" not in transports
+    assert priorities == {10, 50}  # 3x priority 10 + 1x priority 50
     # localpart-anchored, not domain-wide
     assert any(p == r"^team-bounces@lists\.example\.org$" for p in patterns)
     assert any(p == r"^team-confirm-sub-.+@lists\.example\.org$" for p in patterns)
     assert any(p == r"^team-confirm-unsub-.+@lists\.example\.org$" for p in patterns)
-    assert any(p == r"^team-help@lists\.example\.org$" for p in patterns)
-    # catchall absorbs +ext for plus-addressing
+    # +help@ + every other +ext request rides the catchall to mlmmj-receive
     assert any(p == r"^team(\+.+)?@lists\.example\.org$" for p in patterns)
+    # No -help@ regex — modern mlmmj uses +help@ via plus-addressing.
+    assert not any("-help" in p for p in patterns)
 
 
 def test_mlmmj_patterns_escapes_regex_metacharacters_in_address() -> None:
@@ -92,7 +94,7 @@ def _fake_metadata() -> MetaData:
     return md
 
 
-def test_insert_mlmmj_list_writes_five_rows() -> None:
+def test_insert_mlmmj_list_writes_four_rows() -> None:
     engine = create_engine("sqlite:///:memory:")
     md = _fake_metadata()
     md.create_all(engine)
@@ -103,13 +105,12 @@ def test_insert_mlmmj_list_writes_five_rows() -> None:
 
     with engine.connect() as conn:
         rows = conn.execute(md.tables["routes"].select()).fetchall()
-    assert len(rows) == 5
+    assert len(rows) == 4
     transports = {r._mapping["transport"] for r in rows}  # pyright: ignore[reportPrivateUsage]  # WHY: SQLAlchemy Row._mapping is public API despite the underscore prefix.
     assert transports == {
         "mlmmj-bounce:",
         "mlmmj-sub:",
         "mlmmj-unsub:",
-        "mlmmj-help:",
         "mlmmj-receive:",
     }
     list_addresses = {r._mapping["list_address"] for r in rows}  # pyright: ignore[reportPrivateUsage]  # WHY: SQLAlchemy Row._mapping is public API despite the underscore prefix.
@@ -129,10 +130,10 @@ def test_delete_by_list_address_clears_rows() -> None:
         repo.insert_mlmmj_list(conn, "other@lists.example.org")
         deleted = repo.delete_by_list_address(conn, "team@lists.example.org")
 
-    assert deleted == 5
+    assert deleted == 4
     with engine.connect() as conn:
         remaining = conn.execute(md.tables["routes"].select()).fetchall()
-    assert len(remaining) == 5
+    assert len(remaining) == 4
     assert all(r._mapping["list_address"] == "other@lists.example.org" for r in remaining)  # pyright: ignore[reportPrivateUsage]  # WHY: SQLAlchemy Row._mapping is public API despite the underscore prefix.
 
 
@@ -148,8 +149,8 @@ def test_list_by_domain_filters_correctly() -> None:
     with engine.connect() as conn:
         a = repo.list_by_domain(conn, "lists.example.org")
         b = repo.list_by_domain(conn, "example.org")
-    assert len(a) == 5
-    assert len(b) == 5
+    assert len(a) == 4
+    assert len(b) == 4
     assert {r.list_address for r in a} == {"team@lists.example.org"}
     assert {r.list_address for r in b} == {"soci@example.org"}
 
@@ -163,5 +164,5 @@ def test_list_by_list_address_filters_correctly() -> None:
         repo.insert_mlmmj_list(conn, "team@lists.example.org")
     with engine.connect() as conn:
         rows = repo.list_by_list_address(conn, "team@lists.example.org")
-    assert len(rows) == 5
+    assert len(rows) == 4
     assert all(r.list_address == "team@lists.example.org" for r in rows)

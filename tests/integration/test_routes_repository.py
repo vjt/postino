@@ -56,15 +56,14 @@ def test_routes_repository_round_trip() -> None:
             repo.insert_mlmmj_list(conn, test_addr)
         with engine.connect() as conn:
             rows = repo.list_by_list_address(conn, test_addr)
-        assert len(rows) == 5
+        assert len(rows) == 4
         assert {r.transport for r in rows} == {
             "mlmmj-bounce:",
             "mlmmj-sub:",
             "mlmmj-unsub:",
-            "mlmmj-help:",
             "mlmmj-receive:",
         }
     finally:
         with engine.begin() as conn:
             n = repo.delete_by_list_address(conn, test_addr)
-        assert n == 5
+        assert n == 4
