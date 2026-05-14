@@ -247,9 +247,14 @@ def test_subscribe_invokes_mlmmj_sub_with_correct_argv(tmp_path: Path) -> None:
     assert str(listdir) in cmd
     assert "-a" in cmd
     assert "bob@example.org" in cmd
-    assert "-s" in cmd  # silent
-    assert "-c" in cmd  # no confirm
-    assert "-f" in cmd  # force
+    assert "-f" in cmd  # force: bypass moderation
+    assert "-q" in cmd  # quiet: no owner notification
+    assert "-s" in cmd  # silent re-sub
+    # -c (Send welcome mail) MUST NOT be passed — v0.10.3 regression guard.
+    # See mlmmj-sub(1): "To ensure subscription is silent from the point of
+    # view of the subscriber, use -f, but neither -c nor -C."
+    assert "-c" not in cmd
+    assert "-C" not in cmd
 
 
 def test_subscribe_raises_not_found_if_listdir_missing(tmp_path: Path) -> None:
@@ -283,8 +288,13 @@ def test_unsubscribe_invokes_mlmmj_unsub_with_correct_argv(tmp_path: Path) -> No
     assert str(listdir) in cmd
     assert "-a" in cmd
     assert "bob@example.org" in cmd
-    assert "-s" in cmd
-    assert "-c" in cmd
+    assert "-q" in cmd  # quiet: no owner notification
+    assert "-s" in cmd  # silent re-unsub
+    # -c (Send goodbye mail) MUST NOT be passed — v0.10.3 regression guard.
+    # See mlmmj-unsub(1): "When neither -c nor -C is specified, unsubscription
+    # happens silently from the point of view of the subscriber."
+    assert "-c" not in cmd
+    assert "-C" not in cmd
 
 
 def test_unsubscribe_raises_not_found_if_listdir_missing(tmp_path: Path) -> None:

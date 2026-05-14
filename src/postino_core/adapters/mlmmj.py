@@ -381,9 +381,13 @@ class MlmmjAdapter:
     # -- subscriber management ----------------------------------------------
 
     def subscribe(self, *, address: EmailStr, email: EmailStr) -> None:
-        """Run ``mlmmj-sub -L <listdir> -a <email> -s -c -f``.
+        """Run ``mlmmj-sub -L <listdir> -a <email> -f -q -s``.
 
-        Idempotent at the binary level (``-f`` makes already-subscribed a 0-exit)."""
+        Silent admin invocation per the mlmmj-sub(1) help footer:
+        ``-f`` bypasses moderation, ``-q`` suppresses owner notification,
+        ``-s`` suppresses the already-subscribed notice. Crucially, ``-c``
+        (Send welcome mail) is NOT passed — silence from the subscriber's
+        point of view requires "neither -c nor -C" (mlmmj-sub(1))."""
         listdir = self._listdir(address)
         if not listdir.exists():
             raise NotFoundError(f"mlmmj list {address} does not exist")
@@ -393,18 +397,23 @@ class MlmmjAdapter:
             str(listdir),
             "-a",
             str(email),
-            "-s",  # silent: no welcome mail
-            "-c",  # bypass confirmation
-            "-f",  # force: don't reject already-subscribed
+            "-f",  # force: bypass moderation
+            "-q",  # quiet: don't notify list owner
+            "-s",  # silent re-sub: no mail if already subscribed
         ]
         result = self._run(cmd)
         if result.returncode != 0:
             self._raise_mlmmj(cmd, result)
 
     def unsubscribe(self, *, address: EmailStr, email: EmailStr) -> None:
-        """Run ``mlmmj-unsub -L <listdir> -a <email> -s -c``.
+        """Run ``mlmmj-unsub -L <listdir> -a <email> -q -s``.
 
-        Idempotent: not-subscribed is a 0-exit when ``-c`` is set."""
+        Silent admin invocation per mlmmj-unsub(1): "When neither -c nor -C
+        is specified, unsubscription happens silently from the point of
+        view of the subscriber. When -q is specified, unsubscription
+        happens silently from the point of view of the list owner."
+        ``-s`` suppresses the not-subscribed notice (idempotent re-unsub).
+        ``-c`` (Send goodbye mail) is NOT passed."""
         listdir = self._listdir(address)
         if not listdir.exists():
             raise NotFoundError(f"mlmmj list {address} does not exist")
@@ -414,8 +423,8 @@ class MlmmjAdapter:
             str(listdir),
             "-a",
             str(email),
-            "-s",
-            "-c",
+            "-q",  # quiet: don't notify list owner
+            "-s",  # silent re-unsub: no mail if not subscribed
         ]
         result = self._run(cmd)
         if result.returncode != 0:
