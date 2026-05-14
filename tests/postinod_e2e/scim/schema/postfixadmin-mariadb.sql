@@ -202,6 +202,21 @@ CREATE TABLE `vacation_notification` (
   CONSTRAINT `vacation_notification_pkey` FOREIGN KEY (`on_vacation`) REFERENCES `vacation` (`email`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `routes` (
+  `pattern` varchar(255) NOT NULL,
+  `transport` varchar(64) NOT NULL,
+  `domain` varchar(255) NOT NULL,
+  `list_address` varchar(255) DEFAULT NULL,
+  `priority` smallint(6) NOT NULL DEFAULT 50,
+  `active` tinyint(1) NOT NULL DEFAULT 1,
+  `created` timestamp NOT NULL DEFAULT current_timestamp(),
+  PRIMARY KEY (`pattern`),
+  KEY `idx_domain` (`domain`),
+  KEY `idx_list_address` (`list_address`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='postino v0.10+ routing patterns';
+/*!40101 SET character_set_client = @saved_cs_client */;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
 
 /*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
