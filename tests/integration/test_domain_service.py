@@ -23,8 +23,6 @@ def _service(
     db: Engine,
     frozen_clock: datetime,
     fs: FilesystemAdapter | None = None,
-    *,
-    mlmmj_enabled: bool = True,
 ) -> DomainService:
     md = MetaData()
     md.reflect(bind=db)
@@ -38,7 +36,6 @@ def _service(
         clock=lambda: frozen_clock,
         fs=fs,
         lmtp_destination="unix:private/dovecot-lmtp",
-        mlmmj_enabled=mlmmj_enabled,
     )
 
 
@@ -592,24 +589,6 @@ def test_domain_add_rejects_pa_all_name(db: Engine, frozen_clock: datetime) -> N
             transport=DomainTransport.VIRTUAL,
             backupmx=False,
         )
-
-
-def test_domain_add_mlmmj_round_trip(db: Engine, frozen_clock: datetime) -> None:
-    """`transport='mlmmj'` must round-trip through DomainService.add/get."""
-    svc = _service(db, frozen_clock)
-    svc.add(
-        domain="lists.example.org",
-        description="",
-        max_aliases=0,
-        max_mailboxes=0,
-        max_quota_bytes=0,
-        default_quota_bytes=0,
-        transport=DomainTransport.MLMMJ,
-        backupmx=False,
-    )
-    d = svc.get("lists.example.org")
-    assert d is not None
-    assert d.transport is DomainTransport.MLMMJ
 
 
 # ---------------------------------------------------------------------------

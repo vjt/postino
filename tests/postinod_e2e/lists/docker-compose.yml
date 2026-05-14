@@ -30,6 +30,13 @@ services:
     volumes:
       - lists_spool:/var/spool/mlmmj
       - lists_inbox:/var/spool/lists_inbox
+      - ./postfix-stub/main.cf:/etc/postfix/main.cf:ro
+      - ./postfix-stub/master.cf:/etc/postfix/master.cf:ro
+      - ./postfix-stub/sql-routes.cf:/etc/postfix/sql-routes.cf:ro
+      - ./postfix-stub/sql-virtual_transport_maps.cf:/etc/postfix/sql-virtual_transport_maps.cf:ro
+      - ./postfix-stub/sql-virtual_alias_maps.cf:/etc/postfix/sql-virtual_alias_maps.cf:ro
+      - ./postfix-stub/sql-virtual_mailbox_maps.cf:/etc/postfix/sql-virtual_mailbox_maps.cf:ro
+      - ./postfix-stub/sql-virtual_domain_maps.cf:/etc/postfix/sql-virtual_domain_maps.cf:ro
     depends_on:
       mariadb:
         condition: service_healthy

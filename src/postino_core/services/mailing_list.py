@@ -24,7 +24,6 @@ from sqlalchemy.engine import Connection, Engine
 from postino_core.adapters.mlmmj import MlmmjAdapter
 from postino_core.audit import AuditWriter, DefaultAuditWriter, mk_action, sanitize_audit_error
 from postino_core.db import translate_db_errors
-from postino_core.enums import DomainTransport
 from postino_core.errors import (
     AlreadyExistsError,
     CapacityError,
@@ -32,6 +31,7 @@ from postino_core.errors import (
     NotFoundError,
 )
 from postino_core.models import MailingList, MailingListCreate
+from postino_core.repos.routes import RoutesRepository
 
 _logger = logging.getLogger(__name__)
 
@@ -43,12 +43,14 @@ class MailingListService:
         engine: Engine,
         metadata: MetaData,
         adapter: MlmmjAdapter,
+        routes: RoutesRepository,
         clock: Callable[[], datetime],
         audit_writer: AuditWriter | None = None,
     ) -> None:
         self._engine = engine
         self._md = metadata
         self._adapter = adapter
+        self._routes = routes
         self._clock = clock
         self._audit: AuditWriter = audit_writer or DefaultAuditWriter(
             metadata=metadata, clock=clock
@@ -59,24 +61,17 @@ class MailingListService:
 
         Returns: the freshly-read MailingList.
         Raises:
-            ConfigError: domain transport != 'mlmmj' or domain absent.
             AlreadyExistsError: address collides with mailbox/alias/list.
             MlmmjError, FilesystemError: from the adapter.
         """
         _, _, domain = str(create.address).partition("@")
-        # Lock the domain row FOR UPDATE before validation + spool
-        # create so a concurrent `postino domain del --force` blocks
-        # here and cannot vanish the domain mid-create (A3-A2). The
-        # lock spans the adapter.create call so spool tree creation
-        # and DB validation share the same serialisation point.
         try:
             with translate_db_errors(), self._engine.begin() as conn:
-                self._validate_domain_is_mlmmj(conn, domain, lock=True)
                 self._validate_no_collision(conn, str(create.address))
-                # Spool tree is created INSIDE the locked tx so a
-                # concurrent `domain del --force` is serialised behind
-                # the domain row lock and cannot vanish the routing
-                # row while the spool is being laid down (A3-A2).
+                # DB writes first; if the adapter raises, the tx rolls back
+                # and compensation below deletes any partial spool tree.
+                self._routes.insert_mlmmj_list(conn, create.address)
+                self._write_owner_alias(conn, str(create.address), list(create.owners))
                 self._adapter.create(address=create.address, primary_owner=create.owners[0])
                 for owner in create.owners[1:]:
                     self._adapter.append_owner(address=create.address, owner=owner)
@@ -173,6 +168,8 @@ class MailingListService:
 
         try:
             with translate_db_errors(), self._engine.begin() as conn:
+                self._routes.delete_by_list_address(conn, address)
+                self._delete_owner_alias(conn, str(address))
                 self._audit.write(
                     conn,
                     action=mk_action("mailing_list", "delete"),
@@ -210,35 +207,75 @@ class MailingListService:
         """List all mlmmj lists, optionally filtered by FQDN."""
         return self._adapter.list_all(domain=domain)
 
-    def _validate_domain_is_mlmmj(
-        self, conn: Connection, domain: str, *, lock: bool = False
+    def _write_owner_alias(
+        self,
+        conn: Connection,
+        list_address: str,
+        owners: list[EmailStr],
     ) -> None:
-        d = self._md.tables["domain"]
-        stmt = select(d.c.transport).where(d.c.domain == domain)
-        if lock:
-            stmt = stmt.with_for_update()
-        row = conn.execute(stmt).fetchone()
-        if row is None:
-            raise ConfigError(f"domain {domain!r} does not exist")
-        if str(row[0]) != DomainTransport.MLMMJ.value:
-            raise ConfigError(
-                f"domain {domain!r} has transport={row[0]!r}, "
-                f"expected {DomainTransport.MLMMJ.value!r}. "
-                f"Run `postino domain add` with --transport mlmmj first."
+        """Insert the ``<localpart>-owner@<domain>`` alias row whose
+        ``goto`` resolves to the list's owners.
+
+        v0.10: mail to ``<list>-owner@<domain>`` is rewritten by postfix
+        ``virtual_alias_maps`` (PA's existing alias mysql lookup) to the
+        owner addresses, then delivered through each owner's domain
+        transport. Postino owns the row; it's audited under
+        ``mailing_list.owner_alias_sync`` rather than ``alias.create`` so
+        operators inspecting the log can trace it back to list ops."""
+        localpart, _, domain = list_address.partition("@")
+        owner_addr = f"{localpart}-owner@{domain}"
+        goto = ",".join(str(o) for o in owners)
+        alias = self._md.tables["alias"]
+        now = self._clock()
+        conn.execute(
+            alias.insert().values(
+                address=owner_addr,
+                goto=goto,
+                domain=domain,
+                active=1,
+                created=now,
+                modified=now,
             )
+        )
+        self._audit.write(
+            conn,
+            action=mk_action("mailing_list", "owner_alias_sync"),
+            domain=domain,
+            data=f"{owner_addr} -> {goto}",
+        )
+
+    def _delete_owner_alias(self, conn: Connection, list_address: str) -> None:
+        localpart, _, domain = list_address.partition("@")
+        owner_addr = f"{localpart}-owner@{domain}"
+        alias = self._md.tables["alias"]
+        conn.execute(alias.delete().where(alias.c.address == owner_addr))
 
     def _validate_no_collision(self, conn: Connection, address: str) -> None:
         mailbox = self._md.tables["mailbox"]
         alias = self._md.tables["alias"]
+        routes = self._md.tables["routes"]
+        localpart, _, domain = address.partition("@")
+        owner_alias_addr = f"{localpart}-owner@{domain}"
         if (
             conn.execute(select(mailbox.c.username).where(mailbox.c.username == address)).fetchone()
             is not None
         ):
             raise AlreadyExistsError(f"mailbox row already exists for {address!r}")
         if (
-            conn.execute(select(alias.c.address).where(alias.c.address == address)).fetchone()
+            conn.execute(
+                select(alias.c.address).where(alias.c.address.in_([address, owner_alias_addr]))
+            ).fetchone()
             is not None
         ):
-            raise AlreadyExistsError(f"alias row already exists for {address!r}")
-        if self._adapter.exists(address=address):  # type: ignore[arg-type]  # WHY: adapter accepts EmailStr; address is a validated str at the boundary
+            raise AlreadyExistsError(
+                f"alias row already exists for {address!r} or {owner_alias_addr!r}"
+            )
+        if (
+            conn.execute(
+                select(routes.c.list_address).where(routes.c.list_address == address)
+            ).fetchone()
+            is not None
+        ):
+            raise AlreadyExistsError(f"routes row already exists for list {address!r}")
+        if self._adapter.exists(address=address):
             raise AlreadyExistsError(f"mailing list {address!r} already exists")

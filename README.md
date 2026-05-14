@@ -331,6 +331,42 @@ postino enforces PostfixAdmin parity: no self-alias, no chains
 domains must exist, no duplicate rows. Mail loops are rejected at
 creation time. Exit code 10 indicates a rule violation.
 
+### Mailing lists (mlmmj)
+
+postino manages [mlmmj](https://mlmmj.org/) lists via the `postino list`
+subcommand. Lists can live on a dedicated subdomain (`team@lists.example.org`)
+or on a shared domain alongside regular mailboxes (`soci@example.org`).
+Routing is SQL-driven via the `routes` table — no per-domain `transport`
+setting is needed.
+
+**v0.10+ requires the `routes` table and specific Postfix wiring.** Run
+`postino schema migrate` once to apply the new table, then configure
+`main.cf` / `master.cf` before creating any list. See `CHANGELOG.md
+[0.10.0]` for the full migration steps and
+[`docs/postino-mlmmj.md`](docs/postino-mlmmj.md) for the wiring reference.
+
+```sh
+# Create a list.
+postino list add team@lists.example.org \
+  --owner alice@example.org \
+  --owner bob@example.org
+
+# Add / remove subscribers.
+postino list sub team@lists.example.org carol@example.org
+postino list unsub team@lists.example.org carol@example.org
+
+# Inspect lists.
+postino list show team@lists.example.org
+postino list ls --domain lists.example.org
+
+# Delete a list (refuses non-empty unless --force).
+postino list rm team@lists.example.org --yes --force
+```
+
+Spool directories follow the two-level layout
+`<mlmmj_spool_dir>/<domain>/<localpart>/`
+(e.g. `/var/spool/mlmmj/lists.example.org/team/`).
+
 ### Quota usage
 
 ```sh
@@ -342,7 +378,8 @@ postino quota show                    # all users
 
 ```sh
 postino check          # shallow: DB reachable, schema present, hook safe,
-                       #          postfix sql-virtual_*.cf credentials match engine.
+                       #          postfix sql-virtual_*.cf credentials match engine,
+                       #          mlmmj transport_maps + recipient_delimiter + master.cf pipes.
 postino check --deep   # also reconcile mailbox rows ↔ maildirs on disk,
                        # quota2 pairing, alias/mailbox domain FK substitutes,
                        # maildir ownership and Maildir++ skeleton.

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -34,4 +35,20 @@ def test_import_linter_contracts_kept() -> None:
             "import-linter contracts broken:\n"
             f"--- stdout ---\n{completed.stdout}\n"
             f"--- stderr ---\n{completed.stderr}"
+        )
+
+
+@pytest.mark.architecture
+def test_routes_table_not_declared_in_source() -> None:
+    """routes must be reflected from PA schema, never declared via
+    SQLAlchemy `Table(...)` in source. This preserves postino's
+    'read PA schema' contract (postino owns the migration DDL only via
+    the fixture; live deployments are operator-managed)."""
+    src = Path("src/postino_core")
+    for py in src.rglob("*.py"):
+        text = py.read_text()
+        # Permit references to the reflected table by name, but
+        # forbid declarative SQLAlchemy Table/CreateTable for routes.
+        assert "Table('routes'" not in text and 'Table("routes"' not in text, (
+            f"{py} declares routes as SQLAlchemy Table — must reflect instead"
         )

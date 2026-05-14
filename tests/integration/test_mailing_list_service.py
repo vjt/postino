@@ -12,9 +12,10 @@ from sqlalchemy.engine import Engine
 
 from postino_core.adapters.mlmmj import MlmmjAdapter
 from postino_core.enums import DomainTransport
-from postino_core.errors import AlreadyExistsError, CapacityError, ConfigError, NotFoundError
+from postino_core.errors import AlreadyExistsError, CapacityError, NotFoundError
 from postino_core.fs import FilesystemAdapter
 from postino_core.models import MailingListCreate
+from postino_core.repos.routes import RoutesRepository
 from postino_core.services.domain import DomainService
 from postino_core.services.mailing_list import MailingListService
 
@@ -44,7 +45,6 @@ def _seed_mlmmj_domain(db: Engine, frozen_clock: datetime, fqdn: str) -> None:
         clock=lambda: frozen_clock,
         fs=_noop_fs(),
         lmtp_destination="unix:private/dovecot-lmtp",
-        mlmmj_enabled=True,
     ).add(
         domain=fqdn,
         description=f"mlmmj test {fqdn}",
@@ -52,7 +52,7 @@ def _seed_mlmmj_domain(db: Engine, frozen_clock: datetime, fqdn: str) -> None:
         max_mailboxes=0,
         max_quota_bytes=0,
         default_quota_bytes=0,
-        transport=DomainTransport.MLMMJ,
+        transport=DomainTransport.VIRTUAL,
         backupmx=False,
     )
 
@@ -65,6 +65,7 @@ def _service(db: Engine, frozen_clock: datetime, spool: Path) -> MailingListServ
         engine=db,
         metadata=md,
         adapter=adapter,
+        routes=RoutesRepository(engine=db, metadata=md),
         clock=lambda: frozen_clock,
     )
 
@@ -85,7 +86,7 @@ def test_add_creates_list_and_writes_audit(
     )
     assert ml.address == "team@lists.example.org"
     assert ml.owners == ["alice@example.org"]
-    assert (spool / "team@lists.example.org" / "control" / "owner").exists()
+    assert (spool / "lists.example.org" / "team" / "control" / "owner").exists()
 
     md = MetaData()
     md.reflect(bind=db)
@@ -97,9 +98,10 @@ def test_add_creates_list_and_writes_audit(
     assert row is not None
 
 
-def test_add_rejects_when_domain_transport_not_mlmmj(
+def test_add_succeeds_on_virtual_transport_domain(
     db: Engine, frozen_clock: datetime, tmp_path: Path
 ) -> None:
+    """Lists no longer require transport='mlmmj'; virtual domains are accepted."""
     spool = tmp_path / "spool"
     spool.mkdir()
     md = MetaData()
@@ -121,8 +123,8 @@ def test_add_rejects_when_domain_transport_not_mlmmj(
         backupmx=False,
     )
     svc = _service(db, frozen_clock, spool)
-    with pytest.raises(ConfigError):
-        svc.add(MailingListCreate(address="team@lists.example.org", owners=["alice@example.org"]))
+    ml = svc.add(MailingListCreate(address="team@lists.example.org", owners=["alice@example.org"]))
+    assert ml.address == "team@lists.example.org"
 
 
 def test_add_rejects_collision_with_mailbox(
@@ -170,7 +172,7 @@ def test_add_multi_owner_writes_all_owners(
         )
     )
     assert sorted(ml.owners) == ["alice@example.org", "bob@example.org", "carol@example.org"]
-    contents = (spool / "team@lists.example.org" / "control" / "owner").read_text().splitlines()
+    contents = (spool / "lists.example.org" / "team" / "control" / "owner").read_text().splitlines()
     assert sorted(contents) == ["alice@example.org", "bob@example.org", "carol@example.org"]
 
 
@@ -196,7 +198,7 @@ def test_add_compensating_cleanup_removes_spool_on_owner_append_failure(
                 owners=["alice@example.org", "bob@example.org"],
             )
         )
-    assert not (spool / "team@lists.example.org").exists()
+    assert not (spool / "lists.example.org" / "team").exists()
 
 
 def test_subscribe_unsubscribe_round_trip(
@@ -248,7 +250,7 @@ def test_delete_refuses_non_empty_without_force(
     svc.subscribe(address="team@lists.example.org", email="bob@example.org")
     with pytest.raises(CapacityError):
         svc.delete("team@lists.example.org")
-    assert (spool / "team@lists.example.org").exists()
+    assert (spool / "lists.example.org" / "team").exists()
 
 
 def test_delete_with_force_removes_non_empty_list(
@@ -261,7 +263,7 @@ def test_delete_with_force_removes_non_empty_list(
     svc.add(MailingListCreate(address="team@lists.example.org", owners=["alice@example.org"]))
     svc.subscribe(address="team@lists.example.org", email="bob@example.org")
     svc.delete("team@lists.example.org", force=True)
-    assert not (spool / "team@lists.example.org").exists()
+    assert not (spool / "lists.example.org" / "team").exists()
 
 
 def test_delete_raises_not_found_for_unknown_list(

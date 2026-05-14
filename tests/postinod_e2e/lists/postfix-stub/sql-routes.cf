@@ -1,0 +1,5 @@
+hosts = mariadb
+user = postfix
+password = postfixpw
+dbname = postfix
+query = SELECT transport FROM routes WHERE '%s' REGEXP pattern AND domain = SUBSTRING_INDEX('%s', '@', -1) AND active = 1 ORDER BY priority LIMIT 1

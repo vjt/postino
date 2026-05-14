@@ -39,7 +39,7 @@ def _adapter(tmp_path: Path) -> MlmmjAdapter:
 def test_create_writes_full_spool_layout(tmp_path: Path) -> None:
     a = _adapter(tmp_path)
     a.create(address="team@lists.example.org", primary_owner="alice@example.org")
-    listdir = tmp_path / "team@lists.example.org"
+    listdir = tmp_path / "lists.example.org" / "team"
     for sub in (
         "incoming",
         "queue",
@@ -63,8 +63,8 @@ def test_create_writes_full_spool_layout(tmp_path: Path) -> None:
 
 
 def test_create_raises_already_exists_on_existing_dir(tmp_path: Path) -> None:
-    listdir = tmp_path / "team@lists.example.org"
-    listdir.mkdir()
+    listdir = tmp_path / "lists.example.org" / "team"
+    listdir.mkdir(parents=True)
     a = _adapter(tmp_path)
     with pytest.raises(AlreadyExistsError):
         a.create(address="team@lists.example.org", primary_owner="alice@example.org")
@@ -78,7 +78,7 @@ def test_create_rolls_back_partial_state_on_oserror(tmp_path: Path) -> None:
         with pytest.raises(FilesystemError) as exc:
             a.create(address="team@lists.example.org", primary_owner="alice@example.org")
     assert "disk full" in str(exc.value)
-    assert not (tmp_path / "team@lists.example.org").exists()
+    assert not (tmp_path / "lists.example.org" / "team").exists()
 
 
 def test_create_chowns_when_uid_gid_set(tmp_path: Path) -> None:
@@ -113,7 +113,9 @@ def test_listdir_refuses_symlinked_listdir(tmp_path: Path) -> None:
     """A symlinked spool entry would let mlmmj writes redirect outside."""
     outside = tmp_path / "outside"
     outside.mkdir()
-    (tmp_path / "evil@lists.example.org").symlink_to(outside)
+    domain_dir = tmp_path / "lists.example.org"
+    domain_dir.mkdir()
+    (domain_dir / "evil").symlink_to(outside)
     a = _adapter(tmp_path)
     with pytest.raises(FilesystemError, match="symlink"):
         a.exists(address="evil@lists.example.org")
@@ -131,7 +133,7 @@ def test_bin_raises_mlmmjerror_when_binary_missing(
 
     monkeypatch.setattr("postino_core.adapters.mlmmj.shutil.which", _which_none)
     a = _adapter(tmp_path)
-    (tmp_path / "team@lists.example.org").mkdir()
+    (tmp_path / "lists.example.org" / "team").mkdir(parents=True)
     with pytest.raises(MlmmjError, match="not found on PATH"):
         a.subscribe(address="team@lists.example.org", email="bob@example.org")
 
@@ -148,11 +150,11 @@ def test_create_rolls_back_on_non_oserror(tmp_path: Path, monkeypatch: pytest.Mo
     a = MlmmjAdapter(spool_root=tmp_path, mlmmj_uid=1234, mlmmj_gid=5678, timeout=5.0)
     with pytest.raises(RuntimeError, match="simulated unexpected exception"):
         a.create(address="team@lists.example.org", primary_owner="alice@example.org")
-    assert not (tmp_path / "team@lists.example.org").exists()
+    assert not (tmp_path / "lists.example.org" / "team").exists()
 
 
 def test_append_owner_creates_owner_file_if_absent(tmp_path: Path) -> None:
-    listdir = tmp_path / "team@lists.example.org"
+    listdir = tmp_path / "lists.example.org" / "team"
     (listdir / "control").mkdir(parents=True)
     a = _adapter(tmp_path)
     a.append_owner(address="team@lists.example.org", owner="bob@example.org")
@@ -161,7 +163,7 @@ def test_append_owner_creates_owner_file_if_absent(tmp_path: Path) -> None:
 
 
 def test_append_owner_appends_when_file_exists(tmp_path: Path) -> None:
-    listdir = tmp_path / "team@lists.example.org"
+    listdir = tmp_path / "lists.example.org" / "team"
     (listdir / "control").mkdir(parents=True)
     (listdir / "control" / "owner").write_text("alice@example.org\n")
     a = _adapter(tmp_path)
@@ -171,7 +173,7 @@ def test_append_owner_appends_when_file_exists(tmp_path: Path) -> None:
 
 
 def test_append_owner_idempotent_on_duplicate(tmp_path: Path) -> None:
-    listdir = tmp_path / "team@lists.example.org"
+    listdir = tmp_path / "lists.example.org" / "team"
     (listdir / "control").mkdir(parents=True)
     (listdir / "control" / "owner").write_text("alice@example.org\n")
     a = _adapter(tmp_path)
@@ -191,11 +193,11 @@ def test_listdir_rejects_path_traversal(tmp_path: Path) -> None:
     a = _adapter(tmp_path)
     with pytest.raises(FilesystemError):
         # Pydantic EmailStr would normally block this; adapter must defend itself too.
-        a._listdir("../escape@x.org")  # type: ignore[arg-type]  # WHY: testing the guard against a value that bypassed EmailStr validation
+        a._listdir("../escape@x.org")  # pyright: ignore[reportPrivateUsage]  # WHY: direct _listdir access from test bypasses pyright's private-method enforcement.
 
 
 def test_exists_returns_true_when_listdir_present(tmp_path: Path) -> None:
-    listdir = tmp_path / "team@lists.example.org"
+    listdir = tmp_path / "lists.example.org" / "team"
     (listdir / "control").mkdir(parents=True)
     a = _adapter(tmp_path)
     assert a.exists(address="team@lists.example.org") is True
@@ -207,12 +209,21 @@ def test_exists_returns_false_when_listdir_absent(tmp_path: Path) -> None:
 
 
 def test_delete_removes_spool_dir(tmp_path: Path) -> None:
-    listdir = tmp_path / "team@lists.example.org"
+    listdir = tmp_path / "lists.example.org" / "team"
     (listdir / "subscribers.d").mkdir(parents=True)
     (listdir / "subscribers.d" / "alice@example.org").write_text("")
     a = _adapter(tmp_path)
     a.delete(address="team@lists.example.org")
     assert not listdir.exists()
+
+
+def test_create_lays_down_two_level_tree(tmp_path: Path) -> None:
+    """create() must produce <spool>/<domain>/<localpart> — two-level path."""
+    adapter = _adapter(tmp_path)
+    adapter.create(address="team@lists.example.org", primary_owner="alice@example.org")
+    base = tmp_path / "lists.example.org" / "team"
+    assert (base / "incoming").is_dir()
+    assert (base / "control" / "owner").read_text() == "alice@example.org\n"
 
 
 def test_delete_raises_not_found_if_missing(tmp_path: Path) -> None:
@@ -222,8 +233,8 @@ def test_delete_raises_not_found_if_missing(tmp_path: Path) -> None:
 
 
 def test_subscribe_invokes_mlmmj_sub_with_correct_argv(tmp_path: Path) -> None:
-    listdir = tmp_path / "team@lists.example.org"
-    listdir.mkdir()
+    listdir = tmp_path / "lists.example.org" / "team"
+    listdir.mkdir(parents=True)
     a = _adapter(tmp_path)
     with patch("postino_core.adapters.mlmmj.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
@@ -248,8 +259,8 @@ def test_subscribe_raises_not_found_if_listdir_missing(tmp_path: Path) -> None:
 
 
 def test_subscribe_raises_mlmmj_error_on_nonzero(tmp_path: Path) -> None:
-    listdir = tmp_path / "team@lists.example.org"
-    listdir.mkdir()
+    listdir = tmp_path / "lists.example.org" / "team"
+    listdir.mkdir(parents=True)
     a = _adapter(tmp_path)
     with patch("postino_core.adapters.mlmmj.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(
@@ -260,8 +271,8 @@ def test_subscribe_raises_mlmmj_error_on_nonzero(tmp_path: Path) -> None:
 
 
 def test_unsubscribe_invokes_mlmmj_unsub_with_correct_argv(tmp_path: Path) -> None:
-    listdir = tmp_path / "team@lists.example.org"
-    listdir.mkdir()
+    listdir = tmp_path / "lists.example.org" / "team"
+    listdir.mkdir(parents=True)
     a = _adapter(tmp_path)
     with patch("postino_core.adapters.mlmmj.subprocess.run") as run:
         run.return_value = subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
@@ -283,7 +294,10 @@ def test_unsubscribe_raises_not_found_if_listdir_missing(tmp_path: Path) -> None
 
 
 def _seed_list(spool: Path, addr: str, owners: list[str]) -> Path:
-    listdir = spool / addr
+    """Seed a list spool dir using the v0.10 two-level layout: <spool>/<domain>/<localpart>/."""
+    _, _, domain = addr.rpartition("@")
+    localpart = addr[: addr.rindex("@")]
+    listdir = spool / domain / localpart
     (listdir / "control").mkdir(parents=True)
     (listdir / "control" / "owner").write_text("\n".join(owners) + "\n")
     return listdir
@@ -309,7 +323,7 @@ def test_get_parses_owners_and_subscriber_count(tmp_path: Path) -> None:
     assert ml.address == "team@lists.example.org"
     assert ml.owners == ["alice@example.org", "bob@example.org"]
     assert ml.subscriber_count == 2
-    assert ml.spool_dir == tmp_path / "team@lists.example.org"
+    assert ml.spool_dir == tmp_path / "lists.example.org" / "team"
 
 
 def test_get_raises_mlmmj_error_when_mlmmj_list_fails(tmp_path: Path) -> None:
@@ -345,3 +359,83 @@ def test_list_all_filters_by_domain(tmp_path: Path) -> None:
         result = a.list_all(domain="lists.example.org")
     addrs = [ml.address for ml in result]
     assert addrs == ["team@lists.example.org"]
+
+
+def test_list_all_walks_two_level_layout(tmp_path: Path) -> None:
+    # Manually lay out: <spool>/lists.example.org/team/control/owner
+    #                   <spool>/example.org/soci/control/owner
+    (tmp_path / "lists.example.org" / "team" / "control").mkdir(parents=True)
+    (tmp_path / "lists.example.org" / "team" / "control" / "owner").write_text(
+        "alice@example.org\n"
+    )
+    (tmp_path / "example.org" / "soci" / "control").mkdir(parents=True)
+    (tmp_path / "example.org" / "soci" / "control" / "owner").write_text("bob@example.org\n")
+    # Use a stub for mlmmj-list binary; patch _read_subscribers to return []
+    adapter = MlmmjAdapter(spool_root=tmp_path, mlmmj_uid=-1, mlmmj_gid=-1)
+    adapter._read_subscribers = lambda listdir: []  # pyright: ignore[reportPrivateUsage]  # WHY: monkeypatching private method in test to avoid subprocess invocation.
+
+    all_lists = adapter.list_all()
+    addrs = {ml.address for ml in all_lists}
+    assert addrs == {"team@lists.example.org", "soci@example.org"}
+
+    filtered = adapter.list_all(domain="lists.example.org")
+    assert {ml.address for ml in filtered} == {"team@lists.example.org"}
+
+
+def test_list_all_skips_deleting_sentinels(tmp_path: Path) -> None:
+    (tmp_path / "lists.example.org" / "team" / "control").mkdir(parents=True)
+    (tmp_path / "lists.example.org" / "team" / "control" / "owner").write_text("a@b.c\n")
+    (tmp_path / ".deleting.x").mkdir()
+    (tmp_path / "lists.example.org" / ".deleting.y" / "control").mkdir(parents=True)
+    (tmp_path / "lists.example.org" / ".deleting.y" / "control" / "owner").write_text("a@b.c\n")
+    adapter = MlmmjAdapter(spool_root=tmp_path, mlmmj_uid=-1, mlmmj_gid=-1)
+    adapter._read_subscribers = lambda listdir: []  # pyright: ignore[reportPrivateUsage]  # WHY: monkeypatching private method in test to avoid subprocess invocation.
+    addrs = {ml.address for ml in adapter.list_all()}
+    assert addrs == {"team@lists.example.org"}
+
+
+# ---------------------------------------------------------------------------
+# Task 10: _listdir two-level path (<spool>/<domain>/<localpart>/)
+# ---------------------------------------------------------------------------
+
+
+def test_listdir_composes_domain_localpart(tmp_path: Path) -> None:
+    adapter = MlmmjAdapter(
+        spool_root=tmp_path,
+        mlmmj_uid=-1,
+        mlmmj_gid=-1,
+    )
+    p = adapter._listdir("team@lists.example.org")  # pyright: ignore[reportPrivateUsage]  # WHY: direct _listdir access from test bypasses pyright's private-method enforcement.
+    assert p == tmp_path / "lists.example.org" / "team"
+
+
+def test_listdir_rejects_traversal_in_domain(tmp_path: Path) -> None:
+    adapter = MlmmjAdapter(spool_root=tmp_path, mlmmj_uid=-1, mlmmj_gid=-1)
+    with pytest.raises(FilesystemError):
+        adapter._listdir("team@../escape.example.org")  # pyright: ignore[reportPrivateUsage]  # WHY: direct _listdir access from test bypasses pyright's private-method enforcement.
+
+
+def test_listdir_rejects_traversal_in_localpart(tmp_path: Path) -> None:
+    adapter = MlmmjAdapter(spool_root=tmp_path, mlmmj_uid=-1, mlmmj_gid=-1)
+    with pytest.raises(FilesystemError):
+        # /  in local-part — split would create a third path component.
+        adapter._listdir("te/am@lists.example.org")  # pyright: ignore[reportPrivateUsage]  # WHY: direct _listdir access from test bypasses pyright's private-method enforcement.
+
+
+def test_listdir_rejects_symlink_at_domain_level(tmp_path: Path) -> None:
+    adapter = MlmmjAdapter(spool_root=tmp_path, mlmmj_uid=-1, mlmmj_gid=-1)
+    real = tmp_path / "real_domain"
+    real.mkdir()
+    (tmp_path / "lists.example.org").symlink_to(real)
+    with pytest.raises(FilesystemError):
+        adapter._listdir("team@lists.example.org")  # pyright: ignore[reportPrivateUsage]  # WHY: direct _listdir access from test bypasses pyright's private-method enforcement.
+
+
+def test_listdir_rejects_symlink_at_localpart_level(tmp_path: Path) -> None:
+    adapter = MlmmjAdapter(spool_root=tmp_path, mlmmj_uid=-1, mlmmj_gid=-1)
+    (tmp_path / "lists.example.org").mkdir()
+    real = tmp_path / "real_list"
+    real.mkdir()
+    (tmp_path / "lists.example.org" / "team").symlink_to(real)
+    with pytest.raises(FilesystemError):
+        adapter._listdir("team@lists.example.org")  # pyright: ignore[reportPrivateUsage]  # WHY: direct _listdir access from test bypasses pyright's private-method enforcement.

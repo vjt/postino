@@ -50,7 +50,7 @@ def list_env(e2e_write_env: WriteEnv, tmp_path: Path) -> WriteEnv:
     env["POSTINO_MLMMJ_UID"] = "-1"
     env["POSTINO_MLMMJ_GID"] = "-1"
 
-    # Seed the lists.example.org domain with transport=mlmmj.
+    # Seed the lists.example.org domain (virtual transport; v0.10 no longer uses mlmmj transport).
     md = e2e_write_env.metadata
     with e2e_write_env.engine.begin() as conn:
         conn.execute(
@@ -63,7 +63,7 @@ def list_env(e2e_write_env: WriteEnv, tmp_path: Path) -> WriteEnv:
                 mailboxes=0,
                 maxquota=0,
                 quota=0,
-                transport="mlmmj",
+                transport="virtual",
                 backupmx=0,
                 created="2026-05-09 12:00:00",
                 modified="2026-05-09 12:00:00",
@@ -89,7 +89,7 @@ def test_list_add_creates_spool_tree(list_env: WriteEnv) -> None:
         "alice@example.org",
     )
     assert r.returncode == 0, r.stderr
-    assert (spool / "team@lists.example.org" / "control" / "owner").exists()
+    assert (spool / "lists.example.org" / "team" / "control" / "owner").exists()
 
 
 def test_list_sub_unsub_round_trip(list_env: WriteEnv) -> None:
@@ -173,7 +173,7 @@ def test_list_rm_force_removes_spool(list_env: WriteEnv) -> None:
         "--force",
     )
     assert r.returncode == 0
-    assert not (spool / "team@lists.example.org").exists()
+    assert not (spool / "lists.example.org" / "team").exists()
 
 
 def test_list_unconfigured_exits_4(e2e_write_env: WriteEnv) -> None:

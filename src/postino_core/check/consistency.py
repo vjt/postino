@@ -105,6 +105,13 @@ def run_consistency_check(
     findings.append(_check_mailbox_base(settings))
     findings.append(_check_postcreation_hook(settings))
     findings.extend(_check_postfix_sql_cfs(settings, engine))
+    if settings.mlmmj_spool_dir is not None:
+        main_cf = settings.postfix_sql_dir.parent / "main.cf"
+        master_cf = settings.postfix_sql_dir.parent / "master.cf"
+        findings.extend(check_postfix_transport_maps(main_cf))
+        findings.extend(check_recipient_delimiter(main_cf))
+        findings.extend(check_master_cf_mlmmj_pipes(master_cf))
+        findings.extend(check_owner_aliases_for_routes(engine, metadata))
     if deep:
         findings.extend(_check_deep(settings, engine, metadata))
     return CheckResult(findings=findings)
@@ -415,22 +422,25 @@ def _check_deep(s: PostinoSettings, engine: Engine, md: MetaData) -> list[Findin
 
 
 def _check_mailing_lists(s: PostinoSettings, engine: Engine, md: MetaData) -> list[Finding]:
-    """Reconcile mlmmj spool tree against ``domain.transport='mlmmj'`` rows.
+    """Reconcile mlmmj spool tree against known ``domain`` rows.
 
     Surfaces three drift conditions invisible to the rest of the deep
     check:
 
-    1. ``domain`` rows with ``transport='mlmmj'`` but missing a spool
-       dir (failed list-create that left no FS trace; mail for that
-       domain currently bounces).
-    2. Spool dirs under ``mlmmj_spool_dir`` whose ``@<domain>`` portion
-       does not match any ``domain`` row, or whose ``control/owner``
-       file is missing/empty (corrupt list state).
+    1. Spool dirs under ``mlmmj_spool_dir`` whose ``@<domain>`` portion
+       does not match any ``domain`` row (orphan spool — domain was
+       deleted but the spool was not cleaned up).
+    2. Spool dirs whose ``control/owner`` file is missing/empty
+       (corrupt list state).
     3. ``.deleting.*`` / ``.tmp-*`` artefact dirs left behind by a
        partial-delete or partial-create rollback. The current
        MailingListService.delete is FS-first and uses no rename
        sentinel, but operators can move spool dirs aside by hand —
        and a future delete refactor may adopt the rename pattern.
+
+    v0.10: ``domain.transport`` is no longer used for list routing.
+    The check matches spool dirs against all ``domain`` rows instead of
+    only rows with ``transport='mlmmj'``.
 
     Skipped silently when ``mlmmj_spool_dir`` is not configured.
     """
@@ -444,9 +454,7 @@ def _check_mailing_lists(s: PostinoSettings, engine: Engine, md: MetaData) -> li
     with engine.connect() as conn:
         mlmmj_domains = {
             str(r._mapping["domain"])  # type: ignore[index]  # WHY: SQLAlchemy RowMapping[str, Any] indexing.
-            for r in conn.execute(
-                select(domain_t.c.domain).where(domain_t.c.transport == "mlmmj")
-            ).fetchall()
+            for r in conn.execute(select(domain_t.c.domain)).fetchall()
         }
 
     out: list[Finding] = []
@@ -499,11 +507,11 @@ def _check_mailing_lists(s: PostinoSettings, engine: Engine, md: MetaData) -> li
             _err(
                 "mlmmj_lists_orphan_domain",
                 f"{len(orphan_address)} spool dir(s) without a matching "
-                f"transport=mlmmj domain row: {orphan_address[:5]}",
+                f"domain row: {orphan_address[:5]}",
             )
         )
     else:
-        out.append(_ok("mlmmj_lists_orphan_domain", "all spool dirs map to mlmmj domains"))
+        out.append(_ok("mlmmj_lists_orphan_domain", "all spool dirs map to a known domain"))
 
     if artefacts:
         out.append(
@@ -734,3 +742,224 @@ def _check_orphan_domain_maildirs(
             )
         ]
     return [_ok("orphan_domain_maildirs", "no orphan per-domain maildirs on disk")]
+
+
+def check_postfix_transport_maps(main_cf: Path) -> list[Finding]:
+    """Validate main.cf transport_maps wiring for v0.10+ mlmmj routing.
+
+    Required: ``transport_maps = mysql:<routes-cf>, mysql:<virtual-transport-cf>``
+    in that order. The routes source MUST appear FIRST so per-list
+    regex patterns win over per-domain catchall.
+    """
+    if not main_cf.exists():
+        return [
+            Finding(
+                name="postfix-main-cf",
+                severity="error",
+                message=f"main.cf not found at {main_cf}",
+            )
+        ]
+    content = main_cf.read_text()
+    line = next(
+        (
+            ln.split("=", 1)[1].strip()
+            for ln in content.splitlines()
+            if ln.strip().startswith("transport_maps")
+        ),
+        None,
+    )
+    if line is None:
+        return [
+            Finding(
+                name="postfix-transport-maps",
+                severity="error",
+                message=(
+                    "main.cf: transport_maps is not set; v0.10 requires "
+                    "transport_maps = mysql:sql-routes.cf, mysql:sql-virtual_transport.cf"
+                ),
+            )
+        ]
+    sources = [s.strip() for s in line.split(",")]
+    findings: list[Finding] = []
+    if len(sources) < 2:
+        findings.append(
+            Finding(
+                name="postfix-transport-maps",
+                severity="error",
+                message=(
+                    f"main.cf: transport_maps has only {len(sources)} source(s); "
+                    "v0.10 requires both mysql:sql-routes.cf and mysql:sql-virtual_transport.cf"
+                ),
+            )
+        )
+        return findings
+    first, second = sources[0], sources[1]
+    if "routes" not in first:
+        findings.append(
+            Finding(
+                name="postfix-transport-maps-order",
+                severity="error",
+                message=(
+                    f"main.cf: first transport_maps source must reference routes ('routes' "
+                    f"in path); got {first!r}. Per-list patterns must win over per-domain catchall."
+                ),
+            )
+        )
+    if not (first.startswith("mysql:") and second.startswith("mysql:")):
+        findings.append(
+            Finding(
+                name="postfix-transport-maps-type",
+                severity="error",
+                message=(
+                    f"main.cf: both transport_maps sources must be mysql:; "
+                    f"got {first!r}, {second!r}"
+                ),
+            )
+        )
+    if not findings:
+        findings.append(
+            Finding(
+                name="postfix-transport-maps",
+                severity="info",
+                message=f"transport_maps OK: {first}, {second}",
+            )
+        )
+    return findings
+
+
+_REQUIRED_MASTER_CF_PIPES = (
+    "mlmmj-receive",
+    "mlmmj-bounce",
+    "mlmmj-sub",
+    "mlmmj-unsub",
+    "mlmmj-help",
+)
+
+
+def check_master_cf_mlmmj_pipes(master_cf: Path) -> list[Finding]:
+    """Validate master.cf has the 5 v0.10 mlmmj pipe service blocks."""
+    if not master_cf.exists():
+        return [
+            Finding(
+                name="master-cf",
+                severity="error",
+                message=f"master.cf not found at {master_cf}",
+            )
+        ]
+    text = master_cf.read_text()
+    findings: list[Finding] = []
+    for name in _REQUIRED_MASTER_CF_PIPES:
+        # service blocks start with `<name> unix ... pipe`
+        if not any(ln.split() and ln.split()[0] == name for ln in text.splitlines()):
+            findings.append(
+                Finding(
+                    name=f"master-cf-{name}",
+                    severity="error",
+                    message=f"master.cf missing service block: {name}",
+                )
+            )
+        else:
+            findings.append(
+                Finding(
+                    name=f"master-cf-{name}",
+                    severity="info",
+                    message=f"master.cf has {name}",
+                )
+            )
+    return findings
+
+
+def check_owner_aliases_for_routes(engine: Engine, md: MetaData) -> list[Finding]:
+    """For every distinct list_address in routes, confirm a matching
+    ``<localpart>-owner@<domain>`` alias row exists in the alias table.
+
+    A mailing list without an ``-owner`` alias means bounce messages and
+    owner-directed mail (e.g. ``list-owner@domain``) have no delivery target.
+    This surfaces as severity=error so the operator can create the alias
+    before going live.
+
+    Returns a single info finding when the routes table is empty or all
+    lists have their -owner alias.
+    """
+    routes_t = md.tables.get("routes")
+    alias_t = md.tables.get("alias")
+    if routes_t is None or alias_t is None:
+        return [
+            _err("owner-aliases", "routes or alias table missing — cannot verify -owner aliases")
+        ]
+    findings: list[Finding] = []
+    with engine.connect() as conn:
+        list_addrs = conn.execute(
+            select(routes_t.c.list_address).where(routes_t.c.list_address.is_not(None)).distinct()
+        ).fetchall()
+        for (la,) in list_addrs:
+            la_str = str(la)
+            localpart, _, domain = la_str.partition("@")
+            owner_addr = f"{localpart}-owner@{domain}"
+            row = conn.execute(
+                select(alias_t.c.address).where(alias_t.c.address == owner_addr)
+            ).fetchone()
+            if row is None:
+                findings.append(
+                    Finding(
+                        name=f"owner-alias-{la_str}",
+                        severity="error",
+                        message=(
+                            f"missing -owner alias row for list {la_str}; "
+                            f"expected alias.address={owner_addr!r}"
+                        ),
+                    )
+                )
+    if not findings:
+        findings.append(
+            Finding(
+                name="owner-aliases",
+                severity="info",
+                message="all routes have matching -owner aliases",
+            )
+        )
+    return findings
+
+
+def check_recipient_delimiter(main_cf: Path) -> list[Finding]:
+    """v0.10 needs recipient_delimiter to contain both `+` (mailbox
+    subaddressing) and `-` (mlmmj hyphen-suffix dispatch)."""
+    if not main_cf.exists():
+        return []
+    text = main_cf.read_text()
+    line = next(
+        (
+            ln.split("=", 1)[1].strip()
+            for ln in text.splitlines()
+            if ln.strip().startswith("recipient_delimiter")
+        ),
+        None,
+    )
+    if line is None:
+        return [
+            Finding(
+                name="recipient-delimiter",
+                severity="error",
+                message=(
+                    "main.cf: recipient_delimiter is not set; v0.10 requires "
+                    "recipient_delimiter = +-"
+                ),
+            )
+        ]
+    if "+" not in line or "-" not in line:
+        return [
+            Finding(
+                name="recipient-delimiter",
+                severity="error",
+                message=(
+                    f"main.cf: recipient_delimiter must contain both '+' and '-'; got {line!r}"
+                ),
+            )
+        ]
+    return [
+        Finding(
+            name="recipient-delimiter",
+            severity="info",
+            message=f"recipient_delimiter OK: {line}",
+        )
+    ]

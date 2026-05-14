@@ -147,44 +147,43 @@ class MlmmjAdapter:
         raise MlmmjError(f"{cmd[0]}: exit {result.returncode}: {stderr}")
 
     def _listdir(self, address: EmailStr) -> Path:
-        """Compose ``<spool_root>/<address>`` with path-traversal and
-        symlink defenses.
+        """Compose ``<spool_root>/<domain>/<localpart>/`` with
+        path-traversal + symlink defenses applied at each level.
 
-        Rejects:
-        - addresses containing a ``/`` (the local-part of an EmailStr can
-          legally contain quoted slashes; we refuse them because they
-          would split the path component).
-        - addresses containing ``..`` segments.
-        - results that escape ``spool_root`` (e.g. via prefix sibling
-          directories: ``/var/spool/mlmmj2/foo`` for a root of
-          ``/var/spool/mlmmj``).
-        - results that equal ``spool_root`` itself.
-        - any pre-existing component that is a symlink (symlinks under
-          the spool root would let an attacker redirect mlmmj writes).
+        v0.10 layout mirrors PA's virtual mailbox tree
+        (``<vmail>/<domain>/<localpart>/Maildir/``). Multi-domain stacks
+        are safe by construction.
+
+        Rejects (per component, both domain and localpart):
+        - ``/``, NUL, newline, CR, backslash
+        - leading dot (``.deleting.*`` sentinel namespace)
+        - ``..`` / ``.``
+        - the literal ``_DELETING_PREFIX`` (graveyard namespace)
+        - pre-existing symlinks at either level
+        - result equal to or escaping ``spool_root``
         """
         addr_str = str(address)
-        # Defend against bypass-the-EmailStr-boundary callers. EmailStr
-        # would reject most of these, but a future caller passing a
-        # plain str into the adapter must still fail closed.
-        # Reject:
-        # - path separators / traversal segments
-        # - leading dot (`.deleting.*` sentinel collision)
-        # - NUL / newline / CR / backslash (path-component sanitization)
-        # - the literal `_DELETING_PREFIX` (don't let an address claim
-        #   the rename graveyard namespace)
+        if "@" not in addr_str:
+            raise FilesystemError(f"path traversal: {address!r} missing '@'")
+        localpart, _, domain = addr_str.rpartition("@")
+        if not localpart or not domain:
+            raise FilesystemError(f"path traversal: {address!r} has empty local-part or domain")
         forbidden_chars = ("/", "\x00", "\n", "\r", "\\")
-        if (
-            any(c in addr_str for c in forbidden_chars)
-            or addr_str in ("..", ".")
-            or addr_str.startswith(".")
-            or addr_str.startswith(_DELETING_PREFIX)
-        ):
-            raise FilesystemError(f"path traversal: {address!r} contains invalid path characters")
-        joined = self._spool_root / addr_str
+        for label, component in (("domain", domain), ("localpart", localpart)):
+            if (
+                any(c in component for c in forbidden_chars)
+                or component in ("..", ".")
+                or component.startswith(".")
+                or component.startswith(_DELETING_PREFIX)
+            ):
+                raise FilesystemError(
+                    f"path traversal: {label} {component!r} contains invalid path characters"
+                )
+        joined = self._spool_root / domain / localpart
         # Component-by-component lstat: refuse any symlink under the
         # spool root rather than calling resolve() (which follows them).
         cursor = self._spool_root
-        for part in (addr_str,):
+        for part in (domain, localpart):
             cursor = cursor / part
             try:
                 st = cursor.lstat()
@@ -442,38 +441,44 @@ class MlmmjAdapter:
         )
 
     def list_all(self, *, domain: str | None = None) -> list[MailingList]:
-        """Scan ``spool_root`` for list dirs, optionally filtered by FQDN.
+        """Scan ``spool_root`` for list dirs under the v0.10 two-level
+        layout ``<spool>/<domain>/<localpart>/``. Filter by FQDN when
+        ``domain`` is set.
 
-        A directory counts as a list if it contains ``control/owner``."""
+        A directory counts as a list if it contains ``control/owner``.
+        Dot-prefixed entries at any level are skipped (``.deleting.*``
+        rename graveyards, ``.create.lock``)."""
         if not self._spool_root.exists():
             return []
         out: list[MailingList] = []
-        for child in sorted(self._spool_root.iterdir()):
-            if not child.is_dir():
+        domain_iter: list[Path] = (
+            [self._spool_root / domain]
+            if domain is not None
+            else sorted(self._spool_root.iterdir())
+        )
+        for dom_dir in domain_iter:
+            if not dom_dir.exists() or not dom_dir.is_dir():
                 continue
-            # Skip dot-prefixed sentinels: ``.deleting.*`` rename graveyard
-            # from a partial delete, ``.create.lock`` directory if ever
-            # created in error. The consistency checker handles surfacing
-            # these to the operator.
-            if child.name.startswith("."):
+            if dom_dir.name.startswith("."):
                 continue
-            if not (child / "control" / "owner").exists():
-                continue
-            address = child.name
-            if domain is not None:
-                _, _, fqdn = address.partition("@")
-                if fqdn != domain:
+            for list_dir in sorted(dom_dir.iterdir()):
+                if not list_dir.is_dir():
                     continue
-            owners = self._read_owners(child)
-            subscribers = self._read_subscribers(child)
-            out.append(
-                MailingList(
-                    address=address,
-                    owners=owners,
-                    subscriber_count=len(subscribers),
-                    spool_dir=child,
+                if list_dir.name.startswith("."):
+                    continue
+                if not (list_dir / "control" / "owner").exists():
+                    continue
+                address = f"{list_dir.name}@{dom_dir.name}"
+                owners = self._read_owners(list_dir)
+                subscribers = self._read_subscribers(list_dir)
+                out.append(
+                    MailingList(
+                        address=address,
+                        owners=owners,
+                        subscriber_count=len(subscribers),
+                        spool_dir=list_dir,
+                    )
                 )
-            )
         return out
 
     def _read_owners(self, listdir: Path) -> list[str]:

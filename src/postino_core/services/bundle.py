@@ -104,15 +104,19 @@ def build_services(
     )
     mailing_list: MailingListService | None = None
     if settings.mlmmj_spool_dir is not None:
+        from postino_core.repos.routes import RoutesRepository
+
         adapter = MlmmjAdapter(
             spool_root=settings.mlmmj_spool_dir,
             mlmmj_uid=settings.mlmmj_uid,
             mlmmj_gid=settings.mlmmj_gid,
         )
+        routes_repo = RoutesRepository(engine=engine, metadata=metadata)
         mailing_list = MailingListService(
             engine=engine,
             metadata=metadata,
             adapter=adapter,
+            routes=routes_repo,
             clock=clock,
             audit_writer=writer,
         )
@@ -142,7 +146,6 @@ def build_services(
             clock=clock,
             fs=fs,
             lmtp_destination=settings.lmtp_destination,
-            mlmmj_enabled=settings.mlmmj_spool_dir is not None,
             audit_writer=writer,
         ),
         quota=QuotaService(engine=engine, metadata=metadata),

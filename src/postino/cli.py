@@ -18,6 +18,7 @@ from postino.commands import check as check_cmd
 from postino.commands import domain as domain_cmd
 from postino.commands import list as list_cmd
 from postino.commands import quota as quota_cmd
+from postino.commands import schema as schema_cmd
 from postino.commands import status as status_cmd
 from postino.commands import user as user_cmd
 from postino.exit import CliState, exit_with_error
@@ -37,6 +38,7 @@ app.add_typer(alias_cmd.app, name="alias", help="Alias CRUD.")
 app.add_typer(domain_cmd.app, name="domain", help="Domain CRUD.")
 app.add_typer(list_cmd.app, name="list", help="Mailing-list (mlmmj) CRUD.")
 app.add_typer(quota_cmd.app, name="quota", help="Quota inspection.")
+app.add_typer(schema_cmd.app, name="schema", help="Apply postino-managed schema migrations.")
 _SUBCMD_EPILOG = "Run `postino --help` for global options (--json, --quiet, --no-color)."
 
 app.command(

@@ -42,9 +42,10 @@ def test_unknown_enum_raises() -> None:
         MailboxStatus(99)
 
 
-def test_domain_transport_mlmmj_raw_value() -> None:
-    assert DomainTransport("mlmmj") is DomainTransport.MLMMJ
-    assert DomainTransport.MLMMJ.value == "mlmmj"
+def test_domain_transport_mlmmj_removed() -> None:
+    """v0.10 BREAKING: 'mlmmj' is no longer a valid DomainTransport value."""
+    with pytest.raises(ValueError):
+        DomainTransport("mlmmj")
 
 
 def test_identity_backend_has_hybrid() -> None:

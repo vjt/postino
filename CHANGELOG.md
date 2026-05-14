@@ -4,6 +4,75 @@ All notable changes to `il-postino` are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and is generated automatically by [git-cliff](https://git-cliff.org) from
 commit subjects on every tag.
+
+## [0.10.0] - 2026-05-14
+
+### BREAKING
+
+- **mlmmj listdir layout changed.** v0.3-v0.9 used `<spool>/<full-email>/`;
+  v0.10 uses `<spool>/<domain>/<localpart>/`. Operator migration:
+  ```sh
+  for d in /var/spool/mlmmj/*@*; do
+    [ -d "$d" ] || continue
+    name=$(basename "$d")
+    lp="${name%@*}"
+    dom="${name#*@}"
+    mkdir -p "/var/spool/mlmmj/$dom"
+    mv "$d" "/var/spool/mlmmj/$dom/$lp"
+  done
+  ```
+
+- **`DomainTransport.MLMMJ` removed.** `postino domain add --transport
+  mlmmj` is no longer accepted. Lists are routed per-list via the new
+  `routes` table; `domain.transport` continues to drive non-list mail
+  (`virtual`, `lmtp`, `relay`). Existing `domain.transport='mlmmj'` rows
+  are operator-side cleanup: `UPDATE domain SET transport='virtual'
+  WHERE transport='mlmmj'`.
+
+- **New required SQL table `routes`.** Run once before starting postinod
+  or any `postino list` command:
+  ```sh
+  postino schema migrate
+  ```
+  The DDL is included in the postino package and applied idempotently.
+  Note: postino startup now requires this table — `reflect_schema`
+  loads `_REQUIRED_TABLES = (..., "routes")`. Pre-v0.10 deployments
+  will fail-fast with `ConfigError` until the migration is applied.
+
+- **Postfix `transport_maps` and `recipient_delimiter` requirements.**
+  `main.cf` MUST now declare:
+  ```
+  transport_maps = mysql:/etc/postfix/sql-routes.cf, mysql:/etc/postfix/sql-virtual_transport_maps.cf
+  recipient_delimiter = +-
+  ```
+  And `master.cf` MUST carry 5 pipe service blocks (`mlmmj-receive`,
+  `mlmmj-bounce`, `mlmmj-sub`, `mlmmj-unsub`, `mlmmj-help`). See
+  `docs/postino-mlmmj.md` for the canonical snippets.
+
+### Added
+
+- New `routes` SQL table — postino-managed routing patterns.
+- `postino schema migrate` — apply v0.10 routes DDL idempotently.
+- `postino list add` now writes 5 routes rows + 1 `-owner` alias row.
+- `postino list rm` cleans them up.
+- `postino check` validates `transport_maps`, `recipient_delimiter`,
+  `master.cf` pipe entries, and `-owner` alias presence.
+- Shared-domain mailing lists supported (`soci@example.org` alongside
+  `alice@example.org` mailbox).
+
+### Changed
+
+- `MlmmjAdapter._listdir` composes `<spool>/<domain>/<localpart>/`.
+- `MlmmjAdapter.list_all` walks the two-level layout.
+- `MailingListService` constructor takes a `routes: RoutesRepository`.
+- `DomainService` no longer takes `mlmmj_enabled`.
+
+### Removed
+
+- `DomainTransport.MLMMJ` enum value.
+- `MailingListService._validate_domain_is_mlmmj`.
+- `DomainService` mlmmj-transport refusal.
+
 ## [0.8.5] — 2026-05-13
 
 ### CI
