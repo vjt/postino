@@ -21,9 +21,10 @@ import hashlib
 import hmac
 import os
 import pwd
+import re
 import subprocess
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import MetaData, select, text
@@ -233,6 +234,75 @@ def _check_vmail_identity(s: PostinoSettings) -> list[Finding]:
             )
         else:
             out.append(_ok("vmail_gid", f"{s.vmail_gid} → 'vmail'"))
+    return out
+
+
+GrantScope = Literal["global"] | tuple[str, str]
+
+
+class GrantRow(NamedTuple):
+    """One parsed SHOW GRANTS row.
+
+    scope:
+      "global"      → applies to all dbs and tables (matches *.*)
+      (db, "*")     → applies to all tables in `db`
+      (db, table)   → applies to one specific (db, table)
+    privs: frozenset of privilege names ('SELECT', 'INSERT', ...).
+           Filtered to data-path privs we care about. USAGE is dropped.
+    """
+
+    scope: GrantScope
+    privs: frozenset[str]
+
+
+_DATA_PATH_PRIVS: frozenset[str] = frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"})
+
+# Capture: privilege list, db scope, table scope.
+# Canonical row: GRANT <priv-list> ON `db`.`table` TO `user`@`host` [WITH GRANT OPTION]
+# Variants:      ON *.*      → db = '*', table = '*'
+#                ON `db`.*   → db = 'db', table = '*'
+# Backtick-quoting is the MySQL default; unquoted forms are accepted too.
+_GRANT_RE = re.compile(
+    r"^\s*GRANT\s+(?P<privs>.+?)\s+ON\s+"
+    r"(?:`(?P<db_q>[^`]+)`|(?P<db_u>\*|[A-Za-z0-9_]+))"
+    r"\."
+    r"(?:`(?P<tbl_q>[^`]+)`|(?P<tbl_u>\*|[A-Za-z0-9_]+))"
+    r"\s+TO\s+",
+    re.IGNORECASE,
+)
+
+
+def _parse_show_grants(rows: list[str]) -> list[GrantRow]:
+    """Parse a SHOW GRANTS FOR CURRENT_USER() result into GrantRow tuples.
+
+    Skips role grants (no ON clause / wrong shape), PROXY grants, and
+    anything else the canonical-form regex does not match.
+    """
+    out: list[GrantRow] = []
+    for line in rows:
+        m = _GRANT_RE.match(line)
+        if m is None:
+            continue
+        priv_str = m.group("privs").upper().strip()
+        # Reject PROXY grants — they match the regex shape only by accident
+        # when ON is followed by an empty-backtick db. Cheap guard:
+        if "PROXY" in priv_str:
+            continue
+        privs: frozenset[str]
+        if priv_str == "ALL PRIVILEGES" or priv_str == "ALL":
+            privs = frozenset(_DATA_PATH_PRIVS)
+        else:
+            privs = frozenset(
+                p.strip() for p in priv_str.split(",") if p.strip() in _DATA_PATH_PRIVS
+            )
+        if not privs:
+            continue  # USAGE-only or unknown privs — irrelevant
+        db_match = m.group("db_q") or m.group("db_u")
+        tbl_match = m.group("tbl_q") or m.group("tbl_u")
+        scope: GrantScope = (
+            "global" if db_match == "*" and tbl_match == "*" else (db_match, tbl_match)
+        )
+        out.append(GrantRow(scope=scope, privs=privs))
     return out
 
 
