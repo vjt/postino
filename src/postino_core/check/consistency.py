@@ -21,6 +21,7 @@ import hashlib
 import hmac
 import os
 import pwd
+import subprocess
 from pathlib import Path
 from typing import Literal
 
@@ -72,6 +73,9 @@ _POSTFIX_CF_LEGACY_NAMES: dict[str, tuple[str, ...]] = {
 }
 _MAILDIRPP_SUBDIRS = ("cur", "new", "tmp")
 _HOOK_WRITE_BITS = 0o022
+_SHELL_INTERPRETERS = frozenset({"sh", "bash", "dash"})
+_SHEBANG_READ_BYTES = 256
+_SH_SYNTAX_TIMEOUT_S = 5.0
 # A4-A4.4: `sql-virtual_*.cf` files carry the cleartext SQL password.
 # Postfix's canonical layout is mode 0o640 owner root group postfix —
 # postfix's worker uid needs read on the group bit but MUST NOT be
@@ -229,6 +233,66 @@ def _check_vmail_identity(s: PostinoSettings) -> list[Finding]:
         else:
             out.append(_ok("vmail_gid", f"{s.vmail_gid} → 'vmail'"))
     return out
+
+
+def _parse_shebang_interp(shebang_line: str) -> str | None:
+    """Return the basename of the interpreter in a shebang, or None.
+
+    Handles two forms:
+      #!/bin/sh                    → 'sh'
+      #!/usr/bin/env bash          → 'bash'
+    Anything else (no shebang, malformed) returns None.
+    """
+    if not shebang_line.startswith("#!"):
+        return None
+    tokens = shebang_line[2:].strip().split()
+    if not tokens:
+        return None
+    interp_path = tokens[0]
+    interp_name = Path(interp_path).name
+    if interp_name == "env" and len(tokens) >= 2:
+        return Path(tokens[1]).name
+    return interp_name
+
+
+def _check_postcreation_hook_syntax(s: PostinoSettings) -> Finding:
+    """Syntactic validation of the postcreation hook.
+
+    Runs ``sh -n`` (or the variant matching the hook's shebang) on the
+    hook. Only POSIX-shell shebangs trigger the syntax check; other
+    interpreters emit an info-level "skipped" finding.
+
+    Hooks unreadable or missing defer to the existing
+    ``_check_postcreation_hook`` finding.
+    """
+    name = "postcreation_hook_syntax"
+    try:
+        with s.postcreation_hook.open("rb") as f:
+            head = f.read(_SHEBANG_READ_BYTES)
+    except OSError:
+        return _ok(name, "read failed, see postcreation_hook finding")
+
+    first_line = head.split(b"\n", 1)[0].decode("utf-8", errors="replace")
+    interp = _parse_shebang_interp(first_line)
+    if interp is None:
+        return _ok(name, "no shebang, skipped")
+    if interp not in _SHELL_INTERPRETERS:
+        return _ok(name, f"non-shell interpreter {interp!r}, skipped")
+    try:
+        result = subprocess.run(
+            [interp, "-n", str(s.postcreation_hook)],
+            capture_output=True,
+            timeout=_SH_SYNTAX_TIMEOUT_S,
+            check=False,
+        )
+    except FileNotFoundError:
+        return _ok(name, f"interpreter {interp!r} not on PATH, skipped")
+    except subprocess.TimeoutExpired:
+        return _err(name, f"{interp} -n timed out after {_SH_SYNTAX_TIMEOUT_S}s")
+    if result.returncode == 0:
+        return _ok(name, f"{interp} -n passed")
+    stderr = result.stderr.decode("utf-8", errors="replace").strip()[:200]
+    return _err(name, f"{interp} -n failed: {stderr}")
 
 
 def _alias_domain_has_rows(engine: Engine) -> bool:
