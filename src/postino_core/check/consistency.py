@@ -366,18 +366,23 @@ def _check_db_grants(s: PostinoSettings, engine: Engine) -> list[Finding]:
                     f"missing privs on {db}.{table}: {sorted(missing)}",
                 )
             )
-    # Over-privilege rollup: any priv on postino tables that's not required.
-    all_granted: set[str] = set()
-    all_required: set[str] = set()
+    # Over-privilege rollup: any granted priv on a postino table that
+    # isn't in that table's required set. Detected per-table to catch
+    # "ALL on log" (log only needs SELECT+INSERT) — a union-style check
+    # would miss it because some other table requires UPDATE+DELETE.
+    per_table_extras: dict[str, frozenset[str]] = {}
     for table, required in _REQUIRED_GRANTS.items():
-        all_granted |= granted_per_table[table]
-        all_required |= required
-    extras = (all_granted & _DATA_PATH_PRIVS) - all_required
-    if extras:
+        extras = (granted_per_table[table] & _DATA_PATH_PRIVS) - required
+        if extras:
+            per_table_extras[table] = extras
+    if per_table_extras:
+        details = ", ".join(
+            f"{tbl}: {sorted(privs)}" for tbl, privs in sorted(per_table_extras.items())
+        )
         out.append(
             _warn(
                 "db_grants:overprivileged",
-                f"user has extra data-path privs on postino tables: {sorted(extras)}",
+                f"user has extra data-path privs on postino tables ({details})",
             )
         )
     if not out:

@@ -67,3 +67,19 @@ def test_db_grants_missing_insert_on_mailbox_errors(tmp_path: Path) -> None:
     mailbox_err = next(f for f in findings if f.name == "db_grants:mailbox")
     assert mailbox_err.severity == "error"
     assert "INSERT" in mailbox_err.message
+
+
+def test_db_grants_all_privileges_on_db_warns_overprivileged(tmp_path: Path) -> None:
+    rows = [
+        "GRANT USAGE ON *.* TO `postino`@`%`",
+        "GRANT ALL PRIVILEGES ON `postfix`.* TO `postino`@`%`",
+    ]
+    engine = _stub_engine("postfix", rows)
+    findings = _check_db_grants(_settings(tmp_path), engine)
+    # No missing-priv errors (ALL covers everything).
+    assert all(
+        f.name != f"db_grants:{t}" for f in findings for t in ("mailbox", "alias", "log")
+    )
+    # But log only needs SELECT+INSERT; ALL gives UPDATE+DELETE → overpriv warn.
+    over = next(f for f in findings if f.name == "db_grants:overprivileged")
+    assert over.severity == "warn"
