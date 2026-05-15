@@ -15,6 +15,7 @@ from rich.traceback import install as install_traceback
 
 from postino.commands import alias as alias_cmd
 from postino.commands import check as check_cmd
+from postino.commands import config as config_cmd
 from postino.commands import domain as domain_cmd
 from postino.commands import list as list_cmd
 from postino.commands import quota as quota_cmd
@@ -39,6 +40,7 @@ app.add_typer(domain_cmd.app, name="domain", help="Domain CRUD.")
 app.add_typer(list_cmd.app, name="list", help="Mailing-list (mlmmj) CRUD.")
 app.add_typer(quota_cmd.app, name="quota", help="Quota inspection.")
 app.add_typer(schema_cmd.app, name="schema", help="Apply postino-managed schema migrations.")
+app.add_typer(config_cmd.app, name="config", help="Postfix + dovecot config management.")
 _SUBCMD_EPILOG = "Run `postino --help` for global options (--json, --quiet, --no-color)."
 
 app.command(
@@ -141,7 +143,12 @@ def _entry(  # pyright: ignore[reportUnusedFunction]
     # postino.commands.schema._load_settings_for_migrate); leave ctx.obj
     # unset for that subcommand. Every other command requires services
     # and goes through the normal path below.
-    if ctx.invoked_subcommand == "schema":
+    # `postino config gen` carries its own DB URL plumbing (--db-url /
+    # POSTINO_DB_URL / TTY prompt) and is explicitly meant to run on a
+    # host that has no postino.toml yet (that's the whole point — emit
+    # the configs that postino will later consume). Same skip rationale
+    # as `schema`.
+    if ctx.invoked_subcommand in {"schema", "config"}:
         return
     try:
         settings = _load_settings()

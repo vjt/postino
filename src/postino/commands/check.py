@@ -17,7 +17,7 @@ import sys
 import typer
 from rich.console import Console
 
-from postino.exit import exit_with_error, get_services, is_json, is_no_color
+from postino.exit import exit_with_error, get_services, is_json, is_no_color, is_quiet
 from postino_core.check.consistency import CheckResult, run_consistency_check
 from postino_core.errors import ConfigError
 
@@ -30,6 +30,15 @@ def run(
         help="Reconcile mailbox rows against maildirs on disk and check FK substitutes.",
     ),
 ) -> None:
+    # WHY (v0.12): `postino check` is being renamed to `postino config check`
+    # in v0.13. One minor release of stderr-only deprecation warning so
+    # ops scripts can be updated without an immediate hard break. JSON
+    # output stays on stdout; this print is stderr only.
+    if not is_quiet(ctx):
+        print(
+            "WARN: `postino check` is moving to `postino config check` in v0.13. Update scripts.",
+            file=sys.stderr,
+        )
     s = get_services(ctx)
     result = run_consistency_check(
         settings=s.settings,
