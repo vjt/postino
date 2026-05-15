@@ -125,6 +125,7 @@ def run_consistency_check(
     findings.append(_check_required_tables(metadata))
     findings.append(_check_mailbox_base(settings))
     findings.append(_check_postcreation_hook(settings))
+    findings.append(_check_postcreation_hook_syntax(settings))
     findings.extend(_check_vmail_identity(settings))
     findings.extend(_check_postfix_sql_cfs(settings, engine))
     if settings.mlmmj_spool_dir is not None:
