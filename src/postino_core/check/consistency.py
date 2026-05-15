@@ -394,10 +394,15 @@ def _check_db_grants(s: PostinoSettings, engine: Engine) -> list[Finding]:
 def _parse_shebang_interp(shebang_line: str) -> str | None:
     """Return the basename of the interpreter in a shebang, or None.
 
-    Handles two forms:
+    Handles three forms:
       #!/bin/sh                    → 'sh'
       #!/usr/bin/env bash          → 'bash'
-    Anything else (no shebang, malformed) returns None.
+      #!/usr/bin/env -S bash       → 'bash'  (skip `-S` and other -flags)
+
+    Anything else (no shebang, malformed, bare `env`) returns None.
+    The `-S` flag tells env to split its single argument into multiple
+    tokens (POSIX exec quirk); the real interpreter is the first
+    non-flag token after env.
     """
     if not shebang_line.startswith("#!"):
         return None
@@ -406,8 +411,11 @@ def _parse_shebang_interp(shebang_line: str) -> str | None:
         return None
     interp_path = tokens[0]
     interp_name = Path(interp_path).name
-    if interp_name == "env" and len(tokens) >= 2:
-        return Path(tokens[1]).name
+    if interp_name == "env":
+        for tok in tokens[1:]:
+            if not tok.startswith("-"):
+                return Path(tok).name
+        return None
     return interp_name
 
 

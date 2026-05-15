@@ -81,3 +81,28 @@ def test_hook_syntax_unreadable_defers(tmp_path: Path) -> None:
     finding = _check_postcreation_hook_syntax(_settings(hook, tmp_path))
     assert finding.severity == "info"
     assert "read failed" in finding.message
+
+
+def test_hook_syntax_env_dash_S_bash_shebang_resolves(tmp_path: Path) -> None:
+    """`#!/usr/bin/env -S bash` must resolve to 'bash', not '-S'.
+
+    The `-S` flag tells env to split its single argument into multiple
+    tokens (POSIX exec quirk). Older parsers that grab tokens[1] verbatim
+    would return '-S' and silently info-skip a real shell script.
+    """
+    hook = _write_hook(tmp_path / "hook.sh", "#!/usr/bin/env -S bash\nset -eu\n")
+    finding = _check_postcreation_hook_syntax(_settings(hook, tmp_path))
+    assert finding.severity == "info"
+    assert "passed" in finding.message or "not on PATH" in finding.message
+
+
+def test_hook_syntax_bare_env_shebang_skips(tmp_path: Path) -> None:
+    """`#!/usr/bin/env` with no interpreter argument is malformed.
+
+    Older parsers returned 'env' and tried to run `env -n <file>`, which
+    is nonsense. The corrected parser returns None so the check info-skips.
+    """
+    hook = _write_hook(tmp_path / "hook.sh", "#!/usr/bin/env\nset -eu\n")
+    finding = _check_postcreation_hook_syntax(_settings(hook, tmp_path))
+    assert finding.severity == "info"
+    assert "no shebang" in finding.message or "non-shell" in finding.message
