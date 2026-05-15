@@ -58,7 +58,11 @@ def test_check_json_renders(
     payload = json.loads(r.stdout)
     assert "findings" in payload
     severities = {f["severity"] for f in payload["findings"]}
-    assert severities == {"info"}
+    # v0.11 _check_vmail_identity emits a warn when the running uid/gid
+    # resolves to a user/group not named 'vmail' (the test process runs
+    # as the developer's user). No error → exit 0 still holds.
+    assert severities <= {"info", "warn"}
+    assert "error" not in severities
 
 
 def test_check_deep_runs_extra_checks(

@@ -62,9 +62,17 @@ def _settings(
     *,
     sql_dir: Path | None = None,
     mail_root: Path | None = None,
-    vmail_uid: int = -1,
-    vmail_gid: int = -1,
+    # v0.11: default to the running user so _check_vmail_identity
+    # resolves to *some* local user (warn for non-vmail name, but no
+    # error → result.ok stays True for happy-path tests). Callers that
+    # need the -1 ownership-skip sentinel pass it explicitly.
+    vmail_uid: int | None = None,
+    vmail_gid: int | None = None,
 ) -> PostinoSettings:
+    if vmail_uid is None:
+        vmail_uid = os.getuid()
+    if vmail_gid is None:
+        vmail_gid = os.getgid()
     return PostinoSettings(
         identity_backend=IdentityBackend.LOCAL,
         postfix_sql_dir=sql_dir if sql_dir is not None else tmp_path / "postfix",
@@ -206,7 +214,11 @@ def test_passes_with_clean_state(
     md.reflect(bind=db)
     result = run_consistency_check(settings=s, engine=db, metadata=md)
     assert result.ok is True, [f.model_dump() for f in result.findings if not f.ok]
-    assert all(f.severity == "info" for f in result.findings)
+    # v0.11: vmail_uid/vmail_gid resolve to the running user, not a
+    # user named "vmail" — _check_vmail_identity emits warn findings.
+    # The contract here is "no errors", not "every finding info".
+    assert all(f.severity in ("info", "warn") for f in result.findings)
+    assert not any(f.severity == "error" for f in result.findings)
 
 
 def test_fails_when_hook_missing(

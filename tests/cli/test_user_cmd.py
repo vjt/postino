@@ -50,8 +50,12 @@ def env_for_cli(db_url: str, mail_root: Path, hook: Path, sql_dir: Path) -> dict
         "POSTINO_POSTFIX_SQL_DIR": str(sql_dir),
         "POSTINO_VIRTUAL_MAILBOX_BASE": str(mail_root),
         "POSTINO_POSTCREATION_HOOK": str(hook),
-        "POSTINO_VMAIL_UID": "-1",
-        "POSTINO_VMAIL_GID": "-1",
+        # Use the running user's uid/gid so v0.11's _check_vmail_identity
+        # resolves them (warn for non-vmail name, but no error → exit 0).
+        # Sentinel -1 used to be fine before v0.11; the new check errors
+        # on uid/gid that don't resolve via pwd.getpwuid/grp.getgrgid.
+        "POSTINO_VMAIL_UID": str(os.getuid()),
+        "POSTINO_VMAIL_GID": str(os.getgid()),
         "POSTINO_DEFAULT_PASSWORD_SCHEME": "BLF-CRYPT",
         "POSTINO_DEFAULT_QUOTA_BYTES": "1073741824",
     }
