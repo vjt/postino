@@ -96,3 +96,15 @@ def test_db_grants_no_scope_for_db_errors(tmp_path: Path) -> None:
     assert findings[0].name == "db_grants"
     assert findings[0].severity == "error"
     assert "no GRANT rows match db" in findings[0].message
+
+
+def test_db_grants_global_all_privileges_passes_with_overpriv_warn(tmp_path: Path) -> None:
+    rows = ["GRANT ALL PRIVILEGES ON *.* TO `root`@`localhost` WITH GRANT OPTION"]
+    engine = _stub_engine("postfix", rows)
+    findings = _check_db_grants(_settings(tmp_path), engine)
+    # No missing-priv errors.
+    assert not any(
+        f.name.startswith("db_grants:") and f.severity == "error" for f in findings
+    )
+    # Should warn (root has way more than postino needs on log).
+    assert any(f.name == "db_grants:overprivileged" for f in findings)
