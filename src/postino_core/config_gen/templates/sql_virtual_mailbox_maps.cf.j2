@@ -1,0 +1,6 @@
+# postino-managed: mailbox → maildir
+hosts = {{ ctx.db_host }}
+user = {{ ctx.db_user }}
+password = {{ ctx.db_password.get_secret_value() }}
+dbname = {{ ctx.db_name }}
+query = SELECT maildir FROM mailbox WHERE username='%s' AND active = '1'

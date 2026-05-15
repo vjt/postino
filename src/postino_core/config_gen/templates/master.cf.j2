@@ -1,0 +1,12 @@
+# ==========================================================================
+# mlmmj pipe services for postino-managed mailing lists.
+# Splice these four entries into your master.cf.
+# ==========================================================================
+mlmmj-receive unix - n n - - pipe
+   flags=DRhu user={{ ctx.input.mlmmj_uid }} argv=/usr/bin/mlmmj-receive -F -L {{ ctx.input.mlmmj_spool_dir }}/$domain/$user -e ${extension}
+mlmmj-bounce unix - n n - - pipe
+   flags=DRhu user={{ ctx.input.mlmmj_uid }} argv=/usr/bin/mlmmj-bounce -L {{ ctx.input.mlmmj_spool_dir }}/$domain/$user -a ${sender}
+mlmmj-sub unix - n n - - pipe
+   flags=DRhu user={{ ctx.input.mlmmj_uid }} argv=/usr/bin/mlmmj-sub -L {{ ctx.input.mlmmj_spool_dir }}/$domain/$user -m ${extension}
+mlmmj-unsub unix - n n - - pipe
+   flags=DRhu user={{ ctx.input.mlmmj_uid }} argv=/usr/bin/mlmmj-unsub -L {{ ctx.input.mlmmj_spool_dir }}/$domain/$user -m ${extension}

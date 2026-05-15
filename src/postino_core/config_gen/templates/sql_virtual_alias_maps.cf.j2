@@ -1,0 +1,6 @@
+# postino-managed: alias → goto
+hosts = {{ ctx.db_host }}
+user = {{ ctx.db_user }}
+password = {{ ctx.db_password.get_secret_value() }}
+dbname = {{ ctx.db_name }}
+query = SELECT goto FROM alias WHERE address='%s' AND active = '1'

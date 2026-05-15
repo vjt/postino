@@ -1,0 +1,19 @@
+driver = mysql
+connect = host={{ ctx.db_host }} dbname={{ ctx.db_name }} user={{ ctx.db_user }} password={{ ctx.db_password.get_secret_value() }}
+
+default_pass_scheme = BLF-CRYPT
+
+password_query = \
+    SELECT username AS user, password \
+    FROM mailbox WHERE username = '%u' AND active = '1'
+
+user_query = \
+    SELECT username AS user, \
+    CONCAT('/var/vmail/', maildir) AS home, \
+    'maildir:~/Maildir' AS mail, \
+    {{ ctx.input.vmail_uid }} AS uid, \
+    {{ ctx.input.vmail_gid }} AS gid, \
+    CONCAT('*:bytes=', quota) AS quota_rule \
+    FROM mailbox WHERE username = '%u' AND active = '1'
+
+iterate_query = SELECT username AS user FROM mailbox WHERE active = '1'

@@ -1,0 +1,17 @@
+# ==========================================================================
+# postino-managed lookup tables for postfix.
+# Splice into your main.cf (preserves your own hostname, networks, TLS).
+# ==========================================================================
+recipient_delimiter = +
+
+# Order matters: routes must be checked before transport.
+# Note routes lookup uses ${recipient}, transport uses just the domain.
+transport_maps = mysql:{{ ctx.input.postfix_dir }}/sql-routes.cf, mysql:{{ ctx.input.postfix_dir }}/sql-virtual_transport_maps.cf
+
+virtual_mailbox_domains = mysql:{{ ctx.input.postfix_dir }}/sql-virtual_domains.cf
+virtual_mailbox_maps    = mysql:{{ ctx.input.postfix_dir }}/sql-virtual_mailbox_maps.cf
+virtual_alias_maps      = mysql:{{ ctx.input.postfix_dir }}/sql-virtual_alias_maps.cf
+{% if ctx.has_alias_domains -%}
+virtual_alias_domain_maps    = mysql:{{ ctx.input.postfix_dir }}/sql-virtual_alias_alias_domain_maps.cf
+virtual_mailbox_alias_domain_maps = mysql:{{ ctx.input.postfix_dir }}/sql-virtual_mailbox_alias_domain_maps.cf
+{%- endif %}

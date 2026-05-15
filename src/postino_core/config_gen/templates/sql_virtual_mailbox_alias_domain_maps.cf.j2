@@ -1,0 +1,6 @@
+# postino-managed: alias_domain → mailbox existence
+hosts = {{ ctx.db_host }}
+user = {{ ctx.db_user }}
+password = {{ ctx.db_password.get_secret_value() }}
+dbname = {{ ctx.db_name }}
+query = SELECT 1 FROM mailbox,alias_domain WHERE alias_domain.alias_domain='%d' AND mailbox.username = CONCAT('%u', '@', alias_domain.target_domain) AND mailbox.active = 1 AND alias_domain.active='1'

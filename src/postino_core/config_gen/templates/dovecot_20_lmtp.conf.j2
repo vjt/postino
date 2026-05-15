@@ -1,0 +1,11 @@
+service lmtp {
+  unix_listener {{ ctx.input.lmtp_socket }} {
+    mode = 0600
+    user = postfix
+    group = postfix
+  }
+}
+protocol lmtp {
+  postmaster_address = postmaster@localhost
+  mail_plugins = $mail_plugins quota sieve
+}
