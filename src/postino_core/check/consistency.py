@@ -16,9 +16,11 @@ Two modes:
 
 from __future__ import annotations
 
+import grp
 import hashlib
 import hmac
 import os
+import pwd
 from pathlib import Path
 from typing import Literal
 
@@ -192,6 +194,40 @@ def _check_postcreation_hook(s: PostinoSettings) -> Finding:
             f"postcreation hook is group/world writable (mode={oct(st.st_mode & 0o777)}): {h}",
         )
     return _ok("postcreation_hook", f"{h} executable, mode tight")
+
+
+def _check_vmail_identity(s: PostinoSettings) -> list[Finding]:
+    """Resolve vmail_uid and vmail_gid to a local user/group.
+
+    Two findings emitted (one per axis). Unknown uid/gid is an error
+    (postino's FS ops will fail). A name that does not match the
+    conventional ``vmail`` is a warn — common typo-defence, not a
+    correctness rule.
+    """
+    out: list[Finding] = []
+    try:
+        pw_name = pwd.getpwuid(s.vmail_uid).pw_name
+    except KeyError:
+        out.append(_err("vmail_uid", f"uid={s.vmail_uid} does not resolve to any local user"))
+    else:
+        if pw_name != "vmail":
+            out.append(
+                _warn("vmail_uid", f"uid={s.vmail_uid} resolves to {pw_name!r}, expected 'vmail'")
+            )
+        else:
+            out.append(_ok("vmail_uid", f"{s.vmail_uid} → 'vmail'"))
+    try:
+        gr_name = grp.getgrgid(s.vmail_gid).gr_name
+    except KeyError:
+        out.append(_err("vmail_gid", f"gid={s.vmail_gid} does not resolve to any local group"))
+    else:
+        if gr_name != "vmail":
+            out.append(
+                _warn("vmail_gid", f"gid={s.vmail_gid} resolves to {gr_name!r}, expected 'vmail'")
+            )
+        else:
+            out.append(_ok("vmail_gid", f"{s.vmail_gid} → 'vmail'"))
+    return out
 
 
 def _alias_domain_has_rows(engine: Engine) -> bool:
