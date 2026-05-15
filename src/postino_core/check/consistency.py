@@ -128,6 +128,7 @@ def run_consistency_check(
     findings.append(_check_postcreation_hook(settings))
     findings.append(_check_postcreation_hook_syntax(settings))
     findings.extend(_check_vmail_identity(settings))
+    findings.extend(_check_db_grants(settings, engine))
     findings.extend(_check_postfix_sql_cfs(settings, engine))
     if settings.mlmmj_spool_dir is not None:
         main_cf = settings.postfix_sql_dir.parent / "main.cf"

@@ -77,9 +77,7 @@ def test_db_grants_all_privileges_on_db_warns_overprivileged(tmp_path: Path) -> 
     engine = _stub_engine("postfix", rows)
     findings = _check_db_grants(_settings(tmp_path), engine)
     # No missing-priv errors (ALL covers everything).
-    assert all(
-        f.name != f"db_grants:{t}" for f in findings for t in ("mailbox", "alias", "log")
-    )
+    assert all(f.name != f"db_grants:{t}" for f in findings for t in ("mailbox", "alias", "log"))
     # But log only needs SELECT+INSERT; ALL gives UPDATE+DELETE → overpriv warn.
     over = next(f for f in findings if f.name == "db_grants:overprivileged")
     assert over.severity == "warn"
@@ -103,8 +101,6 @@ def test_db_grants_global_all_privileges_passes_with_overpriv_warn(tmp_path: Pat
     engine = _stub_engine("postfix", rows)
     findings = _check_db_grants(_settings(tmp_path), engine)
     # No missing-priv errors.
-    assert not any(
-        f.name.startswith("db_grants:") and f.severity == "error" for f in findings
-    )
+    assert not any(f.name.startswith("db_grants:") and f.severity == "error" for f in findings)
     # Should warn (root has way more than postino needs on log).
     assert any(f.name == "db_grants:overprivileged" for f in findings)
