@@ -6,14 +6,17 @@ the host that runs them.
 
 from __future__ import annotations
 
-import pwd
 import grp
+import pwd
+from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from postino_core.check.consistency import Finding, _check_vmail_identity
+from postino_core.check.consistency import (
+    _check_vmail_identity,  # pyright: ignore[reportPrivateUsage]  # WHY: regression guard for the vmail identity check; module-private by design.
+)
 from postino_core.config import PostinoSettings
 from postino_core.enums import IdentityBackend, PasswordScheme
 
@@ -39,11 +42,25 @@ def _fake_gr(name: str) -> SimpleNamespace:
     return SimpleNamespace(gr_name=name)
 
 
+def _pw_factory(name: str) -> Callable[[int], SimpleNamespace]:
+    def _getpwuid(uid: int) -> SimpleNamespace:
+        return _fake_pw(name)
+
+    return _getpwuid
+
+
+def _gr_factory(name: str) -> Callable[[int], SimpleNamespace]:
+    def _getgrgid(gid: int) -> SimpleNamespace:
+        return _fake_gr(name)
+
+    return _getgrgid
+
+
 def test_vmail_identity_uid_and_gid_resolve_to_vmail(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(pwd, "getpwuid", lambda uid: _fake_pw("vmail"))
-    monkeypatch.setattr(grp, "getgrgid", lambda gid: _fake_gr("vmail"))
+    monkeypatch.setattr(pwd, "getpwuid", _pw_factory("vmail"))
+    monkeypatch.setattr(grp, "getgrgid", _gr_factory("vmail"))
     findings = _check_vmail_identity(_settings(tmp_path))
     assert [f.severity for f in findings] == ["info", "info"]
     assert [f.name for f in findings] == ["vmail_uid", "vmail_gid"]
@@ -52,8 +69,8 @@ def test_vmail_identity_uid_and_gid_resolve_to_vmail(
 def test_vmail_identity_uid_resolves_to_non_vmail_user_warns(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(pwd, "getpwuid", lambda uid: _fake_pw("mailadm"))
-    monkeypatch.setattr(grp, "getgrgid", lambda gid: _fake_gr("vmail"))
+    monkeypatch.setattr(pwd, "getpwuid", _pw_factory("mailadm"))
+    monkeypatch.setattr(grp, "getgrgid", _gr_factory("vmail"))
     findings = _check_vmail_identity(_settings(tmp_path))
     uid_f = next(f for f in findings if f.name == "vmail_uid")
     assert uid_f.severity == "warn"
@@ -63,35 +80,31 @@ def test_vmail_identity_uid_resolves_to_non_vmail_user_warns(
 def test_vmail_identity_gid_resolves_to_non_vmail_group_warns(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(pwd, "getpwuid", lambda uid: _fake_pw("vmail"))
-    monkeypatch.setattr(grp, "getgrgid", lambda gid: _fake_gr("staff"))
+    monkeypatch.setattr(pwd, "getpwuid", _pw_factory("vmail"))
+    monkeypatch.setattr(grp, "getgrgid", _gr_factory("staff"))
     findings = _check_vmail_identity(_settings(tmp_path))
     gid_f = next(f for f in findings if f.name == "vmail_gid")
     assert gid_f.severity == "warn"
     assert "staff" in gid_f.message
 
 
-def test_vmail_identity_uid_unknown_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_vmail_identity_uid_unknown_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def _raise(uid: int) -> SimpleNamespace:
         raise KeyError(uid)
 
     monkeypatch.setattr(pwd, "getpwuid", _raise)
-    monkeypatch.setattr(grp, "getgrgid", lambda gid: _fake_gr("vmail"))
+    monkeypatch.setattr(grp, "getgrgid", _gr_factory("vmail"))
     findings = _check_vmail_identity(_settings(tmp_path, uid=99999))
     uid_f = next(f for f in findings if f.name == "vmail_uid")
     assert uid_f.severity == "error"
     assert "99999" in uid_f.message
 
 
-def test_vmail_identity_gid_unknown_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_vmail_identity_gid_unknown_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def _raise(gid: int) -> SimpleNamespace:
         raise KeyError(gid)
 
-    monkeypatch.setattr(pwd, "getpwuid", lambda uid: _fake_pw("vmail"))
+    monkeypatch.setattr(pwd, "getpwuid", _pw_factory("vmail"))
     monkeypatch.setattr(grp, "getgrgid", _raise)
     findings = _check_vmail_identity(_settings(tmp_path, gid=99999))
     gid_f = next(f for f in findings if f.name == "vmail_gid")

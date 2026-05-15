@@ -52,6 +52,7 @@ def test_run_consistency_check_calls_all_four_mlmmj_validators(
         patch(f"{_PATCH_BASE}._check_required_tables", return_value=_OK),
         patch(f"{_PATCH_BASE}._check_mailbox_base", return_value=_OK),
         patch(f"{_PATCH_BASE}._check_postcreation_hook", return_value=_OK),
+        patch(f"{_PATCH_BASE}._check_vmail_identity", return_value=[_OK, _OK]),
         patch(f"{_PATCH_BASE}._check_postfix_sql_cfs", return_value=[_OK]),
         patch(f"{_PATCH_BASE}.check_postfix_transport_maps", return_value=[_OK]) as mock_transport,
         patch(f"{_PATCH_BASE}.check_recipient_delimiter", return_value=[_OK]) as mock_delimiter,
