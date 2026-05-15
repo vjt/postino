@@ -91,7 +91,7 @@ def test_db_grants_no_scope_for_db_errors(tmp_path: Path) -> None:
     engine = _stub_engine("postfix", rows)
     findings = _check_db_grants(_settings(tmp_path), engine)
     assert len(findings) == 1
-    assert findings[0].name == "db_grants"
+    assert findings[0].name == "db_grants:no_scope"
     assert findings[0].severity == "error"
     assert "no GRANT rows match db" in findings[0].message
 

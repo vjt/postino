@@ -352,7 +352,7 @@ def _check_db_grants(s: PostinoSettings, engine: Engine) -> list[Finding]:
     has_global = any(r.scope == "global" for r in rows)
     has_db_scope = any(r.scope != "global" and r.scope[0] == db for r in rows)
     if not has_global and not has_db_scope:
-        return [_err("db_grants", f"no GRANT rows match db {db!r}")]
+        return [_err("db_grants:no_scope", f"no GRANT rows match db {db!r}")]
 
     out: list[Finding] = []
     granted_per_table: dict[str, frozenset[str]] = {
