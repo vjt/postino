@@ -306,6 +306,85 @@ def _parse_show_grants(rows: list[str]) -> list[GrantRow]:
     return out
 
 
+_REQUIRED_GRANTS: dict[str, frozenset[str]] = {
+    "mailbox": frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"}),
+    "alias": frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"}),
+    "alias_domain": frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"}),
+    "domain": frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"}),
+    "quota2": frozenset({"SELECT", "INSERT", "UPDATE", "DELETE"}),
+    "log": frozenset({"SELECT", "INSERT"}),
+}
+
+
+def _grants_for_table(rows: list[GrantRow], db: str, table: str) -> frozenset[str]:
+    """Union of privs that apply to (db, table) across all parsed rows."""
+    privs: set[str] = set()
+    for r in rows:
+        if r.scope == "global":
+            privs |= r.privs
+        else:
+            r_db, r_tbl = r.scope
+            if r_db == db and r_tbl in ("*", table):
+                privs |= r.privs
+    return frozenset(privs)
+
+
+def _check_db_grants(s: PostinoSettings, engine: Engine) -> list[Finding]:
+    """Compare DB user privileges against postino's minimum required set.
+
+    Missing privs → error per (table, missing-set) tuple. Extra privs
+    on postino tables → single rolled-up warn. No grant rows matching
+    postino's DB → error.
+    """
+    del s  # settings unused — kept in signature for orchestrator consistency.
+    db = engine.url.database
+    if not db:
+        return [_err("db_grants", "engine URL has no database name")]
+    try:
+        with engine.connect() as conn:
+            raw = conn.execute(text("SHOW GRANTS FOR CURRENT_USER()")).all()
+    except Exception as e:
+        return [_err("db_grants", f"SHOW GRANTS failed: {e}")]
+    rows = _parse_show_grants([str(row[0]) for row in raw])
+
+    # No row matching this db (and no global) → no_scope error
+    has_global = any(r.scope == "global" for r in rows)
+    has_db_scope = any(r.scope != "global" and r.scope[0] == db for r in rows)
+    if not has_global and not has_db_scope:
+        return [_err("db_grants", f"no GRANT rows match db {db!r}")]
+
+    out: list[Finding] = []
+    granted_per_table: dict[str, frozenset[str]] = {
+        table: _grants_for_table(rows, db, table) for table in _REQUIRED_GRANTS
+    }
+    for table, required in _REQUIRED_GRANTS.items():
+        missing = required - granted_per_table[table]
+        if missing:
+            out.append(
+                _err(
+                    f"db_grants:{table}",
+                    f"missing privs on {db}.{table}: {sorted(missing)}",
+                )
+            )
+    # Over-privilege rollup: any priv on postino tables that's not required.
+    all_granted: set[str] = set()
+    all_required: set[str] = set()
+    for table, required in _REQUIRED_GRANTS.items():
+        all_granted |= granted_per_table[table]
+        all_required |= required
+    extras = (all_granted & _DATA_PATH_PRIVS) - all_required
+    if extras:
+        out.append(
+            _warn(
+                "db_grants:overprivileged",
+                f"user has extra data-path privs on postino tables: {sorted(extras)}",
+            )
+        )
+    if not out:
+        out.append(_ok("db_grants", f"user has exactly the required grants on {db!r}"))
+    return out
+
+
 def _parse_shebang_interp(shebang_line: str) -> str | None:
     """Return the basename of the interpreter in a shebang, or None.
 
