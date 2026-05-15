@@ -19,6 +19,7 @@ from rich.console import Console
 from postino_core.errors import (
     AlreadyExistsError,
     CapacityError,
+    CollisionRefused,
     ConfigError,
     DBError,
     DeadlockError,
@@ -27,6 +28,9 @@ from postino_core.errors import (
     MailctlError,
     MlmmjError,
     NotFoundError,
+    PostCheckFailed,
+    PreflightFailed,
+    RenderError,
     RuleViolationError,
 )
 from postino_core.services.bundle import ServicesBundle
@@ -45,6 +49,12 @@ _EXIT_CODES: dict[type[MailctlError], int] = {
     NotFoundError: 1,
     AlreadyExistsError: 2,
     CapacityError: 3,
+    # config_gen-specific subclasses of ConfigError must precede ConfigError
+    # itself; exit_with_error returns the first isinstance match.
+    PreflightFailed: 11,
+    CollisionRefused: 12,
+    RenderError: 13,
+    PostCheckFailed: 14,
     ConfigError: 4,
     DBError: 5,
     FilesystemError: 6,

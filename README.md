@@ -413,6 +413,11 @@ postino check --json
 | 7    | `HookError` — postcreation script returned non-zero |
 | 8    | `DeadlockError` — MySQL deadlock / lock-wait timeout |
 | 9    | `MlmmjError` — mlmmj subprocess failed            |
+| 10   | `RuleViolationError` — domain rule violation     |
+| 11   | `PreflightFailed` — `config gen` preflight refused |
+| 12   | `CollisionRefused` — `config gen` would overwrite without `--in-place` |
+| 13   | `RenderError` — `config gen` template render failed |
+| 14   | `PostCheckFailed` — `config gen` post-emit check failed |
 | 99   | unexpected — bug; full traceback                 |
 
 ## Architecture
