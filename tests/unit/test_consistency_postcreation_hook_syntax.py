@@ -48,3 +48,14 @@ def test_hook_syntax_invalid_sh_errors(tmp_path: Path) -> None:
     finding = _check_postcreation_hook_syntax(_settings(hook, tmp_path))
     assert finding.severity == "error"
     assert "failed" in finding.message
+
+
+def test_hook_syntax_env_bash_shebang_resolves(tmp_path: Path) -> None:
+    hook = _write_hook(tmp_path / "hook.sh", "#!/usr/bin/env bash\nset -eu\necho ok\n")
+    finding = _check_postcreation_hook_syntax(_settings(hook, tmp_path))
+    # bash may or may not be installed on the host; both "passed" and
+    # "not on PATH, skipped" are acceptable here. The key assertion is
+    # that the shebang was recognized as a shell interpreter (not the
+    # python/skip path).
+    assert finding.severity == "info"
+    assert "passed" in finding.message or "not on PATH" in finding.message
