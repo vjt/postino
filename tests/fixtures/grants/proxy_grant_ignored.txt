@@ -1,0 +1,2 @@
+GRANT USAGE ON *.* TO `postino`@`%`
+GRANT PROXY ON ``@`%` TO `postino`@`%`

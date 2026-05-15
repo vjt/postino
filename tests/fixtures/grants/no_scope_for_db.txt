@@ -1,0 +1,2 @@
+GRANT USAGE ON *.* TO `postino`@`%`
+GRANT SELECT ON `other_db`.* TO `postino`@`%`

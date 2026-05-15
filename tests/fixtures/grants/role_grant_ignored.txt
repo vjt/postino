@@ -1,0 +1,3 @@
+GRANT USAGE ON *.* TO `postino`@`%`
+GRANT SELECT, INSERT, UPDATE, DELETE ON `postfix`.`mailbox` TO `postino`@`%`
+GRANT `postfixadmin_role`@`%` TO `postino`@`%`

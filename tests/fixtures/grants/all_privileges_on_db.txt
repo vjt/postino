@@ -1,0 +1,2 @@
+GRANT USAGE ON *.* TO `postino`@`%`
+GRANT ALL PRIVILEGES ON `postfix`.* TO `postino`@`%`

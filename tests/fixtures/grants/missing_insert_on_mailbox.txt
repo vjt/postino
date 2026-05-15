@@ -1,0 +1,7 @@
+GRANT USAGE ON *.* TO `postino`@`%`
+GRANT SELECT, UPDATE, DELETE ON `postfix`.`mailbox` TO `postino`@`%`
+GRANT SELECT, INSERT, UPDATE, DELETE ON `postfix`.`alias` TO `postino`@`%`
+GRANT SELECT, INSERT, UPDATE, DELETE ON `postfix`.`alias_domain` TO `postino`@`%`
+GRANT SELECT, INSERT, UPDATE, DELETE ON `postfix`.`domain` TO `postino`@`%`
+GRANT SELECT, INSERT, UPDATE, DELETE ON `postfix`.`quota2` TO `postino`@`%`
+GRANT SELECT, INSERT ON `postfix`.`log` TO `postino`@`%`
