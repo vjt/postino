@@ -58,7 +58,8 @@ CREATE TABLE IF NOT EXISTS `postino_schema_version` (
   COMMENT='postino schema version (single row)'
 """
 
-_CURRENT_SCHEMA_VERSION = "v0.12.0"
+# Schema-shape version (not package version) — bump only when DDL changes.
+CURRENT_SCHEMA_VERSION = "v0.12.0"
 
 _VERSION_UPSERT_SQL = """\
 INSERT INTO `postino_schema_version` (`id`, `version`) VALUES (1, :version)
@@ -119,7 +120,7 @@ def migrate(
             conn.execute(text(_VERSION_TABLE_DDL))
             conn.execute(
                 text(_VERSION_UPSERT_SQL),
-                {"version": _CURRENT_SCHEMA_VERSION},
+                {"version": CURRENT_SCHEMA_VERSION},
             )
     except SQLAlchemyError as e:
         console.print(f"[red]✗ migrate failed:[/red] {e}")
@@ -131,7 +132,7 @@ def migrate(
         console.print("[green]✓[/green] routes table already present — nothing to do.")
     else:
         console.print("[green]✓[/green] routes table created (v0.10).")
-    console.print(f"[green]✓[/green] postino_schema_version recorded ({_CURRENT_SCHEMA_VERSION}).")
+    console.print(f"[green]✓[/green] postino_schema_version recorded ({CURRENT_SCHEMA_VERSION}).")
 
 
 # ---------------------------------------------------------------------------
