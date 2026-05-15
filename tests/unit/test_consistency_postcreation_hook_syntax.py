@@ -59,3 +59,25 @@ def test_hook_syntax_env_bash_shebang_resolves(tmp_path: Path) -> None:
     # python/skip path).
     assert finding.severity == "info"
     assert "passed" in finding.message or "not on PATH" in finding.message
+
+
+def test_hook_syntax_python_shebang_skipped(tmp_path: Path) -> None:
+    hook = _write_hook(tmp_path / "hook.py", "#!/usr/bin/python3\nprint('ok')\n")
+    finding = _check_postcreation_hook_syntax(_settings(hook, tmp_path))
+    assert finding.severity == "info"
+    assert "non-shell" in finding.message
+    assert "python3" in finding.message
+
+
+def test_hook_syntax_no_shebang_skipped(tmp_path: Path) -> None:
+    hook = _write_hook(tmp_path / "hook.sh", "echo no shebang here\n")
+    finding = _check_postcreation_hook_syntax(_settings(hook, tmp_path))
+    assert finding.severity == "info"
+    assert "no shebang" in finding.message
+
+
+def test_hook_syntax_unreadable_defers(tmp_path: Path) -> None:
+    hook = tmp_path / "missing.sh"  # don't create
+    finding = _check_postcreation_hook_syntax(_settings(hook, tmp_path))
+    assert finding.severity == "info"
+    assert "read failed" in finding.message
