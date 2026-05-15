@@ -83,3 +83,16 @@ def test_db_grants_all_privileges_on_db_warns_overprivileged(tmp_path: Path) -> 
     # But log only needs SELECT+INSERT; ALL gives UPDATE+DELETE → overpriv warn.
     over = next(f for f in findings if f.name == "db_grants:overprivileged")
     assert over.severity == "warn"
+
+
+def test_db_grants_no_scope_for_db_errors(tmp_path: Path) -> None:
+    rows = [
+        "GRANT USAGE ON *.* TO `postino`@`%`",
+        "GRANT SELECT ON `other_db`.* TO `postino`@`%`",
+    ]
+    engine = _stub_engine("postfix", rows)
+    findings = _check_db_grants(_settings(tmp_path), engine)
+    assert len(findings) == 1
+    assert findings[0].name == "db_grants"
+    assert findings[0].severity == "error"
+    assert "no GRANT rows match db" in findings[0].message
