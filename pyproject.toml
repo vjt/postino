@@ -155,4 +155,4 @@ forbidden_modules = ["postino", "typer", "rich"]
 name = "config_gen stays in postino_core (no CLI, no daemon)"
 type = "forbidden"
 source_modules = ["postino_core.config_gen"]
-forbidden_modules = ["postino", "postinod", "typer", "rich", "click"]
+forbidden_modules = ["postino", "postinod", "typer", "rich", "click", "litestar", "httpx", "jwt"]
