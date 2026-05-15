@@ -56,3 +56,14 @@ def test_db_grants_exact_required_emits_info_only(tmp_path: Path) -> None:
         (f.name, f.severity, f.message) for f in findings
     ]
     assert any(f.name == "db_grants" for f in findings)
+
+
+def test_db_grants_missing_insert_on_mailbox_errors(tmp_path: Path) -> None:
+    rows = _EXACT_REQUIRED_ROWS.copy()
+    # Replace the mailbox row with one that's missing INSERT.
+    rows[1] = "GRANT SELECT, UPDATE, DELETE ON `postfix`.`mailbox` TO `postino`@`%`"
+    engine = _stub_engine("postfix", rows)
+    findings = _check_db_grants(_settings(tmp_path), engine)
+    mailbox_err = next(f for f in findings if f.name == "db_grants:mailbox")
+    assert mailbox_err.severity == "error"
+    assert "INSERT" in mailbox_err.message
