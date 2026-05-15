@@ -62,6 +62,8 @@ jobs:
         run: |
           mysql -h127.0.0.1 -P3306 -uroot -proot <<'SQL'
           GRANT ALL ON postino_test.* TO 'postino_test'@'%';
+          GRANT CREATE USER ON *.* TO 'postino_test'@'%';
+          GRANT GRANT OPTION ON postino_test.* TO 'postino_test'@'%';
           FLUSH PRIVILEGES;
           SQL
       - name: Run tests
