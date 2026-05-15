@@ -69,3 +69,31 @@ def test_vmail_identity_gid_resolves_to_non_vmail_group_warns(
     gid_f = next(f for f in findings if f.name == "vmail_gid")
     assert gid_f.severity == "warn"
     assert "staff" in gid_f.message
+
+
+def test_vmail_identity_uid_unknown_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _raise(uid: int) -> SimpleNamespace:
+        raise KeyError(uid)
+
+    monkeypatch.setattr(pwd, "getpwuid", _raise)
+    monkeypatch.setattr(grp, "getgrgid", lambda gid: _fake_gr("vmail"))
+    findings = _check_vmail_identity(_settings(tmp_path, uid=99999))
+    uid_f = next(f for f in findings if f.name == "vmail_uid")
+    assert uid_f.severity == "error"
+    assert "99999" in uid_f.message
+
+
+def test_vmail_identity_gid_unknown_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _raise(gid: int) -> SimpleNamespace:
+        raise KeyError(gid)
+
+    monkeypatch.setattr(pwd, "getpwuid", lambda uid: _fake_pw("vmail"))
+    monkeypatch.setattr(grp, "getgrgid", _raise)
+    findings = _check_vmail_identity(_settings(tmp_path, gid=99999))
+    gid_f = next(f for f in findings if f.name == "vmail_gid")
+    assert gid_f.severity == "error"
+    assert "99999" in gid_f.message
