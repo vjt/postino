@@ -4,6 +4,10 @@ is a bug — let it propagate to the top-level exit-99 path."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from postino_core.check.types import Finding
+
 
 class MailctlError(Exception):
     """Base for all expected failures."""
@@ -65,64 +69,32 @@ class RuleViolationError(MailctlError):
 class PreflightFailed(ConfigError):
     """Preflight check refused (DB schema blocker, missing version table)."""
 
-    findings: list[object]
-
-    def __init__(self, findings: list[object] | str) -> None:
-        if isinstance(findings, str):
-            # Bare-message form keeps the parametrised exit-code test happy
-            # and lets callers raise a placeholder when structured detail is
-            # not yet wired up.
-            super().__init__(findings)
-            self.findings = []
-        else:
-            super().__init__(f"preflight refused with {len(findings)} error(s)")
-            self.findings = findings
+    def __init__(self, findings: list[Finding]) -> None:
+        super().__init__(f"preflight refused with {len(findings)} error(s)")
+        self.findings: list[Finding] = findings
 
 
 class CollisionRefused(ConfigError):
     """out_dir contains files that would be overwritten, --in-place not set."""
 
-    colliding: list[str]
-
-    def __init__(self, colliding: list[str] | str) -> None:
-        if isinstance(colliding, str):
-            super().__init__(colliding)
-            self.colliding = []
-        else:
-            super().__init__(f"refusing to overwrite without --in-place: {', '.join(colliding)}")
-            self.colliding = colliding
+    def __init__(self, colliding: list[str]) -> None:
+        super().__init__(f"refusing to overwrite without --in-place: {', '.join(colliding)}")
+        self.colliding: list[str] = colliding
 
 
 class RenderError(ConfigError):
     """Jinja2 raised during template render (KeyError, StrictUndefined)."""
 
-    template_name: str
-    cause: Exception | None
-
-    def __init__(self, template_name: str, cause: Exception | None = None) -> None:
-        if cause is None:
-            # Bare-message form: template_name carries the full message.
-            super().__init__(template_name)
-            self.template_name = ""
-            self.cause = None
-        else:
-            super().__init__(f"render failed for {template_name!r}: {cause}")
-            self.template_name = template_name
-            self.cause = cause
+    def __init__(self, template_name: str, cause: Exception) -> None:
+        super().__init__(f"render failed for {template_name!r}: {cause}")
+        self.template_name: str = template_name
+        self.cause: Exception = cause
 
 
 class PostCheckFailed(ConfigError):
     """Emitted cfs failed the parse-check (StrictUndefined leaked, empty creds)."""
 
-    findings: list[object]
-    out_dir: object
-
-    def __init__(self, findings: list[object] | str, out_dir: object = None) -> None:
-        if isinstance(findings, str):
-            super().__init__(findings)
-            self.findings = []
-            self.out_dir = out_dir
-        else:
-            super().__init__(f"post-emit check failed with {len(findings)} error(s)")
-            self.findings = findings
-            self.out_dir = out_dir
+    def __init__(self, findings: list[Finding], out_dir: Path) -> None:
+        super().__init__(f"post-emit check failed with {len(findings)} error(s)")
+        self.findings: list[Finding] = findings
+        self.out_dir: Path = out_dir

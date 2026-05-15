@@ -30,12 +30,23 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import MetaData, select, text
 from sqlalchemy.engine import Engine
 
+from postino_core.check.types import Finding, Severity
 from postino_core.config import PostinoSettings, parse_postfix_sql_cf
 from postino_core.enums import IdentityBackend
 from postino_core.errors import ConfigError
 from postino_core.fs import DELETING_PREFIX
 
-Severity = Literal["info", "warn", "error"]
+# Re-exported for back-compat — see ``postino_core.check.types``.
+__all__ = [
+    "CheckResult",
+    "Finding",
+    "Severity",
+    "check_master_cf_mlmmj_pipes",
+    "check_owner_aliases_for_routes",
+    "check_postfix_transport_maps",
+    "check_recipient_delimiter",
+    "run_consistency_check",
+]
 
 _REQUIRED_TABLES = frozenset({"mailbox", "alias", "domain", "quota2", "log"})
 
@@ -86,20 +97,6 @@ _SH_SYNTAX_TIMEOUT_S = 5.0
 # reload). Forbid group-write, group-exec, and ALL others bits.
 # Tightened from the prior 0o007-only mask which allowed group-w/x.
 _CF_FORBIDDEN_BITS = 0o037
-
-
-class Finding(BaseModel):
-    """One row in a `postino check` report."""
-
-    model_config = ConfigDict(frozen=True, strict=True, extra="forbid")
-
-    name: str
-    severity: Severity
-    message: str
-
-    @property
-    def ok(self) -> bool:
-        return self.severity == "info"
 
 
 class CheckResult(BaseModel):

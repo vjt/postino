@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 
-from postino_core.check.consistency import Finding
+from postino_core.check.types import Finding
 from postino_core.enums import IdentityBackend
 
 
