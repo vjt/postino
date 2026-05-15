@@ -46,6 +46,25 @@ WHERE table_schema = DATABASE()
   AND table_name = 'routes'
 """
 
+_VERSION_TABLE_DDL = """\
+CREATE TABLE IF NOT EXISTS `postino_schema_version` (
+  `id`         TINYINT      NOT NULL DEFAULT 1,
+  `version`    VARCHAR(32)  NOT NULL,
+  `applied_at` TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+                            ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  CONSTRAINT `single_row` CHECK (`id` = 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  COMMENT='postino schema version (single row)'
+"""
+
+_CURRENT_SCHEMA_VERSION = "v0.12.0"
+
+_VERSION_UPSERT_SQL = """\
+INSERT INTO `postino_schema_version` (`id`, `version`) VALUES (1, :version)
+ON DUPLICATE KEY UPDATE version = :version, applied_at = CURRENT_TIMESTAMP
+"""
+
 
 # ---------------------------------------------------------------------------
 # Commands
@@ -95,6 +114,13 @@ def migrate(
 
         with engine.begin() as conn:
             conn.execute(text(_V010_ROUTES_DDL))
+
+        with engine.begin() as conn:
+            conn.execute(text(_VERSION_TABLE_DDL))
+            conn.execute(
+                text(_VERSION_UPSERT_SQL),
+                {"version": _CURRENT_SCHEMA_VERSION},
+            )
     except SQLAlchemyError as e:
         console.print(f"[red]✗ migrate failed:[/red] {e}")
         exit_with_error(DBError(f"schema migration failed: {e}"))
@@ -105,6 +131,7 @@ def migrate(
         console.print("[green]✓[/green] routes table already present — nothing to do.")
     else:
         console.print("[green]✓[/green] routes table created (v0.10).")
+    console.print(f"[green]✓[/green] postino_schema_version recorded ({_CURRENT_SCHEMA_VERSION}).")
 
 
 # ---------------------------------------------------------------------------
