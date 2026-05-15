@@ -40,3 +40,11 @@ def test_hook_syntax_valid_sh_passes(tmp_path: Path) -> None:
     assert finding.severity == "info"
     assert finding.name == "postcreation_hook_syntax"
     assert "passed" in finding.message
+
+
+def test_hook_syntax_invalid_sh_errors(tmp_path: Path) -> None:
+    # `done` without matching `do` → syntax error
+    hook = _write_hook(tmp_path / "hook.sh", "#!/bin/sh\nif true; then\necho ok\ndone\n")
+    finding = _check_postcreation_hook_syntax(_settings(hook, tmp_path))
+    assert finding.severity == "error"
+    assert "failed" in finding.message
