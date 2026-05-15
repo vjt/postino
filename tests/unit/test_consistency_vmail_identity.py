@@ -47,3 +47,25 @@ def test_vmail_identity_uid_and_gid_resolve_to_vmail(
     findings = _check_vmail_identity(_settings(tmp_path))
     assert [f.severity for f in findings] == ["info", "info"]
     assert [f.name for f in findings] == ["vmail_uid", "vmail_gid"]
+
+
+def test_vmail_identity_uid_resolves_to_non_vmail_user_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pwd, "getpwuid", lambda uid: _fake_pw("mailadm"))
+    monkeypatch.setattr(grp, "getgrgid", lambda gid: _fake_gr("vmail"))
+    findings = _check_vmail_identity(_settings(tmp_path))
+    uid_f = next(f for f in findings if f.name == "vmail_uid")
+    assert uid_f.severity == "warn"
+    assert "mailadm" in uid_f.message
+
+
+def test_vmail_identity_gid_resolves_to_non_vmail_group_warns(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pwd, "getpwuid", lambda uid: _fake_pw("vmail"))
+    monkeypatch.setattr(grp, "getgrgid", lambda gid: _fake_gr("staff"))
+    findings = _check_vmail_identity(_settings(tmp_path))
+    gid_f = next(f for f in findings if f.name == "vmail_gid")
+    assert gid_f.severity == "warn"
+    assert "staff" in gid_f.message
