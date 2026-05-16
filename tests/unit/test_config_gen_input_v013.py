@@ -8,7 +8,7 @@ from pydantic import SecretStr, ValidationError
 from postino_core.config_gen.input import GenInput
 from postino_core.enums import IdentityBackend
 
-_DB_URL = SecretStr("mysql://u:p@h/d")
+_DB_URL = SecretStr("mysql+pymysql://u:p@h/d")
 _BACKEND = IdentityBackend.LOCAL
 
 
@@ -33,6 +33,11 @@ def test_dovecot_mail_layout_rejects_unknown() -> None:
         )
 
 
-def test_virtual_mailbox_base_must_be_path() -> None:
+def test_virtual_mailbox_base_accepts_custom_path() -> None:
     g = GenInput(db_url=_DB_URL, identity_backend=_BACKEND, virtual_mailbox_base=Path("/srv/mail"))
     assert g.virtual_mailbox_base == Path("/srv/mail")
+
+
+def test_dovecot_mail_layout_accepts_maildir_root() -> None:
+    g = GenInput(db_url=_DB_URL, identity_backend=_BACKEND, dovecot_mail_layout="maildir_root")
+    assert g.dovecot_mail_layout == "maildir_root"
