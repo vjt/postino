@@ -29,7 +29,7 @@ class TemplateSpec(NamedTuple):
     mode: int
 
 
-_MLMMJ_GATED: Final[frozenset[str]] = frozenset({"master_cf", "sql_routes"})
+_MLMMJ_GATED: Final[frozenset[str]] = frozenset({"master_cf", "sql_routes", "sql_transport"})
 
 # --- Registry: name → TemplateSpec.  Order = emit order. -------------------
 _REGISTRY: Final[dict[str, TemplateSpec]] = {
@@ -122,7 +122,8 @@ def render_all(
     Artifacts in _MLMMJ_GATED are silently skipped when mlmmj is off
     (settings.mlmmj_spool_dir is None) — the canonical no-mlmmj host
     has no master.cf hand-tweaks and routes its mail straight to lmtp
-    via main.cf's virtual_transport.
+    via main.cf's virtual_transport. Gating runs after --only/--skip,
+    so `--only master_cf` on a mlmmj-off host returns an empty list.
     """
     mlmmj_on = ctx.input.mlmmj_spool_dir is not None
     results: list[RenderResult] = []

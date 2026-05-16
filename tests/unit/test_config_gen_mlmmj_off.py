@@ -25,10 +25,11 @@ def _ctx(mlmmj_on: bool) -> RenderContext:
     )
 
 
-def test_mlmmj_off_skips_master_cf_and_sql_routes() -> None:
+def test_mlmmj_off_skips_master_cf_sql_routes_and_sql_transport() -> None:
     names = {r.rel_path.name for r in render_all(_ctx(mlmmj_on=False))}
     assert "master.cf" not in names
     assert "sql-routes.cf" not in names
+    assert "sql-virtual_transport_maps.cf" not in names
 
 
 def test_mlmmj_off_main_cf_uses_virtual_transport_not_transport_maps() -> None:
@@ -45,7 +46,8 @@ def test_mlmmj_on_main_cf_keeps_transport_maps() -> None:
     assert "virtual_transport =" not in out.content
 
 
-def test_mlmmj_on_emits_master_cf_and_sql_routes() -> None:
+def test_mlmmj_on_emits_master_cf_sql_routes_and_sql_transport() -> None:
     names = {r.rel_path.name for r in render_all(_ctx(mlmmj_on=True))}
     assert "master.cf" in names
     assert "sql-routes.cf" in names
+    assert "sql-virtual_transport_maps.cf" in names
