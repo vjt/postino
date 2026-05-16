@@ -4,9 +4,14 @@
 # ==========================================================================
 recipient_delimiter = +
 
+{% if ctx.input.mlmmj_spool_dir -%}
 # Order matters: routes must be checked before transport.
 # Note routes lookup uses ${recipient}, transport uses just the domain.
 transport_maps = mysql:{{ ctx.input.postfix_dir }}/sql-routes.cf, mysql:{{ ctx.input.postfix_dir }}/sql-virtual_transport_maps.cf
+{%- else -%}
+# No mlmmj on this host — deliver every virtual mailbox via dovecot lmtp.
+virtual_transport = lmtp:unix:{{ ctx.input.lmtp_socket }}
+{%- endif %}
 
 virtual_mailbox_domains = mysql:{{ ctx.input.postfix_dir }}/sql-virtual_domains.cf
 virtual_mailbox_maps    = mysql:{{ ctx.input.postfix_dir }}/sql-virtual_mailbox_maps.cf

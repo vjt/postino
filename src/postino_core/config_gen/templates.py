@@ -29,6 +29,8 @@ class TemplateSpec(NamedTuple):
     mode: int
 
 
+_MLMMJ_GATED: Final[frozenset[str]] = frozenset({"master_cf", "sql_routes"})
+
 # --- Registry: name → TemplateSpec.  Order = emit order. -------------------
 _REGISTRY: Final[dict[str, TemplateSpec]] = {
     "master_cf": TemplateSpec(Path("master.cf"), "master.cf.j2", 0o644),
@@ -115,12 +117,21 @@ def render_all(
     only: frozenset[str] = frozenset(),
     skip: frozenset[str] = frozenset(),
 ) -> list[RenderResult]:
-    """Render every artifact, honouring operator --only / --skip overrides."""
+    """Render every artifact, honouring operator --only / --skip overrides.
+
+    Artifacts in _MLMMJ_GATED are silently skipped when mlmmj is off
+    (settings.mlmmj_spool_dir is None) — the canonical no-mlmmj host
+    has no master.cf hand-tweaks and routes its mail straight to lmtp
+    via main.cf's virtual_transport.
+    """
+    mlmmj_on = ctx.input.mlmmj_spool_dir is not None
     results: list[RenderResult] = []
     for name in _REGISTRY:
         if name in skip:
             continue
         if only and name not in only:
+            continue
+        if name in _MLMMJ_GATED and not mlmmj_on:
             continue
         results.append(render_one(name, ctx))
     return results
