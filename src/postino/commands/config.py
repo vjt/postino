@@ -20,10 +20,18 @@ from pydantic import SecretStr
 from rich.console import Console
 
 from postino_core.config_gen import GenInput, generate
+from postino_core.config_gen import fix as fix_module
+from postino_core.config_gen.generator import (
+    _build_context,  # pyright: ignore[reportPrivateUsage]  # WHY: config fix renders the dovecot fragment via the same context builder as config gen.
+)
 from postino_core.config_gen.templates import registry_names
 from postino_core.enums import IdentityBackend
 from postino_core.errors import (
     CollisionRefused,
+    FixAmbiguity,
+    FixApplyError,
+    FixDetectionFailed,
+    FixDovecotConflict,
     PostCheckFailed,
     PreflightFailed,
     RenderError,
@@ -163,3 +171,130 @@ def gen(
         raise typer.Exit(5) from e
 
     console.print(f"[green]✓[/green] wrote {len(result.written)} files to {out_path}")
+
+
+@app.command("fix")
+def fix(
+    apply: Annotated[
+        bool, typer.Option("--apply", help="Apply the diff. Default is dry-run.")
+    ] = False,
+    vmail_uid: Annotated[int | None, typer.Option("--vmail-uid")] = None,
+    vmail_gid: Annotated[int | None, typer.Option("--vmail-gid")] = None,
+    virtual_mailbox_base: Annotated[
+        str | None,
+        typer.Option("--virtual-mailbox-base", help="Override detected vmail base."),
+    ] = None,
+    db_url: Annotated[str | None, typer.Option("--db-url")] = None,
+) -> None:
+    """Reconcile live postfix+dovecot config to canonical postino shape."""
+    from postino.cli import (
+        _load_settings,  # pyright: ignore[reportPrivateUsage]  # WHY: config fix needs the same PostinoSettings loader; importing at module top would create a cycle.
+    )
+
+    console = Console()
+    try:
+        detected = fix_module.detect()
+    except FixDetectionFailed as e:
+        console.print(f"[red]✗ detection failed:[/red] {e}")
+        raise typer.Exit(1) from e
+
+    try:
+        eff_uid, eff_gid = fix_module.effective_vmail(
+            detected,
+            override_uid=vmail_uid,
+            override_gid=vmail_gid,
+        )
+    except FixAmbiguity as e:
+        console.print(f"[red]✗ ambiguity:[/red] {e}")
+        raise typer.Exit(2) from e
+
+    settings = _load_settings()
+    base_override = virtual_mailbox_base or detected.get("virtual_mailbox_base", "")
+    mlmmj_on = settings.mlmmj_spool_dir is not None
+
+    target = fix_module.build_target_postfix(
+        postfix_dir=detected.get("postfix.config_dir", "/etc/postfix"),
+        lmtp_socket=settings.lmtp_destination.removeprefix("unix:"),
+        mlmmj_on=mlmmj_on,
+    )
+
+    console.print(
+        f"postino config fix — detected {detected.get('postfix.config_dir', '?')}, "
+        f"{detected.get('dovecot.etc_dir', '?')}"
+    )
+    console.print(f"mlmmj: {'ON' if mlmmj_on else 'OFF'}")
+    console.print(f"effective vmail: uid={eff_uid} gid={eff_gid} base={base_override}")
+    console.print("")
+    for line in fix_module.diff(detected, target, mlmmj_target_on=mlmmj_on):
+        console.print(line)
+
+    if not apply:
+        console.print("\nTo apply: postino config fix --apply")
+        return
+
+    # Surface dovecot conflicts BEFORE we open a DB connection — otherwise a
+    # passdb-overlap refusal would be masked by a DB connect failure on hosts
+    # where the operator hasn't yet provided creds.
+    if detected.get("dovecot.has_sql_passdb") == "true":
+        console.print("[red]✗ dovecot conflict:[/red] dovecot already has passdb { driver = sql }")
+        raise typer.Exit(3)
+    if detected.get("dovecot.has_sql_userdb") == "true":
+        console.print("[red]✗ dovecot conflict:[/red] dovecot already has userdb { driver = sql }")
+        raise typer.Exit(3)
+    if detected.get("dovecot.has_lmtp_listener") == "true":
+        console.print(
+            "[red]✗ dovecot conflict:[/red] dovecot already has "
+            "service lmtp { unix_listener private/dovecot-lmtp }"
+        )
+        raise typer.Exit(3)
+
+    try:
+        url = _resolve_db_url(db_url)
+    except typer.BadParameter as e:
+        console.print(f"[red]✗ db url:[/red] {e}")
+        raise typer.Exit(1) from e
+
+    gen_input = GenInput(
+        db_url=url,
+        identity_backend=settings.identity_backend,
+        mlmmj_spool_dir=settings.mlmmj_spool_dir,
+        vmail_uid=eff_uid,
+        vmail_gid=eff_gid,
+        virtual_mailbox_base=Path(base_override),
+        postfix_dir=Path(detected.get("postfix.config_dir", "/etc/postfix")),
+        dovecot_dir=Path(detected.get("dovecot.etc_dir", "/etc/dovecot")),
+        in_place=True,
+    )
+    fragment_text = fix_module.render_fragment(_build_context(gen_input))
+    fragment_path = Path(detected.get("dovecot.etc_dir", "/etc/dovecot")) / "dovecot-postino.conf"
+
+    try:
+        fix_module.apply(
+            detected,
+            target,
+            mlmmj_target_on=mlmmj_on,
+            gen_input=gen_input,
+            out_dir=Path(detected.get("postfix.config_dir", "/etc/postfix")),
+            dovecot_fragment_path=fragment_path,
+            fragment_content=fragment_text,
+        )
+    except FixAmbiguity as e:
+        console.print(f"[red]✗ ambiguity:[/red] {e}")
+        raise typer.Exit(2) from e
+    except FixDovecotConflict as e:
+        console.print(f"[red]✗ dovecot conflict:[/red] {e}")
+        raise typer.Exit(3) from e
+    except FixApplyError as e:
+        console.print(f"[red]✗ apply failed:[/red] {e}")
+        raise typer.Exit(5) from e
+    except OSError as e:
+        console.print(f"[red]✗ IO error:[/red] {e}")
+        raise typer.Exit(5) from e
+
+    console.print(
+        f"\n[green]✓[/green] applied. Now run:\n"
+        f"  postfix reload\n"
+        f"  echo '!include {fragment_path}' >> {fragment_path.parent}/dovecot.conf  "
+        f"# if not already\n"
+        f"  dovecot reload"
+    )
