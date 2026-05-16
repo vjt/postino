@@ -41,7 +41,17 @@ _PATCH_BASE = "postino_core.check.consistency"
 def test_run_consistency_check_calls_all_four_mlmmj_validators(
     stub_settings: PostinoSettings,
 ) -> None:
-    """All 4 v0.10 mlmmj validators must be called when mlmmj_spool_dir is set."""
+    """All 4 v0.10 mlmmj validators must be called when mlmmj_spool_dir is set.
+
+    Also pins the main.cf / master.cf path arguments to live in
+    ``postfix_sql_dir`` itself — NOT in ``postfix_sql_dir.parent``.
+    Canonical postfix layouts put ``sql-virtual_*.cf`` AND ``main.cf`` /
+    ``master.cf`` in the SAME directory (``/etc/postfix/`` on Debian,
+    ``/usr/local/etc/postfix/`` on FreeBSD). Regression guard for the
+    v0.12.2 fix: the prior code used ``.parent``, which made the check
+    look in ``/etc`` or ``/usr/local/etc`` — sibling dirs that don't
+    contain those files.
+    """
     stub_engine = MagicMock()
     stub_metadata = MagicMock()
 
@@ -72,3 +82,21 @@ def test_run_consistency_check_calls_all_four_mlmmj_validators(
     assert mock_pipes.called, "check_master_cf_mlmmj_pipes was not invoked"
     assert mock_owner.called, "check_owner_aliases_for_routes was not invoked"
     assert result.ok  # all stubs return info findings → no errors
+
+    # Pin the path arguments: main.cf and master.cf must live inside
+    # postfix_sql_dir, NOT in postfix_sql_dir.parent. Each helper is
+    # called with a single positional Path argument.
+    expected_main_cf = stub_settings.postfix_sql_dir / "main.cf"
+    expected_master_cf = stub_settings.postfix_sql_dir / "master.cf"
+    assert mock_transport.call_args.args == (expected_main_cf,), (
+        f"check_postfix_transport_maps called with wrong path: "
+        f"{mock_transport.call_args.args}; expected ({expected_main_cf},)"
+    )
+    assert mock_delimiter.call_args.args == (expected_main_cf,), (
+        f"check_recipient_delimiter called with wrong path: "
+        f"{mock_delimiter.call_args.args}; expected ({expected_main_cf},)"
+    )
+    assert mock_pipes.call_args.args == (expected_master_cf,), (
+        f"check_master_cf_mlmmj_pipes called with wrong path: "
+        f"{mock_pipes.call_args.args}; expected ({expected_master_cf},)"
+    )

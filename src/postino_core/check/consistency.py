@@ -128,8 +128,8 @@ def run_consistency_check(
     findings.extend(_check_db_grants(settings, engine))
     findings.extend(_check_postfix_sql_cfs(settings, engine))
     if settings.mlmmj_spool_dir is not None:
-        main_cf = settings.postfix_sql_dir.parent / "main.cf"
-        master_cf = settings.postfix_sql_dir.parent / "master.cf"
+        main_cf = settings.postfix_sql_dir / "main.cf"
+        master_cf = settings.postfix_sql_dir / "master.cf"
         findings.extend(check_postfix_transport_maps(main_cf))
         findings.extend(check_recipient_delimiter(main_cf))
         findings.extend(check_master_cf_mlmmj_pipes(master_cf))
