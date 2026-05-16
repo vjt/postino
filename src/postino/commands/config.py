@@ -13,6 +13,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote_plus
 
 import typer
 from pydantic import SecretStr
@@ -40,15 +41,27 @@ _DEFAULT_DOVECOT_DIR = "/etc/dovecot"
 
 
 def _resolve_db_url(flag_url: str | None) -> SecretStr:
-    """--db-url > $POSTINO_DB_URL > interactive prompt. No fallback => raise."""
+    """--db-url > $POSTINO_DB_URL > interactive field prompts. No fallback => raise.
+
+    Interactive path asks host/user/password/dbname separately (password hidden);
+    we assemble the mysql+pymysql:// URL ourselves so operators don't have to know
+    the SQLAlchemy URL grammar or escape special chars in passwords.
+    """
     if flag_url:
         return SecretStr(flag_url)
     env_url = os.environ.get("POSTINO_DB_URL")
     if env_url:
         return SecretStr(env_url)
-    if sys.stdin.isatty():
-        return SecretStr(typer.prompt("DB URL", hide_input=True))
-    raise typer.BadParameter("no --db-url, no POSTINO_DB_URL env var, no TTY — cannot prompt")
+    if not sys.stdin.isatty():
+        raise typer.BadParameter("no --db-url, no POSTINO_DB_URL env var, no TTY — cannot prompt")
+    host = typer.prompt("DB host", default="localhost")
+    port = typer.prompt("DB port", default=3306, type=int)
+    user = typer.prompt("DB user")
+    password = typer.prompt("DB password", hide_input=True)
+    dbname = typer.prompt("DB name", default="postfix")
+    return SecretStr(
+        f"mysql+pymysql://{quote_plus(user)}:{quote_plus(password)}@{host}:{port}/{dbname}"
+    )
 
 
 @app.command("gen")
