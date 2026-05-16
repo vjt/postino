@@ -8,6 +8,8 @@ non-integration phase — no DB required.
 
 from __future__ import annotations
 
+import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +21,24 @@ import pytest
 # can still find it.
 _POSTINO_BIN = Path(sys.executable).parent / "postino"
 
+# Strip ANSI escape sequences so substring assertions don't trip on
+# rich/click colourised help output. Help also gets word-wrapped to
+# the terminal width — force a wide COLUMNS so options like `--out`
+# don't get hyphen-split across box borders on narrow CI shells.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def _help_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env["NO_COLOR"] = "1"
+    env["COLUMNS"] = "200"
+    env["TERM"] = "dumb"
+    return env
+
+
+def _strip_ansi(s: str) -> str:
+    return _ANSI_RE.sub("", s).replace("\n", " ")
+
 
 @pytest.mark.cli
 def test_config_gen_help_exits_zero() -> None:
@@ -27,11 +47,13 @@ def test_config_gen_help_exits_zero() -> None:
         [str(_POSTINO_BIN), "config", "gen", "--help"],
         capture_output=True,
         text=True,
+        env=_help_env(),
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert "--out" in result.stdout
-    assert "--identity-backend" in result.stdout
+    out = _strip_ansi(result.stdout)
+    assert "--out" in out
+    assert "--identity-backend" in out
 
 
 @pytest.mark.cli
