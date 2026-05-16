@@ -83,6 +83,45 @@ def test_detect_returns_expected_keys(tmp_path: Path) -> None:
     assert d["dovecot.has_sql_userdb"] == "false"
     assert d["dovecot.has_lmtp_listener"] == "false"
     assert d["fs.base_uid"] == str(base.stat().st_uid)
+    assert d["dovecot.etc_dir"] == "/etc/dovecot"
+
+
+def test_detect_freebsd_layout_uses_usr_local_etc(tmp_path: Path) -> None:
+    base = tmp_path / "mail"
+    base.mkdir()
+    base.chmod(0o755)
+    sample = _POSTCONF_N_SAMPLE.replace("/srv/mail", str(base)).replace(
+        "/etc/postfix/", "/usr/local/etc/postfix/"
+    )
+
+    def _fake_run(argv: list[str]) -> str:
+        binary = Path(argv[0]).name
+        tail = tuple(argv[1:])
+        lookup: dict[tuple[str, ...], str] = {
+            ("postconf", "-n"): sample,
+            ("postconf", "-d", "config_directory"): "config_directory = /usr/local/etc/postfix\n",
+            ("postconf", "-Mf"): _POSTCONF_MF_SAMPLE,
+            ("doveconf", "-n"): _DOVECONF_N_SAMPLE,
+            ("doveconf", "-h", "base_dir"): "/var/run/dovecot\n",
+            ("doveconf", "-h", "mail_uid"): "1006\n",
+            ("doveconf", "-h", "mail_gid"): "1006\n",
+            ("doveconf", "-h", "first_valid_uid"): "1006\n",
+        }
+        key = (binary, *tail)
+        if key in lookup:
+            return lookup[key]
+        raise AssertionError(f"unexpected subprocess call: {argv}")
+
+    with (
+        patch("postino_core.config_gen.fix._run", side_effect=_fake_run),
+        patch(
+            "postino_core.config_gen.fix._which_or_raise",
+            side_effect=lambda b: f"/usr/local/bin/{b}",  # type: ignore[reportUnknownLambdaType]  # WHY: pyright strict cannot infer lambda param without annotation in side_effect context
+        ),
+    ):
+        d = fix.detect()
+    assert d["postfix.config_dir"] == "/usr/local/etc/postfix"
+    assert d["dovecot.etc_dir"] == "/usr/local/etc/dovecot"
 
 
 def test_detect_raises_when_postconf_missing() -> None:

@@ -73,17 +73,17 @@ _PASSDB_SQL_RE = re.compile(r"passdb\s*\{[^}]*driver\s*=\s*sql", re.DOTALL)
 _USERDB_SQL_RE = re.compile(r"userdb\s*\{[^}]*driver\s*=\s*sql", re.DOTALL)
 _LMTP_LISTENER_RE = re.compile(r"unix_listener\s+private/dovecot-lmtp")
 
-_DOVECOT_ETC_BY_BASE: dict[str, str] = {
-    "/var/run/dovecot": "/etc/dovecot",
-    "/run/dovecot": "/etc/dovecot",
-    "/var/spool/dovecot": "/usr/local/etc/dovecot",  # FreeBSD pkg layout
-    "/var/run/dovecot/run": "/usr/local/etc/dovecot",
-}
 
+def _dovecot_etc_dir(postfix_config_dir: str) -> str:
+    """Derive dovecot etc dir from postfix config_dir prefix.
 
-def _dovecot_etc_dir(base_dir: str) -> str:
-    """Map dovecot base_dir to its etc/conf.d location. Fallback to /etc/dovecot."""
-    return _DOVECOT_ETC_BY_BASE.get(base_dir.rstrip("/"), "/etc/dovecot")
+    OS convention pairs postfix and dovecot in the same etc tree:
+    /etc/postfix ↔ /etc/dovecot (Debian/Ubuntu/RHEL),
+    /usr/local/etc/postfix ↔ /usr/local/etc/dovecot (FreeBSD pkg).
+    """
+    if postfix_config_dir.startswith("/usr/local/etc/"):
+        return "/usr/local/etc/dovecot"
+    return "/etc/dovecot"
 
 
 def _doveconf_safe(key: str) -> str:
@@ -107,7 +107,7 @@ def detect() -> dict[str, str]:
 
     dc_n = _doveconf_n()
     base_dir = _doveconf_h("base_dir")
-    etc_dir = _dovecot_etc_dir(base_dir)
+    etc_dir = _dovecot_etc_dir(config_dir)
 
     base = pc_n.get("virtual_mailbox_base", "")
     fs_base_uid = ""
