@@ -9,8 +9,12 @@ password_query = \
 
 user_query = \
     SELECT username AS user, \
-    CONCAT('/var/vmail/', maildir) AS home, \
+    CONCAT('{{ ctx.input.virtual_mailbox_base }}/', maildir) AS home, \
+    {%- if ctx.input.dovecot_mail_layout == "maildir_root" %}
+    'maildir:~' AS mail, \
+    {%- else %}
     'maildir:~/Maildir' AS mail, \
+    {%- endif %}
     {{ ctx.input.vmail_uid }} AS uid, \
     {{ ctx.input.vmail_gid }} AS gid, \
     CONCAT('*:bytes=', quota) AS quota_rule \
