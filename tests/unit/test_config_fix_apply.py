@@ -4,9 +4,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from pydantic import SecretStr
 
 from postino_core.config_gen import fix
-from postino_core.errors import FixApplyError
+from postino_core.config_gen.input import GenInput
+from postino_core.enums import IdentityBackend
+from postino_core.errors import FixAmbiguity, FixApplyError, FixDovecotConflict
 
 
 def _fake_which(binary: str) -> str:
@@ -116,3 +119,92 @@ def test_write_dovecot_fragment_cleans_tmp_when_rename_fails(tmp_path: Path) -> 
 
     assert not tmp.exists()
     assert not target.exists()
+
+
+def _gen_input() -> GenInput:
+    return GenInput(
+        db_url=SecretStr("mysql+pymysql://u:p@h/d"),
+        identity_backend=IdentityBackend.LOCAL,
+        mlmmj_spool_dir=None,
+        skip_preflight=True,
+        skip_postcheck=True,
+        in_place=True,
+    )
+
+
+def test_apply_raises_on_partial_mlmmj(tmp_path: Path) -> None:
+    detected = {"mlmmj_services": "mlmmj-receive,mlmmj-bounce"}
+    with pytest.raises(FixAmbiguity, match="partial mlmmj"):
+        fix.apply(
+            detected,
+            target_postfix={},
+            mlmmj_target_on=False,
+            gen_input=_gen_input(),
+            out_dir=tmp_path / "postfix",
+            dovecot_fragment_path=tmp_path / "dovecot-postino.conf",
+            fragment_content="x",
+        )
+
+
+def test_apply_raises_on_dovecot_sql_conflict(tmp_path: Path) -> None:
+    detected = {"dovecot.has_sql_passdb": "true"}
+    with pytest.raises(FixDovecotConflict):
+        fix.apply(
+            detected,
+            target_postfix={},
+            mlmmj_target_on=False,
+            gen_input=_gen_input(),
+            out_dir=tmp_path / "postfix",
+            dovecot_fragment_path=tmp_path / "dovecot-postino.conf",
+            fragment_content="x",
+        )
+
+
+def test_apply_runs_postconf_calls_in_order(tmp_path: Path) -> None:
+    calls: list[list[str]] = []
+
+    def _capture(argv: list[str]) -> str:
+        calls.append(argv)
+        return ""
+
+    detected = {
+        "virtual_mailbox_domains": "proxy:mysql:/etc/postfix/sql-virtual_domain_maps.cf",
+        "virtual_alias_maps": "hash:/etc/aliases, mysql:/etc/postfix/sql-virtual_alias_maps.cf",
+        "transport_maps": "mysql:/etc/postfix/sql-routes.cf",
+        "mlmmj_services": "mlmmj-receive,mlmmj-bounce,mlmmj-sub,mlmmj-unsub",
+    }
+    target = {
+        "virtual_mailbox_domains": "mysql:/etc/postfix/sql-virtual_domains.cf",
+        "virtual_alias_maps": "mysql:/etc/postfix/sql-virtual_alias_maps.cf",
+        "transport_maps": "",
+        "virtual_transport": "lmtp:unix:private/dovecot-lmtp",
+    }
+
+    def _fake_generate(_input: object, _out: object) -> None:
+        return None
+
+    fragment = tmp_path / "dovecot-postino.conf"
+    with (
+        patch("postino_core.config_gen.fix._run", side_effect=_capture),
+        patch("postino_core.config_gen.fix._which_or_raise", side_effect=_fake_which),
+        patch("postino_core.config_gen.fix.generate", side_effect=_fake_generate),
+    ):
+        fix.apply(
+            detected,
+            target_postfix=target,
+            mlmmj_target_on=False,
+            gen_input=_gen_input(),
+            out_dir=tmp_path / "postfix",
+            dovecot_fragment_path=fragment,
+            fragment_content="# postino fragment\n",
+        )
+
+    flag_pairs = [c[1] for c in calls if len(c) >= 2]
+    # 3 -e (virtual_mailbox_domains, virtual_alias_maps, virtual_transport)
+    # 1 -X (transport_maps)
+    # 4 -MX (mlmmj services)
+    assert flag_pairs.count("-e") == 3
+    assert flag_pairs.count("-X") == 1
+    assert flag_pairs.count("-MX") == 4
+    assert fragment.exists()
+    assert fragment.read_text() == "# postino fragment\n"

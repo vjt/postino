@@ -18,11 +18,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from postino_core.config_gen.input import RenderContext
+from postino_core.config_gen.generator import generate
+from postino_core.config_gen.input import GenInput, RenderContext
 from postino_core.config_gen.templates import (
     _ENV,  # pyright: ignore[reportPrivateUsage]  # WHY: config fix renders a fix-only template that intentionally lives outside the _REGISTRY exported by templates.py.
 )
-from postino_core.errors import FixAmbiguity, FixApplyError, FixDetectionFailed
+from postino_core.errors import FixAmbiguity, FixApplyError, FixDetectionFailed, FixDovecotConflict
 
 
 def _which_or_raise(binary: str) -> str:
@@ -368,3 +369,52 @@ def write_dovecot_fragment(target: Path, *, content: str) -> None:
             with contextlib.suppress(OSError):
                 tmp.unlink()
         raise FixApplyError(f"write {target} failed: {e}") from e
+
+
+def apply(
+    detected: dict[str, str],
+    target_postfix: dict[str, str],
+    *,
+    mlmmj_target_on: bool,
+    gen_input: GenInput,
+    out_dir: Path,
+    dovecot_fragment_path: Path,
+    fragment_content: str,
+) -> None:
+    """Execute the reconciliation. Stop on first failure; surface typed errors."""
+    # Step 1 — re-check refusals (raises FixAmbiguity / FixDovecotConflict)
+    found = [s for s in detected.get("mlmmj_services", "").split(",") if s]
+    if found and len(found) != 4:
+        raise FixAmbiguity(
+            f"partial mlmmj: master.cf has {found} but not all 4 {list(_MLMMJ_FOUR)}"
+        )
+    if detected.get("dovecot.has_sql_passdb") == "true":
+        raise FixDovecotConflict("dovecot already has passdb { driver = sql }")
+    if detected.get("dovecot.has_sql_userdb") == "true":
+        raise FixDovecotConflict("dovecot already has userdb { driver = sql }")
+    if detected.get("dovecot.has_lmtp_listener") == "true":
+        raise FixDovecotConflict(
+            "dovecot already has service lmtp { unix_listener private/dovecot-lmtp }"
+        )
+
+    # Step 2 — main.cf reconcile
+    for key in _POSTFIX_OWNED_KEYS:
+        cur = detected.get(key, "")
+        tgt = target_postfix.get(key, "")
+        if cur == tgt:
+            continue
+        if tgt:
+            postconf_set(key, tgt)
+        else:
+            postconf_unset(key)
+
+    # Step 3 — master.cf cleanup when mlmmj going off
+    if not mlmmj_target_on:
+        for svc in [s for s in detected.get("mlmmj_services", "").split(",") if s]:
+            postconf_master_remove(f"{svc}/unix")
+
+    # Step 4 — sql cf files via config_gen.generate (atomic rename + rollback)
+    generate(gen_input, out_dir)
+
+    # Step 5 — dovecot fragment
+    write_dovecot_fragment(dovecot_fragment_path, content=fragment_content)
