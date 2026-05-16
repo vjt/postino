@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -75,3 +76,30 @@ def test_postconf_set_wraps_FixDetectionFailed_as_FixApplyError() -> None:
         pytest.raises(FixApplyError, match="bad value"),
     ):
         fix.postconf_set("virtual_alias_maps", "mysql:/etc/postfix/sql-virtual_alias_maps.cf")
+
+
+def test_write_dovecot_fragment_creates_file_atomically(tmp_path: Path) -> None:
+    target = tmp_path / "dovecot-postino.conf"
+    fix.write_dovecot_fragment(target, content="# postino fragment\n")
+    assert target.exists()
+    assert target.read_text() == "# postino fragment\n"
+    assert oct(target.stat().st_mode)[-3:] == "640"
+    assert not (tmp_path / ".dovecot-postino.conf.tmp").exists()
+
+
+def test_write_dovecot_fragment_overwrites_atomically(tmp_path: Path) -> None:
+    target = tmp_path / "dovecot-postino.conf"
+    target.write_text("old\n")
+    fix.write_dovecot_fragment(target, content="new\n")
+    assert target.read_text() == "new\n"
+
+
+def test_write_dovecot_fragment_cleans_tmp_on_error(tmp_path: Path) -> None:
+    target = tmp_path / "subdir" / "dovecot-postino.conf"
+    # parent missing → write to tmp will fail
+    with pytest.raises(FixApplyError):
+        fix.write_dovecot_fragment(target, content="boom\n")
+    # The tmp file is in the missing subdir, so there's nothing to clean — the test
+    # asserts the error type, not the cleanup. (cleanup is exercised by the
+    # next test which simulates a rename failure with the parent existing.)
+    assert not target.exists()

@@ -11,11 +11,17 @@ the sql cf writes.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import shutil
 import subprocess
+from pathlib import Path
 
+from postino_core.config_gen.input import RenderContext
+from postino_core.config_gen.templates import (
+    _ENV,  # pyright: ignore[reportPrivateUsage]  # WHY: config fix renders a fix-only template that intentionally lives outside the _REGISTRY exported by templates.py.
+)
 from postino_core.errors import FixAmbiguity, FixApplyError, FixDetectionFailed
 
 
@@ -333,3 +339,25 @@ def postconf_master_remove(service_slash_type: str) -> None:
 def postconf_master_set(service_slash_type: str, line: str) -> None:
     """`postconf -Me '<service>/<type>=<line>'` adds/edits a master.cf entry."""
     _apply_postconf("-Me", f"{service_slash_type}={line}")
+
+
+def render_fragment(ctx: RenderContext) -> str:
+    """Render dovecot-postino.conf body for the given context."""
+    return _ENV.get_template("dovecot_postino.conf.j2").render(ctx=ctx)
+
+
+def write_dovecot_fragment(target: Path, *, content: str) -> None:
+    """Atomic write: write to .tmp sibling → os.rename → chmod.
+
+    On any failure: try to remove the .tmp file; re-raise wrapped as FixApplyError.
+    """
+    tmp = target.with_name(f".{target.name}.tmp")
+    try:
+        tmp.write_text(content)
+        os.rename(tmp, target)
+        target.chmod(0o640)
+    except OSError as e:
+        if tmp.exists():
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+        raise FixApplyError(f"write {target} failed: {e}") from e
