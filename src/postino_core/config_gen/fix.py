@@ -158,9 +158,8 @@ def _resolve_one(
     candidates = [c for c in (mail, first_valid, fs_owner) if c]
     if not candidates:
         raise FixAmbiguity(
-            f"cannot resolve effective vmail {name}: no candidates "
-            f"(dovecot {name}, first_valid_uid, fs owner all empty); "
-            f"pass --vmail-{name}"
+            f"cannot resolve effective vmail {name}: all candidates empty "
+            f"(dovecot, fs owner); pass --vmail-{name}"
         )
     distinct = set(candidates)
     if len(distinct) > 1:
