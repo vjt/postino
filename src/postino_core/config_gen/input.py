@@ -9,6 +9,7 @@ GenResult     — return value of generate()
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, SecretStr
 
@@ -24,12 +25,15 @@ class GenInput(BaseModel):
     db_url: SecretStr
     identity_backend: IdentityBackend
 
-    mlmmj_spool_dir: Path = Path("/var/spool/mlmmj")
+    mlmmj_spool_dir: Path | None = Path("/var/spool/mlmmj")
     mlmmj_uid: str = "mlmmj"
     mlmmj_gid: str = "mlmmj"
 
     vmail_uid: int = 5000
     vmail_gid: int = 5000
+
+    virtual_mailbox_base: Path = Path("/var/vmail")
+    dovecot_mail_layout: Literal["maildir_subdir", "maildir_root"] = "maildir_subdir"
 
     postfix_dir: Path = Path("/etc/postfix")
     dovecot_dir: Path = Path("/etc/dovecot")
