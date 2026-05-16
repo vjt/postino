@@ -195,3 +195,110 @@ def effective_vmail(
         fs_owner=detected.get("fs.base_gid", ""),
     )
     return uid, gid
+
+
+_MLMMJ_FOUR = ("mlmmj-receive", "mlmmj-bounce", "mlmmj-sub", "mlmmj-unsub")
+
+# Postino-owned postfix main.cf params. These get reconciled.
+_POSTFIX_OWNED_KEYS = (
+    "virtual_mailbox_base",
+    "virtual_mailbox_maps",
+    "virtual_alias_maps",
+    "virtual_mailbox_domains",
+    "transport_maps",
+    "virtual_transport",
+    "recipient_delimiter",
+)
+
+
+def _refusals(detected: dict[str, str], mlmmj_target_on: bool) -> list[str]:
+    out: list[str] = []
+    found = [s for s in detected.get("mlmmj_services", "").split(",") if s]
+    if found and len(found) != 4:
+        out.append(
+            f"partial mlmmj: master.cf has {found} but not all 4 "
+            f"{list(_MLMMJ_FOUR)}; fix master.cf by hand"
+        )
+    if mlmmj_target_on and not found:
+        # Target wants mlmmj but host has none — apply will add the missing services.
+        pass
+    if detected.get("dovecot.has_sql_passdb") == "true":
+        out.append("dovecot already has passdb { driver = sql } — refusing to overlap")
+    if detected.get("dovecot.has_sql_userdb") == "true":
+        out.append("dovecot already has userdb { driver = sql } — refusing to overlap")
+    if detected.get("dovecot.has_lmtp_listener") == "true":
+        out.append(
+            "dovecot already has service lmtp { unix_listener private/dovecot-lmtp } "
+            "— refusing to overlap"
+        )
+    return out
+
+
+def diff(
+    detected: dict[str, str],
+    target_postfix: dict[str, str],
+    *,
+    mlmmj_target_on: bool,
+) -> list[str]:
+    """Return human-readable diff lines (and copy-paste commands)."""
+    lines: list[str] = []
+    lines.append("─── postfix main.cf ───")
+
+    for key in _POSTFIX_OWNED_KEYS:
+        cur = detected.get(key, "")
+        tgt = target_postfix.get(key, "")
+        if cur == tgt:
+            continue
+        lines.append(f"- {key}: {cur or '(unset)'}")
+        lines.append(f"+ {key}: {tgt or '(unset)'}")
+        if tgt:
+            lines.append(f"  $ postconf -e '{key}={tgt}'")
+        else:
+            lines.append(f"  $ postconf -X {key}")
+
+    # master.cf mlmmj services
+    detected_svcs = [s for s in detected.get("mlmmj_services", "").split(",") if s]
+    if mlmmj_target_on:
+        missing = [s for s in _MLMMJ_FOUR if s not in detected_svcs]
+        if missing:
+            lines.append("─── postfix master.cf ───")
+            for s in missing:
+                lines.append(f"+ {s}/unix → ADD")
+                lines.append("  $ postino config gen --only master_cf --in-place")
+    else:
+        if detected_svcs:
+            lines.append("─── postfix master.cf ───")
+            for s in detected_svcs:
+                lines.append(f"- {s}/unix → REMOVE")
+                lines.append(f"  $ postconf -MX {s}/unix")
+
+    refusals = _refusals(detected, mlmmj_target_on)
+    if refusals:
+        lines.append("─── refusals ───")
+        for r in refusals:
+            lines.append(f"! {r}")
+    return lines
+
+
+def build_target_postfix(
+    *,
+    postfix_dir: str,
+    lmtp_socket: str,
+    mlmmj_on: bool,
+) -> dict[str, str]:
+    """Canonical postino-owned main.cf params for the given mode."""
+    tgt: dict[str, str] = {
+        "virtual_mailbox_maps": f"mysql:{postfix_dir}/sql-virtual_mailbox_maps.cf",
+        "virtual_alias_maps": f"mysql:{postfix_dir}/sql-virtual_alias_maps.cf",
+        "virtual_mailbox_domains": f"mysql:{postfix_dir}/sql-virtual_domains.cf",
+        "recipient_delimiter": "+",
+    }
+    if mlmmj_on:
+        tgt["transport_maps"] = (
+            f"mysql:{postfix_dir}/sql-routes.cf, mysql:{postfix_dir}/sql-virtual_transport_maps.cf"
+        )
+        tgt["virtual_transport"] = ""
+    else:
+        tgt["transport_maps"] = ""
+        tgt["virtual_transport"] = f"lmtp:unix:{lmtp_socket}"
+    return tgt
