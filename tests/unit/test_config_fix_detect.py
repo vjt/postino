@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from postino_core.config_gen import fix
-from postino_core.errors import FixDetectionFailed
+from postino_core.errors import FixAmbiguity, FixDetectionFailed
 
 _POSTCONF_N_SAMPLE = """\
 recipient_delimiter = +
@@ -130,3 +130,51 @@ def test_detect_raises_when_postconf_missing() -> None:
         pytest.raises(FixDetectionFailed, match="postconf not on PATH"),
     ):
         fix.detect()
+
+
+def test_effective_vmail_uid_picks_cli_override_first() -> None:
+    detected = {
+        "dovecot.mail_uid": "5000",
+        "dovecot.first_valid_uid": "5000",
+        "fs.base_uid": "5000",
+        "dovecot.mail_gid": "5000",
+        "fs.base_gid": "5000",
+    }
+    uid, gid = fix.effective_vmail(detected, override_uid=1006, override_gid=1006)
+    assert (uid, gid) == (1006, 1006)
+
+
+def test_effective_vmail_uid_picks_mail_uid_when_present() -> None:
+    detected = {
+        "dovecot.mail_uid": "1006",
+        "dovecot.first_valid_uid": "",
+        "fs.base_uid": "1006",
+        "dovecot.mail_gid": "1006",
+        "fs.base_gid": "1006",
+    }
+    uid, gid = fix.effective_vmail(detected, override_uid=None, override_gid=None)
+    assert (uid, gid) == (1006, 1006)
+
+
+def test_effective_vmail_falls_through_to_fs_owner() -> None:
+    detected = {
+        "dovecot.mail_uid": "",
+        "dovecot.first_valid_uid": "",
+        "fs.base_uid": "5000",
+        "dovecot.mail_gid": "",
+        "fs.base_gid": "5000",
+    }
+    uid, gid = fix.effective_vmail(detected, override_uid=None, override_gid=None)
+    assert (uid, gid) == (5000, 5000)
+
+
+def test_effective_vmail_refuses_on_disagreement_without_override() -> None:
+    detected = {
+        "dovecot.mail_uid": "1006",
+        "dovecot.first_valid_uid": "",
+        "fs.base_uid": "5000",
+        "dovecot.mail_gid": "1006",
+        "fs.base_gid": "1006",
+    }
+    with pytest.raises(FixAmbiguity, match="vmail uid"):
+        fix.effective_vmail(detected, override_uid=None, override_gid=None)

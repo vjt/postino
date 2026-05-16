@@ -16,7 +16,7 @@ import re
 import shutil
 import subprocess
 
-from postino_core.errors import FixDetectionFailed
+from postino_core.errors import FixAmbiguity, FixDetectionFailed
 
 
 def _which_or_raise(binary: str) -> str:
@@ -141,3 +141,58 @@ def detect() -> dict[str, str]:
         "fs.base_uid": fs_base_uid,
         "fs.base_gid": fs_base_gid,
     }
+
+
+def _resolve_one(
+    name: str,
+    *,
+    cli_override: int | None,
+    mail: str,
+    first_valid: str,
+    fs_owner: str,
+) -> int:
+    """Highest-priority non-empty candidate wins; if two non-CLI candidates
+    disagree, refuse."""
+    if cli_override is not None:
+        return cli_override
+    candidates = [c for c in (mail, first_valid, fs_owner) if c]
+    if not candidates:
+        raise FixAmbiguity(
+            f"cannot resolve effective vmail {name}: no candidates "
+            f"(dovecot {name}, first_valid_uid, fs owner all empty); "
+            f"pass --vmail-{name}"
+        )
+    distinct = set(candidates)
+    if len(distinct) > 1:
+        raise FixAmbiguity(
+            f"vmail {name} candidates disagree: {sorted(distinct)} "
+            f"(dovecot={mail!r}, first_valid={first_valid!r}, fs={fs_owner!r}); "
+            f"pass --vmail-{name} to force a value"
+        )
+    return int(candidates[0])
+
+
+def effective_vmail(
+    detected: dict[str, str],
+    *,
+    override_uid: int | None,
+    override_gid: int | None,
+) -> tuple[int, int]:
+    """Resolve vmail uid+gid per spec priority: CLI > dovecot.mail_uid >
+    first_valid_uid > fs owner. Refuse if any two non-override candidates
+    disagree."""
+    uid = _resolve_one(
+        "uid",
+        cli_override=override_uid,
+        mail=detected.get("dovecot.mail_uid", ""),
+        first_valid=detected.get("dovecot.first_valid_uid", ""),
+        fs_owner=detected.get("fs.base_uid", ""),
+    )
+    gid = _resolve_one(
+        "gid",
+        cli_override=override_gid,
+        mail=detected.get("dovecot.mail_gid", ""),
+        first_valid="",  # dovecot has no first_valid_gid
+        fs_owner=detected.get("fs.base_gid", ""),
+    )
+    return uid, gid
