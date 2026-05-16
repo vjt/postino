@@ -60,8 +60,6 @@ def test_render_context_password_is_secret() -> None:
         db_host="h",
         db_port=3306,
         db_name="d",
-        has_alias_domains=True,
-        has_routes_rows=True,
         schema_version="v0.12.0",
     )
     assert ctx.db_password.get_secret_value() == secret

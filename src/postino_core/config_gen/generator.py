@@ -44,8 +44,6 @@ def _build_context(input: GenInput) -> RenderContext:
                 text("SELECT version FROM postino_schema_version")
             ).scalar_one_or_none()
             version = "unknown" if version_raw is None else str(version_raw)
-            n_ad = conn.execute(text("SELECT COUNT(*) FROM alias_domain")).scalar_one()
-            n_rt = conn.execute(text("SELECT COUNT(*) FROM routes")).scalar_one()
     finally:
         engine.dispose()
     return RenderContext(
@@ -55,8 +53,6 @@ def _build_context(input: GenInput) -> RenderContext:
         db_host=url.host or "",
         db_port=url.port or 3306,
         db_name=url.database or "",
-        has_alias_domains=int(n_ad) > 0,
-        has_routes_rows=int(n_rt) > 0,
         schema_version=version,
     )
 

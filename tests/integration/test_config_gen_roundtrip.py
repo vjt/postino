@@ -1,7 +1,10 @@
 """generate() -> re-parse emitted cfs -> no ERROR findings.
 
-6 cases: identity_backend in {local, noauth, hybrid}
-       x has_alias_domains in {False, True}
+3 cases: identity_backend in {local, noauth, hybrid}.
+
+alias_domain rows are always seeded — the registry now always emits
+the alias_domain pair regardless of table contents (a DB-only change
+must not require a config regen + postfix reload).
 """
 
 from __future__ import annotations
@@ -20,25 +23,24 @@ from postino_core.enums import IdentityBackend
 from ._schema_helpers import invoke_migrate
 
 
-def _seed_alias_domain(db_url: str, populate: bool) -> None:
+def _seed_alias_domain(db_url: str) -> None:
     engine = create_engine(db_url, future=True)
     try:
         with engine.begin() as conn:
             conn.execute(text("DELETE FROM alias_domain"))
-            if populate:
-                conn.execute(
-                    text(
-                        "INSERT IGNORE INTO domain (domain, active) "
-                        "VALUES ('example.org', '1'), ('alias.example.org', '1')"
-                    )
+            conn.execute(
+                text(
+                    "INSERT IGNORE INTO domain (domain, active) "
+                    "VALUES ('example.org', '1'), ('alias.example.org', '1')"
                 )
-                conn.execute(
-                    text(
-                        "INSERT INTO alias_domain "
-                        "(alias_domain, target_domain, active) "
-                        "VALUES ('alias.example.org', 'example.org', '1')"
-                    )
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO alias_domain "
+                    "(alias_domain, target_domain, active) "
+                    "VALUES ('alias.example.org', 'example.org', '1')"
                 )
+            )
     finally:
         engine.dispose()
 
@@ -48,12 +50,10 @@ def _seed_alias_domain(db_url: str, populate: bool) -> None:
     "backend",
     [IdentityBackend.LOCAL, IdentityBackend.NOAUTH, IdentityBackend.HYBRID],
 )
-@pytest.mark.parametrize("has_alias_domains", [False, True])
 def test_roundtrip(
     db: Engine,
     tmp_path: Path,
     backend: IdentityBackend,
-    has_alias_domains: bool,
 ) -> None:
     db_url = os.environ["POSTINO_TEST_DB_URL"]
 
@@ -62,7 +62,7 @@ def test_roundtrip(
     code = invoke_migrate()
     assert code == 0, f"schema migrate exited {code}"
 
-    _seed_alias_domain(db_url, populate=has_alias_domains)
+    _seed_alias_domain(db_url)
 
     out_dir = tmp_path / "cfg"
     input_model = GenInput(
@@ -76,13 +76,9 @@ def test_roundtrip(
     assert (out_dir / "sql-virtual_alias_maps.cf").exists()
     assert (out_dir / "sql-virtual_domains.cf").exists()
 
-    # alias_domain pair: conditional
-    if has_alias_domains:
-        assert (out_dir / "sql-virtual_alias_alias_domain_maps.cf").exists()
-        assert (out_dir / "sql-virtual_mailbox_alias_domain_maps.cf").exists()
-    else:
-        assert not (out_dir / "sql-virtual_alias_alias_domain_maps.cf").exists()
-        assert not (out_dir / "sql-virtual_mailbox_alias_domain_maps.cf").exists()
+    # alias_domain pair: always emitted (DB-state-independent)
+    assert (out_dir / "sql-virtual_alias_alias_domain_maps.cf").exists()
+    assert (out_dir / "sql-virtual_mailbox_alias_domain_maps.cf").exists()
 
     # Dovecot trio always emitted
     assert (out_dir / "dovecot-sql.conf.ext").exists()

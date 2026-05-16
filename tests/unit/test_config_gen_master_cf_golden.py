@@ -27,8 +27,6 @@ def _ctx() -> RenderContext:
         db_host="localhost",
         db_port=3306,
         db_name="postfix",
-        has_alias_domains=True,
-        has_routes_rows=True,
         schema_version="v0.12.0",
     )
 

@@ -35,8 +35,6 @@ def _ctx() -> RenderContext:
         db_host="h",
         db_port=3306,
         db_name="d",
-        has_alias_domains=False,
-        has_routes_rows=False,
         schema_version="v0.12.0",
     )
 

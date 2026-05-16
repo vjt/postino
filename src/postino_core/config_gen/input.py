@@ -55,8 +55,6 @@ class RenderContext(BaseModel):
     db_port: int
     db_name: str
 
-    has_alias_domains: bool
-    has_routes_rows: bool
     schema_version: str
 
 

@@ -1,4 +1,4 @@
-"""Tests for templates.py: render loop, skip predicates, --only/--skip filter."""
+"""Tests for templates.py: render loop, --only/--skip filter, dovecot auth branching."""
 
 from __future__ import annotations
 
@@ -15,12 +15,7 @@ from postino_core.config_gen.templates import (
 from postino_core.enums import IdentityBackend
 
 
-def _ctx(
-    *,
-    has_alias_domains: bool = True,
-    has_routes_rows: bool = True,
-    backend: IdentityBackend = IdentityBackend.LOCAL,
-) -> RenderContext:
+def _ctx(*, backend: IdentityBackend = IdentityBackend.LOCAL) -> RenderContext:
     return RenderContext(
         input=GenInput(
             db_url=SecretStr("mysql://u:p@h/d"),
@@ -31,8 +26,6 @@ def _ctx(
         db_host="127.0.0.1",
         db_port=3306,
         db_name="postfix",
-        has_alias_domains=has_alias_domains,
-        has_routes_rows=has_routes_rows,
         schema_version="v0.12.0",
     )
 
@@ -48,24 +41,15 @@ def test_registry_names_returns_frozenset() -> None:
     assert "dovecot_lmtp" in names
 
 
-def test_render_all_emits_twelve_when_all_facts_present() -> None:
+def test_render_all_emits_twelve() -> None:
     results = render_all(_ctx())
     rel_paths = {r.rel_path for r in results}
     assert Path("master.cf") in rel_paths
     assert Path("conf.d/auth-sql.conf.ext") in rel_paths
+    assert Path("sql-virtual_alias_alias_domain_maps.cf") in rel_paths
+    assert Path("sql-virtual_mailbox_alias_domain_maps.cf") in rel_paths
+    assert Path("sql-routes.cf") in rel_paths
     assert len(results) == 12
-
-
-def test_render_all_skips_alias_domain_pair_when_absent() -> None:
-    results = render_all(_ctx(has_alias_domains=False))
-    rel_paths = {r.rel_path for r in results}
-    assert Path("sql-virtual_alias_alias_domain_maps.cf") not in rel_paths
-    assert Path("sql-virtual_mailbox_alias_domain_maps.cf") not in rel_paths
-
-
-def test_render_all_skips_routes_cf_when_no_routes() -> None:
-    results = render_all(_ctx(has_routes_rows=False))
-    assert Path("sql-routes.cf") not in {r.rel_path for r in results}
 
 
 def test_render_all_only_filter() -> None:
