@@ -418,6 +418,10 @@ postino check --json
 | 12   | `CollisionRefused` — `config gen` would overwrite without `--in-place` |
 | 13   | `RenderError` — `config gen` template render failed |
 | 14   | `PostCheckFailed` — `config gen` post-emit check failed |
+| 15   | `FixDetectionFailed` — `config fix` postconf/doveconf missing or unparseable |
+| 16   | `FixAmbiguity` — `config fix` vmail uid candidates disagree |
+| 17   | `FixDovecotConflict` — `config fix` conflicting dovecot passdb/userdb detected |
+| 18   | `FixApplyError` — `config fix` postconf write or file-rename failed |
 | 99   | unexpected — bug; full traceback                 |
 
 ## Architecture

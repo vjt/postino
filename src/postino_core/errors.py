@@ -98,3 +98,22 @@ class PostCheckFailed(ConfigError):
         super().__init__(f"post-emit check failed with {len(findings)} error(s)")
         self.findings: list[Finding] = findings
         self.out_dir: Path = out_dir
+
+
+class FixDetectionFailed(ConfigError):
+    """`postconf` or `doveconf` missing, or output unparseable."""
+
+
+class FixAmbiguity(ConfigError):
+    """Detected vmail uid candidates disagree without a CLI override
+    (or master.cf has only some mlmmj-* services)."""
+
+
+class FixDovecotConflict(ConfigError):
+    """Dovecot already has a SQL passdb/userdb or private/dovecot-lmtp
+    listener — postino refuses to write a conflicting fragment."""
+
+
+class FixApplyError(MailctlError):
+    """`postconf -e/-X/-Me/-MX` exited non-zero, or atomic file write
+    failed. The detail message carries the stderr of the failing call."""
