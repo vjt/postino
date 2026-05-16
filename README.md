@@ -386,6 +386,11 @@ postino check --deep   # also reconcile mailbox rows ↔ maildirs on disk,
 postino status         # row counts (domains / mailboxes / aliases / quota2)
 ```
 
+### Config generation and reconciliation
+
+- `postino config gen` — generate postfix + dovecot config files from a `postino.toml` manifest. `--diff` to preview, `--apply` to write.
+- `postino config fix` — reconcile a live postfix+dovecot deployment to canonical postino shape. `--diff` to preview, `--apply` to execute.
+
 `postino check` exits 0 when every finding is severity `info`, 4 (`ConfigError`)
 when at least one finding is severity `error`. JSON output (`--json`) returns the
 full `{findings:[…], ok:bool}` payload for scripting.

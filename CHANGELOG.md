@@ -5,6 +5,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and is generated automatically by [git-cliff](https://git-cliff.org) from
 commit subjects on every tag.
 
+## [0.13.0] — 2026-05-16
+
+### Added
+- `postino config fix` — reconciler for an existing postfix+dovecot
+  deployment. `--diff` (default) prints a per-key delta plus the exact
+  `postconf -e/-X/-Me/-MX` commands needed to apply. `--apply` runs them
+  + writes the sql cf files atomically + drops a single
+  `dovecot-postino.conf` fragment the operator `!include`s once.
+- `config_gen` honours `mlmmj_spool_dir=None` (no master.cf, no
+  sql-routes.cf, no sql-virtual_transport_maps.cf; `virtual_transport=lmtp:...`
+  in main.cf instead of `transport_maps`).
+- `GenInput.virtual_mailbox_base` + `dovecot_mail_layout` (literal
+  `maildir_subdir` | `maildir_root`) — parameterizes the dovecot
+  `user_query` so non-canonical hosts (m42 = `/srv/mail`, `maildir:~`)
+  generate correctly.
+- Four new exit codes (15–18) for `FixDetectionFailed`, `FixAmbiguity`,
+  `FixDovecotConflict`, `FixApplyError` in the global error map. Local
+  `config fix` exit codes are 1/2/3/5 per the spec.
+
+### Changed
+- `GenInput.mlmmj_spool_dir` is now `Path | None` (defaults preserved).
+
 ## [0.10.3] - 2026-05-14
 
 ### Fixed
