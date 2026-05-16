@@ -76,8 +76,15 @@ ON DUPLICATE KEY UPDATE version = :version, applied_at = CURRENT_TIMESTAMP
     "migrate",
     help=(
         "Apply all pending postino-managed schema migrations idempotently.\n\n"
-        "v0.10: creates the [bold]routes[/bold] table if absent.  "
-        "Running twice is safe (CREATE IF NOT EXISTS)."
+        "v0.10: creates the [bold]routes[/bold] table.\n"
+        "v0.12: creates the [bold]postino_schema_version[/bold] table.\n\n"
+        "Running twice is safe (CREATE IF NOT EXISTS + UPSERT).\n\n"
+        "[yellow]Required DB grants[/yellow] on the user from "
+        "sql-virtual_mailbox_maps.cf:\n"
+        "  GRANT CREATE, INSERT, UPDATE ON <db>.* TO '<user>'@'<host>';\n"
+        "The PostfixAdmin app user is typically SELECT-only; either grant "
+        "CREATE temporarily for the migrate run, or grant it permanently if "
+        "you're comfortable with the broader surface."
     ),
     epilog="Run `postino --help` for global options (--json, --quiet, --no-color).",
 )
@@ -123,7 +130,22 @@ def migrate(
                 {"version": CURRENT_SCHEMA_VERSION},
             )
     except SQLAlchemyError as e:
-        console.print(f"[red]✗ migrate failed:[/red] {e}")
+        # WHY: MySQL/MariaDB returns errno 1142 (table-level) or 1044
+        # (db-level) when CREATE/INSERT/UPDATE grants are missing.
+        # Surface a friendlier hint pointing the operator at the fix.
+        msg = str(e)
+        if "1142" in msg or "1044" in msg or "command denied" in msg.lower():
+            console.print(
+                f"[red]✗ migrate failed:[/red] missing DB grant — {e}\n\n"
+                f"[yellow]Hint:[/yellow] the user from "
+                f"sql-virtual_mailbox_maps.cf (PostfixAdmin app user) is "
+                f"typically SELECT-only. To run migrate, grant:\n"
+                f"  GRANT CREATE, INSERT, UPDATE ON <db>.* "
+                f"TO '<user>'@'<host>';\n"
+                f"You can revoke CREATE again after migrate completes."
+            )
+        else:
+            console.print(f"[red]✗ migrate failed:[/red] {e}")
         exit_with_error(DBError(f"schema migration failed: {e}"))
     finally:
         engine.dispose()
