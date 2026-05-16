@@ -16,7 +16,7 @@ import re
 import shutil
 import subprocess
 
-from postino_core.errors import FixAmbiguity, FixDetectionFailed
+from postino_core.errors import FixAmbiguity, FixApplyError, FixDetectionFailed
 
 
 def _which_or_raise(binary: str) -> str:
@@ -304,3 +304,32 @@ def build_target_postfix(
         tgt["transport_maps"] = ""
         tgt["virtual_transport"] = f"lmtp:unix:{lmtp_socket}"
     return tgt
+
+
+def _apply_postconf(*flags: str) -> None:
+    try:
+        _run([_which_or_raise("postconf"), *flags])
+    except FixDetectionFailed as e:
+        # Same subprocess plumbing; in the apply path a non-zero exit
+        # is an apply failure, not a detection failure.
+        raise FixApplyError(str(e)) from e
+
+
+def postconf_set(key: str, value: str) -> None:
+    """Idempotent `postconf -e key=value`. Raises FixApplyError on non-zero."""
+    _apply_postconf("-e", f"{key}={value}")
+
+
+def postconf_unset(key: str) -> None:
+    """`postconf -X key` removes the key from main.cf."""
+    _apply_postconf("-X", key)
+
+
+def postconf_master_remove(service_slash_type: str) -> None:
+    """`postconf -MX <service>/<type>` removes a master.cf service entry."""
+    _apply_postconf("-MX", service_slash_type)
+
+
+def postconf_master_set(service_slash_type: str, line: str) -> None:
+    """`postconf -Me '<service>/<type>=<line>'` adds/edits a master.cf entry."""
+    _apply_postconf("-Me", f"{service_slash_type}={line}")
