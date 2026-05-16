@@ -26,7 +26,6 @@ def _detected_m42_like() -> dict[str, str]:
 def _target_no_mlmmj() -> dict[str, str]:
     """Canonical postino target params for a no-mlmmj m42-style host."""
     return {
-        "virtual_mailbox_base": "/srv/mail",
         "virtual_mailbox_maps": "mysql:/usr/local/etc/postfix/sql-virtual_mailbox_maps.cf",
         "virtual_alias_maps": "mysql:/usr/local/etc/postfix/sql-virtual_alias_maps.cf",
         "virtual_mailbox_domains": "mysql:/usr/local/etc/postfix/sql-virtual_domains.cf",
@@ -108,3 +107,19 @@ def test_build_target_postfix_mlmmj_on() -> None:
     assert "sql-routes.cf" in tgt["transport_maps"]
     assert "sql-virtual_transport_maps.cf" in tgt["transport_maps"]
     assert tgt["virtual_transport"] == ""
+
+
+def test_diff_mlmmj_on_emits_missing_master_cf_services() -> None:
+    det = _detected_m42_like()
+    # Suppose target is mlmmj-on but live host has no mlmmj entries yet.
+    det["mlmmj_services"] = ""
+    target = fix.build_target_postfix(
+        postfix_dir="/usr/local/etc/postfix",
+        lmtp_socket="private/dovecot-lmtp",
+        mlmmj_on=True,
+    )
+    lines = fix.diff(det, target, mlmmj_target_on=True)
+    body = "\n".join(lines)
+    assert "mlmmj-receive/unix → ADD" in body
+    assert "mlmmj-unsub/unix → ADD" in body
+    assert "postino config gen --only master_cf --in-place" in body

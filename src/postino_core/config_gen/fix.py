@@ -200,8 +200,11 @@ def effective_vmail(
 _MLMMJ_FOUR = ("mlmmj-receive", "mlmmj-bounce", "mlmmj-sub", "mlmmj-unsub")
 
 # Postino-owned postfix main.cf params. These get reconciled.
+# NOTE: virtual_mailbox_base is intentionally excluded — postino *consumes* it
+# (via fs.base_uid fallback and --virtual-mailbox-base override) but does NOT own it.
+# Including it would cause `postconf -X virtual_mailbox_base` to be emitted on every
+# diff, nuking a valid operator-set value.
 _POSTFIX_OWNED_KEYS = (
-    "virtual_mailbox_base",
     "virtual_mailbox_maps",
     "virtual_alias_maps",
     "virtual_mailbox_domains",
@@ -219,9 +222,8 @@ def _refusals(detected: dict[str, str], mlmmj_target_on: bool) -> list[str]:
             f"partial mlmmj: master.cf has {found} but not all 4 "
             f"{list(_MLMMJ_FOUR)}; fix master.cf by hand"
         )
-    if mlmmj_target_on and not found:
-        # Target wants mlmmj but host has none — apply will add the missing services.
-        pass
+    # When mlmmj_target_on=True and no services found, diff() handles the ADD path;
+    # that is a valid apply step, not a refusal, so _refusals stays silent.
     if detected.get("dovecot.has_sql_passdb") == "true":
         out.append("dovecot already has passdb { driver = sql } — refusing to overlap")
     if detected.get("dovecot.has_sql_userdb") == "true":
