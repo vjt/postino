@@ -342,7 +342,14 @@ def postconf_master_set(service_slash_type: str, line: str) -> None:
 
 
 def render_fragment(ctx: RenderContext) -> str:
-    """Render dovecot-postino.conf body for the given context."""
+    """Render dovecot-postino.conf body for the given context.
+
+    Self-contained fragment: includes passdb + userdb + service lmtp + protocol
+    lmtp. Do NOT co-load with `config gen`'s conf.d/20-lmtp.conf — they define
+    `service lmtp` twice, which dovecot rejects. `config fix` is intended for
+    existing hosts that own their own dovecot etc dir; `config gen` is for
+    fresh-host bootstrap.
+    """
     return _ENV.get_template("dovecot_postino.conf.j2").render(ctx=ctx)
 
 

@@ -96,10 +96,23 @@ def test_write_dovecot_fragment_overwrites_atomically(tmp_path: Path) -> None:
 
 def test_write_dovecot_fragment_cleans_tmp_on_error(tmp_path: Path) -> None:
     target = tmp_path / "subdir" / "dovecot-postino.conf"
-    # parent missing → write to tmp will fail
     with pytest.raises(FixApplyError):
         fix.write_dovecot_fragment(target, content="boom\n")
-    # The tmp file is in the missing subdir, so there's nothing to clean — the test
-    # asserts the error type, not the cleanup. (cleanup is exercised by the
-    # next test which simulates a rename failure with the parent existing.)
+    assert not target.exists()
+
+
+def test_write_dovecot_fragment_cleans_tmp_when_rename_fails(tmp_path: Path) -> None:
+    target = tmp_path / "dovecot-postino.conf"
+    tmp = tmp_path / ".dovecot-postino.conf.tmp"
+
+    def _boom_rename(_src: str, _dst: str) -> None:
+        raise OSError("simulated rename failure")
+
+    with (
+        patch("postino_core.config_gen.fix.os.rename", side_effect=_boom_rename),
+        pytest.raises(FixApplyError, match="rename"),
+    ):
+        fix.write_dovecot_fragment(target, content="x\n")
+
+    assert not tmp.exists()
     assert not target.exists()
