@@ -1,8 +1,8 @@
 #!/bin/sh
 # scripts/build-txz.sh — build il-postino-<version>.pkg inside FreeBSD 14.
 # Hermetic venv + Rust toolchain: pip builds pydantic-core, bcrypt and
-# cryptography from sdist into the venv. Only python311 + mlmmj remain
-# external runtime deps.
+# cryptography from sdist into the venv. Only python (PY below) + mlmmj
+# remain external runtime deps.
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -13,6 +13,13 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 
+# FreeBSD's current default Python flavor: the py311-* flavored packages
+# (pip, virtualenv) left the package repo in 2026. Keep in sync with the
+# python dep in pkg/manifest.json.in.
+PY=3.12
+PY_PKG=$(echo "$PY" | tr -d .)
+PYTHON=/usr/local/bin/python$PY
+
 WORK=$(pwd)/pkg/work
 STAGE=$WORK/stage
 DIST=$(pwd)/dist
@@ -22,17 +29,18 @@ mkdir -p "$STAGE" "$DIST"
 
 # FreeBSD prereqs: Python + Rust toolchain + headers needed by pip to
 # build pydantic-core, bcrypt, cryptography wheels inside the venv.
-# We do NOT install py311-pydantic / py311-pydantic-settings because the
-# 1.x line in ports conflicts with the 2.x line (py311-pydantic2), and
-# pip+rust rebuilds the 2.x stack into the venv anyway.
+# We do NOT install py3xx-pydantic / py3xx-pydantic-settings because the
+# 1.x line in ports conflicts with the 2.x line (py3xx-pydantic2), and
+# pip+rust rebuilds the 2.x stack into the venv anyway. The venv comes
+# from the stdlib venv module, so no virtualenv package.
 pkg install -y \
-  python311 py311-pip py311-virtualenv \
+  "python$PY_PKG" "py$PY_PKG-pip" \
   rust llvm \
   pkgconf libffi openssl \
   mlmmj git
 
 # Diagnostic: confirm Python + Rust are available.
-/usr/local/bin/python3.11 --version
+"$PYTHON" --version
 /usr/local/bin/cargo --version || true
 
 # Stage tree.
@@ -47,22 +55,22 @@ install -d "$STAGE/usr/local/etc/postino"
 # including the Rust-compiled pydantic-core / bcrypt / cryptography, get
 # bundled into the venv by pip below.
 VENV="$STAGE/usr/local/share/postino/venv"
-/usr/local/bin/python3.11 -m venv "$VENV"
+"$PYTHON" -m venv "$VENV"
 
 # Use venv's python -m pip explicitly so scripts always land in $VENV/bin/,
 # not in the system bin/ (the pip shim can misbehave with --system-site-packages).
-"$VENV/bin/python3.11" -m pip install --upgrade pip setuptools wheel
+"$VENV/bin/python$PY" -m pip install --upgrade pip setuptools wheel
 
 # Install postino + daemon extras. pip builds pydantic-core, bcrypt,
 # cryptography from sdists via the Rust toolchain installed above.
-"$VENV/bin/python3.11" -m pip install --no-cache-dir '.[daemon]'
+"$VENV/bin/python$PY" -m pip install --no-cache-dir '.[daemon]'
 
 # Diagnostics: list what got installed where.
 echo "=== venv bin/ contents ==="
 ls -la "$VENV/bin/"
 echo "=== venv site-packages ==="
-"$VENV/bin/python3.11" -c "import postino; print('postino at:', postino.__file__)"
-"$VENV/bin/python3.11" -c "import postinod; print('postinod at:', postinod.__file__)" || echo "WARNING: postinod not importable in venv"
+"$VENV/bin/python$PY" -c "import postino; print('postino at:', postino.__file__)"
+"$VENV/bin/python$PY" -c "import postinod; print('postinod at:', postinod.__file__)" || echo "WARNING: postinod not importable in venv"
 
 # Replace absolute shebangs with /usr/local prefix (BSD sed -i needs empty extension).
 find "$STAGE/usr/local/share/postino/venv/bin" -type f -exec \

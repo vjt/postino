@@ -174,7 +174,7 @@ Shipped surface:
   `/lib/systemd/system/postinod.service`, manpages.
 - **`il-postino` FreeBSD package** — `.pkg` (zstd, FreeBSD 14's
   default). Hermetic venv built by pip+Rust inside the build VM.
-  External deps: `python311`, `mlmmj`. Ships rc(8) script at
+  External deps: `python312`, `mlmmj`. Ships rc(8) script at
   `/usr/local/etc/rc.d/postinod`.
 - **GitHub Release per tag** — assets: `.pkg`, `bookworm.deb`,
   `trixie.deb`; body from git-cliff.

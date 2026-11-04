@@ -11,8 +11,8 @@
   "licenselogic": "single",
   "licenses": ["MIT"],
   "deps": {
-    "python311": {"origin": "lang/python311", "version": "3.11.0"},
+    "python312": {"origin": "lang/python312", "version": "3.12.0"},
     "mlmmj":     {"origin": "mail/mlmmj",     "version": "1.3.0"}
   },
-  "desc": "il-postino administers domains, mailboxes, aliases, alias-domains, and mlmmj mailing lists on a Postfix + Dovecot stack using the PostfixAdmin SQL schema.\n\nShipped: postino(1) CLI and postinod(8) daemon. All Python dependencies — including the Rust-built pydantic-core, bcrypt, cryptography — are bundled in the venv at /usr/local/share/postino/venv. Only python311 and mlmmj are external runtime requirements."
+  "desc": "il-postino administers domains, mailboxes, aliases, alias-domains, and mlmmj mailing lists on a Postfix + Dovecot stack using the PostfixAdmin SQL schema.\n\nShipped: postino(1) CLI and postinod(8) daemon. All Python dependencies — including the Rust-built pydantic-core, bcrypt, cryptography — are bundled in the venv at /usr/local/share/postino/venv. Only python312 and mlmmj are external runtime requirements."
 }

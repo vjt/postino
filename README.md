@@ -116,9 +116,9 @@ sudo apt install -y /tmp/il-postino.deb
 
 ### FreeBSD (.pkg)
 
-FreeBSD 14, amd64. Brings `pkg`-installed `py311-pydantic`,
-`py311-bcrypt`, `py311-cryptography` etc. as runtime deps so the venv
-doesn't carry duplicate C extensions. Ships an `rc(8)` script disabled
+FreeBSD 14, amd64. Hermetic venv (pydantic-core, bcrypt, cryptography
+built inside it); external runtime deps are `python312` and `mlmmj`.
+Ships an `rc(8)` script disabled
 by default; enable with `postinod_enable=YES` in `/etc/rc.conf`.
 
 ```sh
