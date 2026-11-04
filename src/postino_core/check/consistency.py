@@ -9,7 +9,8 @@ Two modes:
 
 * `--deep` — actual state-drift detection: mailbox rows reconciled
   against maildirs on disk, quota2 row presence, FK substitutes
-  (mailbox.domain ∈ domain, alias.domain ∈ domain), maildir ownership
+  (mailbox.domain ∈ domain, alias.domain ∈ domain), alias targets that
+  reach no mailbox (backscatter), maildir ownership
   matches `vmail_uid:vmail_gid`, Maildir++ skeleton (`cur`/`new`/`tmp`)
   exists.
 """
@@ -30,6 +31,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import MetaData, select, text
 from sqlalchemy.engine import Engine
 
+from postino_core.check.alias_targets import find_dead_aliases
 from postino_core.check.types import Finding, Severity
 from postino_core.config import PostinoSettings, parse_postfix_sql_cf
 from postino_core.enums import IdentityBackend
@@ -715,6 +717,7 @@ def _check_deep(s: PostinoSettings, engine: Engine, md: MetaData) -> list[Findin
 
     out.extend(_check_mailbox_domain_fk(mailbox_rows, domain_names))
     out.extend(_check_alias_domain_fk(alias_rows, domain_names))
+    out.append(_check_alias_targets(engine, md))
     out.extend(_check_quota_pairing(mailbox_rows, quota_users))
     out.extend(_check_mailbox_maildir_pairing(s, mailbox_rows))
     out.extend(_check_orphan_maildirs(s, mailbox_rows))
@@ -862,6 +865,60 @@ def _check_alias_domain_fk(
             )
         ]
     return [_ok("alias_domain_fk", "all alias.domain values resolve")]
+
+
+def _check_alias_targets(engine: Engine, md: MetaData) -> Finding:
+    """Active aliases whose targets reach no mailbox: postfix accepts the
+    mail, LMTP rejects it, the bounce goes to the envelope sender. See
+    ``postino_core.check.alias_targets``. Reads active rows only, and
+    local domains as postfix's domain map does (not backup MX)."""
+    alias_t = md.tables["alias"]
+    mailbox_t = md.tables["mailbox"]
+    domain_t = md.tables["domain"]
+    alias_domain_t = md.tables.get("alias_domain")
+    with engine.connect() as conn:
+        aliases = {
+            str(r[0]): str(r[1])
+            for r in conn.execute(
+                select(alias_t.c.address, alias_t.c.goto).where(alias_t.c.active == 1)
+            )
+        }
+        mailboxes = {
+            str(r[0])
+            for r in conn.execute(select(mailbox_t.c.username).where(mailbox_t.c.active == 1))
+        }
+        domains = {
+            str(r[0])
+            for r in conn.execute(
+                select(domain_t.c.domain).where(
+                    domain_t.c.active == 1,
+                    domain_t.c.backupmx == 0,
+                    domain_t.c.domain != "ALL",
+                )
+            )
+        }
+        alias_domains: dict[str, str] = {}
+        if alias_domain_t is not None:
+            alias_domains = {
+                str(r[0]): str(r[1])
+                for r in conn.execute(
+                    select(alias_domain_t.c.alias_domain, alias_domain_t.c.target_domain).where(
+                        alias_domain_t.c.active == 1
+                    )
+                )
+            }
+    dead = find_dead_aliases(
+        aliases=aliases, mailboxes=mailboxes, domains=domains, alias_domains=alias_domains
+    )
+    if not dead:
+        return _ok("alias_targets", "every alias target reaches a mailbox or a remote domain")
+    shown = "; ".join(f"{d.address} -> {', '.join(d.dead_targets)}" for d in dead[:10])
+    more = f" (+{len(dead) - 10} more)" if len(dead) > 10 else ""
+    return _err(
+        "alias_targets",
+        f"{len(dead)} aliases deliver to no mailbox (postfix accepts, LMTP rejects, "
+        f"the bounce goes to the sender: backscatter): {shown}{more}",
+    )
 
 
 def _check_quota_pairing(

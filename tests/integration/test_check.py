@@ -625,6 +625,34 @@ def test_deep_detects_alias_domain_fk_drift(
     assert f.severity == "error"
 
 
+def test_deep_detects_alias_target_without_mailbox(
+    db: Engine,
+    tmp_path: Path,
+    fake_postcreation_hook: Path,
+) -> None:
+    # ska@ is a listed recipient, so postfix accepts it; roberto@ has no
+    # mailbox, so LMTP rejects it after the fact and postfix bounces to
+    # the envelope sender (backscatter).
+    sql_dir = tmp_path / "postfix"
+    _write_postfix_cf(sql_dir, db)
+    mail_root = tmp_path / "mail"
+    mail_root.mkdir()
+    _seed_domain(db, "example.com")
+    _seed_mailbox(db, username="bob@example.com", maildir="example.com/bob/", domain="example.com")
+    _seed_quota2(db, username="bob@example.com")
+    _make_maildir(mail_root, "example.com/bob")
+    _seed_alias(db, address="bob@example.com", goto="bob@example.com", domain="example.com")
+    _seed_alias(db, address="ska@example.com", goto="roberto@example.com", domain="example.com")
+    s = _settings(tmp_path, fake_postcreation_hook, sql_dir=sql_dir, mail_root=mail_root)
+    md = MetaData()
+    md.reflect(bind=db)
+    result = run_consistency_check(settings=s, engine=db, metadata=md, deep=True)
+    f = _by_name(result, "alias_targets")
+    assert f.severity == "error"
+    assert "ska@example.com -> roberto@example.com" in f.message
+    assert "bob@example.com ->" not in f.message
+
+
 def test_deep_passes_with_aligned_state(
     db: Engine,
     tmp_path: Path,
