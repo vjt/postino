@@ -1,3 +1,9 @@
+il-postino (0.14.0-1) unstable; urgency=medium
+
+  * Release 0.14.0. See CHANGELOG.md for details.
+
+ -- Marcello Barnaba <vjt@openssl.it>  Wed, 04 Nov 2026 14:26:59 +0000
+
 il-postino (0.10.2-1) unstable; urgency=medium
 
   * Release 0.10.2. See CHANGELOG.md for details (drops phantom mlmmj-help

@@ -5,6 +5,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and is generated automatically by [git-cliff](https://git-cliff.org) from
 commit subjects on every tag.
 
+## [0.14.0] — 2026-11-04
+
+### Added
+- `postino check --deep` reports `alias_targets`: active aliases whose
+  targets reach no mailbox, directly or through other aliases, alias
+  domains or a catch-all. Postfix accepts mail for them, dovecot's LMTP
+  rejects it afterwards and the bounce goes to the (often forged)
+  envelope sender: backscatter, and real mail to the alias is lost.
+
+### Fixed
+- Compatibility with typer 0.27 (`CliRunner` input), pydantic-settings
+  2.16 (`toml_file` typing) and ruff 0.17 (Markdown code blocks).
+
 ## [0.13.0] — 2026-05-16
 
 ### Added
