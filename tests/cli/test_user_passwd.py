@@ -9,8 +9,8 @@ consistency with the sibling `test_user_cmd.py`."""
 
 from __future__ import annotations
 
-import io
 import os
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -33,19 +33,6 @@ def _env(db_url: str, tmp_path: Path, hook: Path) -> dict[str, str]:
     return env_for_cli(db_url, mail_root, hook, sql_dir)
 
 
-class _TTYBytesIO(io.BytesIO):
-    """A BytesIO that reports itself as a TTY.
-
-    Click's ``CliRunner`` swaps ``sys.stdin`` for whatever stream it
-    derives from ``input=``; monkeypatching ``sys.stdin.isatty`` before
-    invoke() therefore has no effect. Passing a binary stream whose
-    ``isatty()`` returns True works around the swap deterministically.
-    """
-
-    def isatty(self) -> bool:
-        return True
-
-
 def _seed_mailbox(env: dict[str, str], address: str) -> None:
     """Provision a mailbox via the CLI so `user passwd` has a target.
 
@@ -64,6 +51,7 @@ def test_user_passwd_password_stdin_rejects_tty(
     db: Engine,
     tmp_path: Path,
     fake_postcreation_hook: Path,
+    tty_stdin: Callable[[], None],
 ) -> None:
     """`--password-stdin` must refuse interactive stdin.
 
@@ -72,11 +60,11 @@ def test_user_passwd_password_stdin_rejects_tty(
     seed_domain(db, "example.com")
     env = _env(os.environ["POSTINO_TEST_DB_URL"], tmp_path, fake_postcreation_hook)
     _seed_mailbox(env, "rotate@example.com")
+    tty_stdin()
     result = runner.invoke(
         app,
         ["user", "passwd", "rotate@example.com", "--password-stdin"],
         env=env,
-        input=_TTYBytesIO(b""),
     )
     assert result.exit_code == 4, result.output
     assert "interactive stdin" in result.stderr

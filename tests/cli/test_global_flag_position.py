@@ -21,9 +21,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from click.testing import Result
 from sqlalchemy.engine import Engine
-from typer.testing import CliRunner
+from typer.testing import CliRunner, Result
 
 from postino.__main__ import (
     _FLOATING_GLOBALS,  # pyright: ignore[reportPrivateUsage]  # WHY: module-private allow-list reused so the test shuffle mirrors production exactly.

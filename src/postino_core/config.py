@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import tomllib
+from collections.abc import Sequence
 from pathlib import Path
 from tomllib import TOMLDecodeError
 from typing import ClassVar
@@ -172,8 +173,12 @@ class PostinoSettings(BaseSettings):
             # source tuple (first wins).
             if isinstance(toml_files, (str, Path)):
                 paths = (Path(toml_files),)
+            elif isinstance(toml_files, Sequence):
+                paths = tuple(Path(str(p)) for p in reversed(toml_files))
             else:
-                paths = tuple(Path(p) for p in reversed(list(toml_files)))
+                # pydantic-settings >= 2.16 also types a lone importlib
+                # Traversable here; postino reads files from disk only.
+                raise ConfigError(f"toml_file must be a path or a list of paths: {toml_files!r}")
         toml_sources: tuple[PydanticBaseSettingsSource, ...] = tuple(
             _PostinoTomlSource(settings_cls, p) for p in paths
         )

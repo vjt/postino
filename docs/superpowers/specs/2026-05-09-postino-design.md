@@ -139,6 +139,7 @@ from enum import IntEnum, StrEnum
 
 class MailboxStatus(IntEnum):
     """Maps to PA mailbox.active column."""
+
     ACTIVE = 1
     DISABLED = 0
 
@@ -148,6 +149,7 @@ class PasswordScheme(StrEnum):
     PostfixAdmin default). New mailboxes default to BCRYPT (BLF-CRYPT).
     Dovecot reads {scheme} from the row prefix; default_pass_scheme
     covers legacy unprefixed rows."""
+
     MD5_CRYPT = "MD5-CRYPT"
     BCRYPT = "BLF-CRYPT"
     SHA512_CRYPT = "SHA512-CRYPT"
@@ -155,6 +157,7 @@ class PasswordScheme(StrEnum):
 
 class QuotaUnit(StrEnum):
     """Suffix → multiplier (binary). 5G == 5 * 1024**3 bytes."""
+
     B = "B"
     K = "K"
     M = "M"
@@ -170,8 +173,9 @@ class DomainTransport(StrEnum):
 
 class IdentityBackend(StrEnum):
     """Selects which IdentityProvider postino uses at runtime."""
+
     LOCAL = "local"
-    ZITADEL = "zitadel"   # V2 only; CLI errors out if requested in MVP build
+    ZITADEL = "zitadel"  # V2 only; CLI errors out if requested in MVP build
 ```
 
 ### 4.2 Models (`models.py`)
@@ -186,11 +190,12 @@ class Mailbox(BaseModel):
     Returns: a validated mailbox.
     Raises: pydantic.ValidationError on schema mismatch.
     """
+
     model_config = ConfigDict(frozen=True, strict=True)
     username: EmailStr
-    name: str                # display name; empty string allowed but explicit
-    maildir: Path            # relative to virtual_mailbox_base
-    quota_bytes: int         # 0 = unlimited (PA convention)
+    name: str  # display name; empty string allowed but explicit
+    maildir: Path  # relative to virtual_mailbox_base
+    quota_bytes: int  # 0 = unlimited (PA convention)
     local_part: str
     domain: str
     status: MailboxStatus
@@ -200,16 +205,18 @@ class Mailbox(BaseModel):
 
 class MailboxCreate(BaseModel):
     """Inputs for `postino user add`. Built at the CLI boundary."""
+
     model_config = ConfigDict(frozen=True, strict=True)
     username: EmailStr
     password: SecretStr
-    name: str                # caller supplies "" if absent
+    name: str  # caller supplies "" if absent
     quota_bytes: int
-    scheme: PasswordScheme   # caller decides; CLI default = BCRYPT
+    scheme: PasswordScheme  # caller decides; CLI default = BCRYPT
 
 
 class MailboxUsage(BaseModel):
     """Live usage from quota2 table."""
+
     model_config = ConfigDict(frozen=True, strict=True)
     username: EmailStr
     bytes_used: int
@@ -219,7 +226,7 @@ class MailboxUsage(BaseModel):
 class Alias(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
     address: EmailStr
-    goto: str                # may be a comma-list of dest addresses
+    goto: str  # may be a comma-list of dest addresses
     domain: str
     status: MailboxStatus
     created: datetime
@@ -230,9 +237,9 @@ class Domain(BaseModel):
     model_config = ConfigDict(frozen=True, strict=True)
     domain: str
     description: str
-    max_aliases: int         # 0 = unlimited
+    max_aliases: int  # 0 = unlimited
     max_mailboxes: int
-    max_quota_bytes: int     # per-mailbox cap
+    max_quota_bytes: int  # per-mailbox cap
     default_quota_bytes: int
     transport: DomainTransport
     backupmx: bool
@@ -408,13 +415,26 @@ this.
 class MailctlError(Exception):
     """Base for all expected failures. CLI top-level catches this."""
 
-class ConfigError(MailctlError): ...        # bad config / unsupported scheme
-class DBError(MailctlError): ...            # connection, schema drift
-class NotFoundError(MailctlError): ...      # SELECT returned 0 rows
-class AlreadyExistsError(MailctlError): ... # uniqueness violation
-class CapacityError(MailctlError): ...      # domain caps hit
-class FilesystemError(MailctlError): ...    # mkdir / chown / rm
-class HookError(MailctlError): ...          # postcreation script failed
+
+class ConfigError(MailctlError): ...  # bad config / unsupported scheme
+
+
+class DBError(MailctlError): ...  # connection, schema drift
+
+
+class NotFoundError(MailctlError): ...  # SELECT returned 0 rows
+
+
+class AlreadyExistsError(MailctlError): ...  # uniqueness violation
+
+
+class CapacityError(MailctlError): ...  # domain caps hit
+
+
+class FilesystemError(MailctlError): ...  # mkdir / chown / rm
+
+
+class HookError(MailctlError): ...  # postcreation script failed
 ```
 
 **CLI exit codes**:
