@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and is generated automatically by [git-cliff](https://git-cliff.org) from
 commit subjects on every tag.
 
+## [0.14.1] — 2026-11-04
+
+### Fixed
+- FreeBSD package builds against `python312`: the `py311-pip` and
+  `py311-virtualenv` packages left the FreeBSD 14 repo, which broke the
+  v0.14.0 `.pkg` build (v0.14.0 is on PyPI only). The package now
+  depends on `lang/python312`.
+
 ## [0.14.0] — 2026-11-04
 
 ### Added
